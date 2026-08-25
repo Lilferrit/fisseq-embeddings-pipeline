@@ -28,9 +28,9 @@ Every story cites the `SPEC.md` section it implements — read that section (and
 - [x] Unit test per vendored-with-changes file confirming the deviation behaves as documented (e.g. `xgbparams`'s `train_binary_xgboost` actually reads `cfg.random_seed`, not `cfg.random_state`).
 
 ### Story 0.2 — `AppConfig` with the shared seed
-- [ ] `config/app.py` implements `AppConfig` per SPEC.md §3's code block: `output_dir`, `output_root`, `log_level`, `random_seed: int = 0`.
-- [ ] Every stage config in later epics extends `AppConfig` — no stage adds its own `random_state`/seed field (SPEC.md §3 decision 11).
-- [ ] Unit test: a `ConfigStore`-registered stage config's default `random_seed` is `0` and is overridable via Hydra CLI override syntax.
+- [x] `config/app.py` implements `AppConfig` per SPEC.md §3's code block: `output_dir`, `output_root`, `log_level`, `random_seed: int = 0`.
+- [x] Every stage config in later epics extends `AppConfig` — no stage adds its own `random_state`/seed field (SPEC.md §3 decision 11).
+- [x] Unit test: a `ConfigStore`-registered stage config's default `random_seed` is `0` and is overridable via Hydra CLI override syntax.
 
 ### Story 0.3 — Package/build sanity
 - [ ] `uv sync --group dev` succeeds from a clean clone.
