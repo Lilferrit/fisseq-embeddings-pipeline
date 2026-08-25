@@ -8,7 +8,9 @@
   },
   "mounts": [
     "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
-    "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,readonly"
+    "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,readonly",
+    "source=/Users/gwen/fisseq-data-pipeline,target=/workspaces/fisseq-data-pipeline,type=bind,readonly",
+    "source=/Users/gwen/Documents/starcall-workflow,target=/workspaces/starcall-workflow,type=bind,readonly"
   ],
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"

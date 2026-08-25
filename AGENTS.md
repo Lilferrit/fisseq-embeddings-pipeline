@@ -35,12 +35,24 @@ piece of vendored code below):
   produces this pipeline's two inputs (Cell Info Table, Cell Images). See
   `SPEC.md` §5.
 
-If you have read access to both sibling repos (e.g. checked out alongside
-this one), use them directly rather than re-deriving vendored code from
-`SPEC.md`'s illustrative sketches — the sketches are a design aid, not
-guaranteed-correct source to copy verbatim. Where `SPEC.md` says "vendored
-unchanged," pull the real file across; where it says "vendored with N things
-different," diff against the real file and apply exactly those changes.
+`.devcontainer/devcontainer.json` bind-mounts both sibling repos read-only
+into this sandbox at `/workspaces/fisseq-data-pipeline` and
+`/workspaces/starcall-workflow` — use them directly from there rather than
+re-deriving vendored code from `SPEC.md`'s illustrative sketches, which are a
+design aid, not guaranteed-correct source to copy verbatim. Where `SPEC.md`
+says "vendored unchanged," pull the real file across; where it says "vendored
+with N things different," diff against the real file and apply exactly those
+changes. They're mounted read-only on purpose — don't write into them; if a
+vendored file needs a fix upstream, note that in your commit message instead
+of editing the sibling repo in place.
+
+**`starcall-workflow` gotcha:** `SPEC.md` §5 confirms this pipeline tracks
+`starcall-workflow`'s `origin/devel` branch, not `master` — check
+`/workspaces/starcall-workflow`'s checked-out branch before trusting anything
+you read from it (`git -C /workspaces/starcall-workflow branch
+--show-current`); if it's on `master`, the phenotyping rules `SPEC.md`
+references (`make_cell_images`, `extract_embeddings` in
+`workflow/rules/phenotyping.smk`) won't be there at all.
 
 ## Working through the checklist
 
