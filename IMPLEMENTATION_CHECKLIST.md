@@ -33,10 +33,10 @@ Every story cites the `SPEC.md` section it implements — read that section (and
 - [x] Unit test: a `ConfigStore`-registered stage config's default `random_seed` is `0` and is overridable via Hydra CLI override syntax.
 
 ### Story 0.3 — Package/build sanity
-- [ ] `uv sync --group dev` succeeds from a clean clone.
-- [ ] `python -c "import fisseq_embeddings_pipeline"` succeeds.
-- [ ] `uv run ruff check .` and `uv run pre-commit run --all-files` pass on the scaffold as-is.
-- [ ] CI (or at minimum a documented local command) runs `pytest tests/unit` and `ruff check` on every push — decide and document where (GitHub Actions, matching `fisseq-data-pipeline`'s `.github/`, or elsewhere).
+- [x] `uv sync --group dev` succeeds from a clean clone.
+- [x] `python -c "import fisseq_embeddings_pipeline"` succeeds.
+- [x] `uv run ruff check .` and `uv run pre-commit run --all-files` pass on the scaffold as-is.
+- [x] CI (or at minimum a documented local command) runs `pytest tests/unit` and `ruff check` on every push — decide and document where (GitHub Actions, matching `fisseq-data-pipeline`'s `.github/`, or elsewhere). **Decided:** `.github/workflows/ci.yml`, mirroring `fisseq-data-pipeline`'s `.github/workflows/pr-checks.yml` shape (`astral-sh/setup-uv`, `uv sync --group dev`) with `lint`/`unit-tests` jobs against `master` (this repo's actual default branch). No `integration-tests` job yet — `tests/integration` has no content until Epic 11; add one then, mirroring that same workflow's Java+Nextflow setup.
 
 ---
 

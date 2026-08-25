@@ -1,0 +1,63 @@
+name: CI
+
+# fisseq-embeddings-pipeline is currently a local-only repo (no remote
+# configured -- see AGENTS.md's Git workflow section), so this workflow is
+# inert until a remote exists; it's added now so CI is already decided and
+# in place the moment one is. `master` (not `main`) is this repo's actual
+# default/integration branch -- see AGENTS.md.
+#
+# No integration-tests job yet: tests/integration has no content until
+# Epic 11 (it needs `nextflow` on PATH -- see SPEC.md §9.3), so there's
+# nothing for it to run. Add one then, mirroring fisseq-data-pipeline's
+# .github/workflows/pr-checks.yml, which also sets up Java + Nextflow for
+# that job.
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run ruff check (lint, including import order)
+        run: uv run ruff check .
+
+      - name: Run ruff format check
+        run: uv run ruff format --check .
