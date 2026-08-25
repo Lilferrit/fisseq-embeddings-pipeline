@@ -50,11 +50,11 @@ Every story cites the `SPEC.md` section it implements — read that section (and
 - [x] Unit test: `discover_tiles()` against a small synthetic directory tree returns the expected `(well, tile, cell_table_csv, cell_crops_tif, mask_crops_tif)` rows, sorted deterministically (including a case with >10 tiles to actually exercise the numeric-sort fix above).
 
 ### Story 1.2 — Shard writing
-- [ ] `write_dataset_shards()` writes one WebDataset sample per cell (`crop.npy`, `mask.npy`, `meta.json` with `meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index`/`meta_barcode`/`meta_aa_changes`/`meta_edit_distance`), keyed `"{well}_{tile}_{cell_index}"`, via `webdataset.ShardWriter(maxcount=cfg.shard_maxcount)`.
-- [ ] Empty-tile CSVs are skipped without erroring (matches `make_cell_images`'s empty-tile behavior).
-- [ ] `metadata.parquet` is written alongside the shards with the same per-cell `meta_*` fields, no image data — confirm `QC_FILTER` (Epic 2) never needs to touch the `.tar` shards.
-- [ ] Hydra `main()` entry point wired up; `python -m fisseq_embeddings_pipeline.dataset <overrides>` runs end to end against a small synthetic `phenotyping_dir`.
-- [ ] Unit test: round-trip a tiny synthetic tile (2-3 cells) through `write_dataset_shards()` and confirm the shard's decoded samples and `metadata.parquet` rows match.
+- [x] `write_dataset_shards()` writes one WebDataset sample per cell (`crop.npy`, `mask.npy`, `meta.json` with `meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index`/`meta_barcode`/`meta_aa_changes`/`meta_edit_distance`), keyed `"{well}_{tile}_{cell_index}"`, via `webdataset.ShardWriter(maxcount=cfg.shard_maxcount)`.
+- [x] Empty-tile CSVs are skipped without erroring (matches `make_cell_images`'s empty-tile behavior). **Correction versus SPEC.md's sketch**: a real empty tile is a genuinely 0-byte file (`os.system('touch ...')` in the real `starcall-workflow` rule), which makes `pandas.read_csv` raise `EmptyDataError` rather than return a 0-row frame — SPEC.md's sketch only guards `len(table.index) == 0`, which alone only catches a header-only CSV. `write_dataset_shards()` catches both cases.
+- [x] `metadata.parquet` is written alongside the shards with the same per-cell `meta_*` fields, no image data — confirm `QC_FILTER` (Epic 2) never needs to touch the `.tar` shards.
+- [x] Hydra `main()` entry point wired up; `python -m fisseq_embeddings_pipeline.dataset <overrides>` runs end to end against a small synthetic `phenotyping_dir`.
+- [x] Unit test: round-trip a tiny synthetic tile (2-3 cells) through `write_dataset_shards()` and confirm the shard's decoded samples and `metadata.parquet` rows match.
 
 ### Story 1.3 — Shard sizing sanity (SPEC.md §10, item 2)
 - [ ] Measure real per-sample byte size (crop + mask, your actual `window`/channel count) and confirm `shard_maxcount=2000` still lands shards in a reasonable size band (~hundreds of MB to ~1GB); adjust the default if not.
