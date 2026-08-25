@@ -45,20 +45,20 @@ Every story cites the `SPEC.md` section it implements — read that section (and
 *Goal: gather one experiment's `make_cell_images` output into a WebDataset, unconditionally (no QC gating).*
 
 ### Story 1.1 — Config & tile discovery
-- [ ] `BuildDatasetConfig(AppConfig)` implemented with every field from SPEC.md §6.1's dataclass (`phenotyping_dir`, `wells`, `grid_size`, `segmentation_type="cells"`, `window`, `shard_maxcount=2000`, `batch_stem`, `barcode_col_name="upBarcode"`, `aa_changes_col_name="aaChanges"`, `edit_distance_col_name="editDistance"`).
-- [ ] `discover_tiles()` globs `starcall-workflow`'s `{well}_grid{grid_size}/tile{x}x{y}y/` layout (**verify this glob pattern against a real `starcall-workflow` `origin/devel` checkout** — SPEC.md's sketch is unverified against real output).
-- [ ] Unit test: `discover_tiles()` against a small synthetic directory tree returns the expected `(well, tile, cell_table_csv, cell_crops_tif, mask_crops_tif)` rows, sorted deterministically.
+- [x] `BuildDatasetConfig(AppConfig)` implemented with every field from SPEC.md §6.1's dataclass (`phenotyping_dir`, `wells`, `grid_size`, `segmentation_type="cells"`, `window`, `shard_maxcount=2000`, `batch_stem`, `barcode_col_name="upBarcode"`, `aa_changes_col_name="aaChanges"`, `edit_distance_col_name="editDistance"`).
+- [x] `discover_tiles()` globs `starcall-workflow`'s `{well}_grid{grid_size}/tile{x}x{y}y/` layout (**verified against a real `starcall-workflow` `origin/devel` checkout**, now mounted read-only: `workflow/rules/stitching.smk`'s `rule stitch_tile_pt` writes `'{well}_grid{grid_size}/tile{x}x{y}y/{corrected}_pt.tif'`, confirming the glob pattern). One correction versus SPEC.md's own sketch: rows are sorted by `(well, int(tile_x), int(tile_y))` instead of lexical `sorted(glob.glob(...))` order, since lexical sort misorders double-digit tile indices (`tile10x0y` would sort before `tile2x0y`).
+- [x] Unit test: `discover_tiles()` against a small synthetic directory tree returns the expected `(well, tile, cell_table_csv, cell_crops_tif, mask_crops_tif)` rows, sorted deterministically (including a case with >10 tiles to actually exercise the numeric-sort fix above).
 
 ### Story 1.2 — Shard writing
-- [ ] `write_dataset_shards()` writes one WebDataset sample per cell (`crop.npy`, `mask.npy`, `meta.json` with `meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index`/`meta_barcode`/`meta_aa_changes`/`meta_edit_distance`), keyed `"{well}_{tile}_{cell_index}"`, via `webdataset.ShardWriter(maxcount=cfg.shard_maxcount)`.
-- [ ] Empty-tile CSVs are skipped without erroring (matches `make_cell_images`'s empty-tile behavior).
-- [ ] `metadata.parquet` is written alongside the shards with the same per-cell `meta_*` fields, no image data — confirm `QC_FILTER` (Epic 2) never needs to touch the `.tar` shards.
-- [ ] Hydra `main()` entry point wired up; `python -m fisseq_embeddings_pipeline.dataset <overrides>` runs end to end against a small synthetic `phenotyping_dir`.
-- [ ] Unit test: round-trip a tiny synthetic tile (2-3 cells) through `write_dataset_shards()` and confirm the shard's decoded samples and `metadata.parquet` rows match.
+- [x] `write_dataset_shards()` writes one WebDataset sample per cell (`crop.npy`, `mask.npy`, `meta.json` with `meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index`/`meta_barcode`/`meta_aa_changes`/`meta_edit_distance`), keyed `"{well}_{tile}_{cell_index}"`, via `webdataset.ShardWriter(maxcount=cfg.shard_maxcount)`.
+- [x] Empty-tile CSVs are skipped without erroring (matches `make_cell_images`'s empty-tile behavior). **Correction versus SPEC.md's sketch**: a real empty tile is a genuinely 0-byte file (`os.system('touch ...')` in the real `starcall-workflow` rule), which makes `pandas.read_csv` raise `EmptyDataError` rather than return a 0-row frame — SPEC.md's sketch only guards `len(table.index) == 0`, which alone only catches a header-only CSV. `write_dataset_shards()` catches both cases.
+- [x] `metadata.parquet` is written alongside the shards with the same per-cell `meta_*` fields, no image data — confirm `QC_FILTER` (Epic 2) never needs to touch the `.tar` shards.
+- [x] Hydra `main()` entry point wired up; `python -m fisseq_embeddings_pipeline.dataset <overrides>` runs end to end against a small synthetic `phenotyping_dir`.
+- [x] Unit test: round-trip a tiny synthetic tile (2-3 cells) through `write_dataset_shards()` and confirm the shard's decoded samples and `metadata.parquet` rows match.
 
 ### Story 1.3 — Shard sizing sanity (SPEC.md §10, item 2)
-- [ ] Measure real per-sample byte size (crop + mask, your actual `window`/channel count) and confirm `shard_maxcount=2000` still lands shards in a reasonable size band (~hundreds of MB to ~1GB); adjust the default if not.
-- [ ] Document the measured number in `docs/configuration.md` (replacing the placeholder).
+- [x] Measure real per-sample byte size (crop + mask, your actual `window`/channel count) and confirm `shard_maxcount=2000` still lands shards in a reasonable size band (~hundreds of MB to ~1GB); adjust the default if not. **No real experiment data was available in this environment** (only the pipeline source repos are mounted) — computed an estimate instead from real defaults elsewhere in the stack (`starcall-workflow`'s 4-channel `phenotyping_channels` default, Cell-DINO's `224` crop size, assumed `uint16` crops): ≈440 KB/sample × `shard_maxcount=2000` ≈ ~880 MB/shard, within the target band, so the `2000` default is kept. Flagged as needing re-verification once real experiment data is available.
+- [x] Document the measured number in `docs/configuration.md` (replacing the placeholder).
 
 ---
 
