@@ -57,8 +57,8 @@ Every story cites the `SPEC.md` section it implements — read that section (and
 - [x] Unit test: round-trip a tiny synthetic tile (2-3 cells) through `write_dataset_shards()` and confirm the shard's decoded samples and `metadata.parquet` rows match.
 
 ### Story 1.3 — Shard sizing sanity (SPEC.md §10, item 2)
-- [ ] Measure real per-sample byte size (crop + mask, your actual `window`/channel count) and confirm `shard_maxcount=2000` still lands shards in a reasonable size band (~hundreds of MB to ~1GB); adjust the default if not.
-- [ ] Document the measured number in `docs/configuration.md` (replacing the placeholder).
+- [x] Measure real per-sample byte size (crop + mask, your actual `window`/channel count) and confirm `shard_maxcount=2000` still lands shards in a reasonable size band (~hundreds of MB to ~1GB); adjust the default if not. **No real experiment data was available in this environment** (only the pipeline source repos are mounted) — computed an estimate instead from real defaults elsewhere in the stack (`starcall-workflow`'s 4-channel `phenotyping_channels` default, Cell-DINO's `224` crop size, assumed `uint16` crops): ≈440 KB/sample × `shard_maxcount=2000` ≈ ~880 MB/shard, within the target band, so the `2000` default is kept. Flagged as needing re-verification once real experiment data is available.
+- [x] Document the measured number in `docs/configuration.md` (replacing the placeholder).
 
 ---
 
