@@ -48,10 +48,10 @@ different," diff against the real file and apply exactly those changes.
   earlier ones exist (e.g. every stage's Hydra config extends `AppConfig`
   from Epic 0; `AGGREGATE_EMBEDDINGS`/`OVWT_BATCHWISE` in Epics 5-6 both call
   `filter.py`'s `load_filtered_embeddings()` from Epic 4).
-- Check off each item as you complete it (`- [x]`) and commit the checked-off
-  checklist alongside the code it corresponds to, so the checklist stays a
-  true record of progress for whoever picks this up next (including a future
-  you).
+- Check off each item as you complete it (`- [x]`), and commit that checkbox
+  update in the *same* commit as the code/tests that satisfy it — see
+  **Git workflow** below for exactly how. The checklist should always
+  reflect what's actually on disk, never what's planned or in progress.
 - Each story's acceptance criteria are meant to be concretely verifiable —
   a specific output file, column set, or test — not vibes. If an acceptance
   criterion turns out to be wrong or ambiguous once you're actually
@@ -62,6 +62,68 @@ different," diff against the real file and apply exactly those changes.
   judgment once you're in the real code/data: Cell-DINO's actual inference
   API (§6.3, Epic 3), and WebDataset shard byte-sizing (§6.1, Epic 1). Don't
   treat the spec's sketches for those as settled.
+
+## Git workflow
+
+The repo currently has a single `master` branch (one commit: the initial
+scaffold) and **no remote configured** — this is local-only until you or the
+user adds one. Don't add or push to a remote on your own initiative; ask
+first if you think the work is ready to leave this machine.
+
+- **One branch per epic.** Before starting Epic *N*, branch off `master`:
+  `git checkout -b epic-N-<short-slug>` (e.g. `epic-1-build-dataset`,
+  `epic-6-ovwt-batchwise`). Do the epic's stories on that branch, merge back
+  to `master` when the whole epic is done (see below), then start the next
+  epic's branch from the updated `master`. This keeps `master` at a series
+  of working, epic-sized checkpoints rather than one long-running branch.
+- **One commit per story**, made once that story's acceptance criteria
+  actually pass — not before, and not batched together with other stories.
+  A story's commit includes: the code/config/`.nf` changes, its tests, and
+  the `- [x]` checkbox update(s) in `IMPLEMENTATION_CHECKLIST.md`, all
+  together. If a story is too large to land as one honest commit, split it
+  into smaller commits *within* the story rather than jumping ahead to the
+  next story's work.
+- **Before every commit**, run the relevant tests and linters and don't
+  commit a red state:
+  ```bash
+  uv run pytest tests/unit/test_<stage>.py   # the story's own test module
+  uv run ruff check --fix . && uv run ruff format .
+  ```
+  (Full commands in **Testing** below — you don't need `tests/integration`
+  passing for every single-story commit, but do run it before merging an
+  epic branch back to `master`.)
+- **Commit message format:**
+  ```
+  Epic N.M: <story title, matching IMPLEMENTATION_CHECKLIST.md>
+
+  <what was implemented, and against which SPEC.md section(s)>
+  <any deviation from SPEC.md's sketch or the checklist's acceptance
+  criteria discovered while implementing, and why — mirrors the checklist
+  bullet's own "fix the checklist item... note why in the commit message"
+  instruction>
+  ```
+  e.g. `Epic 4.1: filter_and_fit_normalizer() (SPEC.md §6.4)`. This makes
+  `git log` a second, chronological view of the same progress the checklist
+  tracks statically.
+- **Finishing an epic:** once every story in the epic is checked off and
+  `tests/unit` (plus `tests/integration` if the epic touches Nextflow
+  wiring) pass on the epic branch, merge it back to `master`
+  (`git checkout master && git merge --no-ff epic-N-<slug>`; `--no-ff` keeps
+  the epic boundary visible in `git log --graph`). Delete the epic branch
+  after merging. Optionally tag a finished milestone from
+  `IMPLEMENTATION_CHECKLIST.md`'s "Suggested sequencing" (M1-M4) once every
+  epic in it is merged: `git tag m1-foundations`.
+- **Never rewrite history already merged into `master`** (no
+  `push --force`/rebase of a merged branch) — even solo, this keeps
+  `git log` a trustworthy record of what happened and when, which matters
+  more here than a tidy history, since the checklist + commit log together
+  are how the next person (or a future you) reconstructs *why* something
+  was built the way it was.
+- If you hit a point where a story can't be completed as specified (a real
+  blocker, not just "this is hard") — commit whatever working, tested
+  partial progress exists, leave the checklist item unchecked with a note
+  on what's blocking it, and say so plainly rather than checking it off
+  early or leaving uncommitted work sitting in the working tree.
 
 ## Repo conventions
 
