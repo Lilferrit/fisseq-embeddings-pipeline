@@ -18,25 +18,25 @@ Every story cites the `SPEC.md` section it implements — read that section (and
 *Goal: every later epic has a working `AppConfig`, vendored utilities, and a package that imports cleanly.*
 
 ### Story 0.1 — Vendor shared utilities from `fisseq-data-pipeline`
-- [ ] `utils/constants.py`: vendored unchanged (`CONTROL_COLUMN`/`CONTROL_COLUMN_NAME`, `FEATURE_SELECTOR`, `META_SELECTOR`, `EPS`, `META_BATCH_COL`, `META_BARCODE_COL`, `META_EDIT_DISTANCE_COL`, etc.) **plus** a new `EMBEDDING_SELECTOR = cs.matches(r"^emb_\d+$")` (SPEC.md §6.3's Output note).
-- [ ] `utils/variant.py`: vendored unchanged (`classify_variant`, `variant_classification`).
-- [ ] `utils/batches.py`: vendored unchanged (`load_batches`).
-- [ ] `utils/log.py`: vendored unchanged (`setup_logging`).
-- [ ] `utils/xgbparams.py`: vendored, **with exactly one line changed** — `train_binary_xgboost`'s `params["seed"] = cfg.random_state` becomes `params["seed"] = cfg.random_seed` (SPEC.md §6.6's Seed note). Everything else (`XGBoostParams`, `XGBoostConfig`, `get_dmatrix`, `get_dmatrix_multiclass`, `resolve_feature_importance`, `split_indices_stratified`, `evaluate_binary`) unchanged.
-- [ ] `utils/dimreduction.py`: vendored, **with one added parameter** — `compute_pca` gains `random_state: int = 0`, threaded into its internal `PCA(...)` call instead of the hardcoded `0` (SPEC.md §6.7's Seed note).
-- [ ] `config/input.py`: vendored unchanged (`InputConfig`, `LabeledInputConfig`).
-- [ ] Unit test per vendored-with-changes file confirming the deviation behaves as documented (e.g. `xgbparams`'s `train_binary_xgboost` actually reads `cfg.random_seed`, not `cfg.random_state`).
+- [x] `utils/constants.py`: vendored unchanged (`CONTROL_COLUMN`/`CONTROL_COLUMN_NAME`, `FEATURE_SELECTOR`, `META_SELECTOR`, `EPS`, `META_BATCH_COL`, `META_BARCODE_COL`, `META_EDIT_DISTANCE_COL`, etc.) **plus** a new `EMBEDDING_SELECTOR = cs.matches(r"^emb_\d+$")` (SPEC.md §6.3's Output note).
+- [x] `utils/variant.py`: vendored unchanged (`classify_variant`). **Checklist correction**: `variant_classification` does not live in the real source repo's `utils/variant.py` — it's defined in `aggregate.py` and will be ported alongside that file in Epic 4/5, not here.
+- [x] `utils/batches.py`: vendored unchanged (`load_batches`).
+- [x] `utils/log.py`: vendored unchanged (`setup_logging`).
+- [x] `utils/xgbparams.py`: vendored, **with exactly one line changed** — `train_binary_xgboost`'s `params["seed"] = cfg.random_state` becomes `params["seed"] = cfg.random_seed` (SPEC.md §6.6's Seed note). Everything else (`XGBoostParams`, `XGBoostConfig`, `get_dmatrix`, `get_dmatrix_multiclass`, `resolve_feature_importance`, `split_indices_stratified`, `evaluate_binary`) unchanged.
+- [x] `utils/dimreduction.py`: vendored, **with one added parameter** — `compute_pca` gains `random_state: int = 0`, threaded into its internal `PCA(...)` call instead of the hardcoded `0` (SPEC.md §6.7's Seed note).
+- [x] `config/input.py`: vendored unchanged (`InputConfig`, `LabeledInputConfig`). `config/__init__.py` populated to export `AppConfig`/`InputConfig`/`LabeledInputConfig`, matching the source repo's, since `utils/log.py`'s `setup_logging` imports `AppConfig` from `..config`.
+- [x] Unit test per vendored-with-changes file confirming the deviation behaves as documented (e.g. `xgbparams`'s `train_binary_xgboost` actually reads `cfg.random_seed`, not `cfg.random_state`).
 
 ### Story 0.2 — `AppConfig` with the shared seed
-- [ ] `config/app.py` implements `AppConfig` per SPEC.md §3's code block: `output_dir`, `output_root`, `log_level`, `random_seed: int = 0`.
-- [ ] Every stage config in later epics extends `AppConfig` — no stage adds its own `random_state`/seed field (SPEC.md §3 decision 11).
-- [ ] Unit test: a `ConfigStore`-registered stage config's default `random_seed` is `0` and is overridable via Hydra CLI override syntax.
+- [x] `config/app.py` implements `AppConfig` per SPEC.md §3's code block: `output_dir`, `output_root`, `log_level`, `random_seed: int = 0`.
+- [x] Every stage config in later epics extends `AppConfig` — no stage adds its own `random_state`/seed field (SPEC.md §3 decision 11).
+- [x] Unit test: a `ConfigStore`-registered stage config's default `random_seed` is `0` and is overridable via Hydra CLI override syntax.
 
 ### Story 0.3 — Package/build sanity
-- [ ] `uv sync --group dev` succeeds from a clean clone.
-- [ ] `python -c "import fisseq_embeddings_pipeline"` succeeds.
-- [ ] `uv run ruff check .` and `uv run pre-commit run --all-files` pass on the scaffold as-is.
-- [ ] CI (or at minimum a documented local command) runs `pytest tests/unit` and `ruff check` on every push — decide and document where (GitHub Actions, matching `fisseq-data-pipeline`'s `.github/`, or elsewhere).
+- [x] `uv sync --group dev` succeeds from a clean clone.
+- [x] `python -c "import fisseq_embeddings_pipeline"` succeeds.
+- [x] `uv run ruff check .` and `uv run pre-commit run --all-files` pass on the scaffold as-is.
+- [x] CI (or at minimum a documented local command) runs `pytest tests/unit` and `ruff check` on every push — decide and document where (GitHub Actions, matching `fisseq-data-pipeline`'s `.github/`, or elsewhere). **Decided:** `.github/workflows/ci.yml`, mirroring `fisseq-data-pipeline`'s `.github/workflows/pr-checks.yml` shape (`astral-sh/setup-uv`, `uv sync --group dev`) with `lint`/`unit-tests` jobs against `master` (this repo's actual default branch). No `integration-tests` job yet — `tests/integration` has no content until Epic 11; add one then, mirroring that same workflow's Java+Nextflow setup.
 
 ---
 
