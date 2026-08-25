@@ -1,0 +1,50 @@
+[project]
+name = "fisseq-embeddings-pipeline"
+version = "0.1.0"
+description = "Nextflow + Python pipeline for learned (Cell-DINO) cell embeddings and variant distinguish-ability scoring -- sibling to fisseq-data-pipeline, retargeted from CellProfiler features to embeddings. See SPEC.md."
+readme = "README.md"
+authors = [
+    { email = "gwynneth.idk@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "hydra-core>=1.3.2",
+    "pandas>=2.3.2",
+    "polars>=1.32.3",
+    "pyarrow>=21.0.0",
+    "pyyaml>=6.0.2",
+    "scikit-learn>=1.7.1",
+    "tifffile>=2025.5.10",
+    "tqdm>=4.67.3",
+    "webdataset>=0.2.111",
+    "xgboost>=2.0.0",
+    # torch + dinov2 (EMBED_CELLS / Cell-DINO, §6.3): torch is pip-installable
+    # (pinned to match your CUDA toolkit -- see README's GPU install note);
+    # dinov2 itself is not on PyPI and must be vendored/installed from
+    # https://github.com/facebookresearch/dinov2 directly -- see
+    # IMPLEMENTATION_CHECKLIST.md Epic 3.
+    "torch>=2.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/integration"]
+
+[tool.ruff.lint]
+# Ruff's default select ("E4", "E7", "E9", "F") plus "I" (isort-equivalent
+# import sorting) so ruff fully replaces isort -- matches fisseq-data-pipeline.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.6.20",
+    "mkdocstrings>=0.30.1",
+    "mkdocstrings-python>=1.16.0",
+    "pre-commit>=4.5.1",
+    "pytest>=8.4.1",
+    "ruff>=0.15.12",
+]

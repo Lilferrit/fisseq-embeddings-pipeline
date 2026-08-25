@@ -1,0 +1,39 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Vscode
+.vscode/*
+.vscode/
+
+# Other stuff
+.ruff_cache/
+.pytest_cache/
+.claude/
+.codegraph/
+
+# Generated docs output
+site/
+
+# Nextflow
+.nextflow/
+.nextflow.log*
+work/
+nf-report*.html
+nf-timeline*.html
+nf-trace*.txt
+nf-dag*.html
+
+# Model checkpoints / large artifacts (kept out of git; documented in README)
+*.pth
+*.ckpt
+
+# Scratch (Claude cannot delete on this mount -- see _to_delete/README)
+_to_delete/
