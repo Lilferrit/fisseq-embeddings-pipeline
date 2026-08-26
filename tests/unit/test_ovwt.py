@@ -233,7 +233,9 @@ def _kfold_fixture_lf(
 
 
 def _ovwt_cfg(**overrides) -> OvwtEmbeddingConfig:
-    return _cfg(n_folds=3, min_cells=1, **overrides)
+    defaults = dict(n_folds=3, min_cells=1)
+    defaults.update(overrides)
+    return _cfg(**defaults)
 
 
 def test_ovwt_batchwise_no_nans_in_oof_scores():
@@ -328,3 +330,73 @@ def test_ovwt_batchwise_calibrate_true_gives_calibrators():
     _, _, models = ovwt_batchwise(_kfold_fixture_lf(), _ovwt_cfg(calibrate=True))
     for _model, calibrator in models["M1K"]:
         assert calibrator is not None
+
+
+# ---------------------------------------------------------------------------
+# Stratification edge cases (Story 6.4)
+# ---------------------------------------------------------------------------
+
+
+def test_ovwt_batchwise_rare_barcode_does_not_crash_and_is_skipped():
+    """M2L has a single, extremely rare barcode (2 cells) -- even after
+    _stratification_key's collapse-to-"rare|variant" fallback, that bucket
+    is still far too small for split_indices_stratified's inner nested
+    split to survive. This must be caught by ovwt_batchwise()'s per-variant
+    try/except (not propagate), and M2L must be absent from the results --
+    while M1K (normal barcodes) still succeeds in the same run."""
+    rng = np.random.default_rng(2)
+    rows = []
+    for i in range(15):
+        rows.append(
+            {
+                "meta_aa_changes": "WT",
+                "meta_barcode": "bc_wt",
+                "emb_0000": 1.0 + rng.normal(scale=0.05),
+            }
+        )
+    for b in range(2):
+        for i in range(15):
+            rows.append(
+                {
+                    "meta_aa_changes": "M1K",
+                    "meta_barcode": f"bc_v{b}",
+                    "emb_0000": 0.0 + rng.normal(scale=0.05),
+                }
+            )
+    for i in range(2):
+        rows.append(
+            {
+                "meta_aa_changes": "M2L",
+                "meta_barcode": "bc_rare",
+                "emb_0000": 0.5 + rng.normal(scale=0.05),
+            }
+        )
+    lf = pl.DataFrame(rows).lazy()
+
+    results, cell_scores, models = ovwt_batchwise(lf, _ovwt_cfg())
+
+    assert "M1K" in results["meta_aa_changes"].to_list()
+    assert "M2L" not in results["meta_aa_changes"].to_list()
+    assert "M1K" in models
+    assert "M2L" not in models
+    assert cell_scores["score"].null_count() == 0
+
+
+def test_ovwt_batchwise_all_variants_filtered_out_returns_empty_frames():
+    """min_cells set higher than any variant's cell count filters every
+    non-WT variant out before the per-variant loop even starts -- must
+    return correctly-schema'd empty DataFrames, not raise on pl.concat([])."""
+    lf = _kfold_fixture_lf()
+    results, cell_scores, models = ovwt_batchwise(lf, _ovwt_cfg(min_cells=10_000))
+
+    assert results.height == 0
+    assert set(results.columns) == {
+        "meta_aa_changes",
+        "auroc_pooled",
+        "auroc_median_barcode",
+        "meta_n_barcodes",
+        "meta_n_cells",
+    }
+    assert cell_scores.height == 0
+    assert "score" in cell_scores.columns
+    assert models == {}
