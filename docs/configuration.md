@@ -14,22 +14,34 @@ controls how many cells `write_dataset_shards()` packs into each
 against directly in this environment (only the pipeline source repos are
 mounted, not phenotyping data) -- the number below is a computed estimate
 from real defaults elsewhere in the stack, not a real measurement, and
-should be re-checked against one real experiment's actual
-`*_crops_{window}.tif` byte size once available.
+should be re-checked against one real experiment's actual `stitch_tile_pt`
+output byte size once available.
+
+`BUILD_DATASET` crops `crop.npy`/`mask.npy` itself from `stitch_tile_pt`'s
+stitched tile image and `stitch_tile_from_well_segmentation`'s mask (SPEC.md
+§5.2/§6.1), rather than reading a pre-cropped file, but the estimate below
+is unaffected by that -- it's the same underlying phenotype image either
+way, only the file it's cropped from changed.
 
 **Inputs to the estimate:**
 
 - Channel count: **4**, from `starcall-workflow`'s (`origin/devel`)
   `default-config.yaml`: `phenotyping_channels: ['DAPI', 'GFP', 'Ph+WGA', 'Mito']`.
+  This assumes the default single phenotype cycle (`phenotype_cycles: ['PT']`)
+  -- `crop.npy`'s actual channel dimension is
+  `num_phenotyping_cycles × num_channels` (cycle-major flattened), so a
+  deployment configuring more than one phenotyping cycle scales this
+  estimate proportionally and should re-check `shard_maxcount`.
 - Crop window: **224** (`window`/`crop_size`), from Cell-DINO's
   channel-adaptive eval config (`global_crops_size: 224`, SPEC.md §6.3).
 - Crop dtype: **uint16**, the standard bit depth for fluorescence
   microscopy TIFFs -- assumed, not confirmed against a real
-  `*_crops_224.tif` (`starcall-workflow`'s `make_cell_images` rule writes
-  crops in the source phenotype image's own dtype, whatever that turns out
+  `raw_pt.tif`/`corrected_pt.tif` (`stitch_tile_pt` writes the stitched
+  image in the source phenotype image's own dtype, whatever that turns out
   to be for a real acquisition).
-- Mask dtype: **uint8** label mask (fixed -- `make_cell_images` always
-  writes `uint8`, not memory-mappable `bool`).
+- Mask dtype: **uint8** label mask (fixed -- `_crop_cell()` always writes
+  `uint8`, not memory-mappable `bool`, matching `make_cell_images`'s own
+  convention for the same reason).
 
 **Per-sample size:**
 

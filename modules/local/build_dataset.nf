@@ -1,6 +1,7 @@
 // SPEC.md §6.1 / §7 -- BUILD_DATASET (Epic 1). Reads a per-experiment
-// config (phenotyping_dir, wells, grid_size, segmentation_type, window,
-// shard_maxcount, batch_stem) from <pipeline_dir>/configs/<batch>.yaml.
+// config (phenotyping_dir, wells, grid_size, segmentation_type,
+// use_corrected, window, shard_maxcount, batch_stem) from
+// <pipeline_dir>/configs/<batch>.yaml.
 // TODO(Epic 9): implement per IMPLEMENTATION_CHECKLIST.md Epic 9, following
 // embed_cells.nf's shape (container / errorStrategy / publishDir / CLI args
 // incl. random_seed=${params.random_seed}).

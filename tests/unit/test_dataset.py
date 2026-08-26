@@ -5,15 +5,18 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 import polars as pl
+import pytest
 import tifffile
 import webdataset as wds
 
 from fisseq_embeddings_pipeline.dataset import (
     BuildDatasetConfig,
+    _crop_cell,
     discover_tiles,
     main,
     write_dataset_shards,
@@ -69,8 +72,17 @@ def test_discover_tiles_builds_expected_file_paths(tmp_path: Path):
     row = discover_tiles(cfg).iloc[0]
 
     assert row["cell_table_csv"] == f"{tile_dir}/cells.csv"
-    assert row["cell_crops_tif"] == f"{tile_dir}/cells_crops_16.tif"
-    assert row["mask_crops_tif"] == f"{tile_dir}/cells_mask_crops_16.tif"
+    assert row["pt_tif"] == f"{tile_dir}/raw_pt.tif"
+    assert row["mask_tif"] == f"{tile_dir}/cells_mask.tif"
+
+
+def test_discover_tiles_uses_corrected_pt_when_configured(tmp_path: Path):
+    tile_dir = _make_tile_dir(tmp_path, "well1", 4, 2, 3)
+    cfg = _cfg(tmp_path, ["well1"])
+    cfg.use_corrected = True
+    row = discover_tiles(cfg).iloc[0]
+
+    assert row["pt_tif"] == f"{tile_dir}/corrected_pt.tif"
 
 
 def test_discover_tiles_ignores_wells_with_no_tiles(tmp_path: Path):
@@ -126,75 +138,171 @@ def test_discover_tiles_empty_when_phenotyping_dir_has_no_matching_tiles(
         "well",
         "tile",
         "cell_table_csv",
-        "cell_crops_tif",
-        "mask_crops_tif",
+        "pt_tif",
+        "mask_tif",
     ]
 
 
 # ---------------------------------------------------------------------------
-# write_dataset_shards (Story 1.2)
+# _crop_cell (Story 1.4) -- the ported make_cell_images crop-window algorithm
 # ---------------------------------------------------------------------------
 
 NUM_CHANNELS = 3
+TILE_SIZE = 20
 WINDOW = 8
+
+
+def _make_deterministic_image(cycles: int, channels: int, size: int) -> np.ndarray:
+    """A synthetic (cycles, channels, size, size) tile image whose value at
+    every position encodes its own (cycle, channel, x, y), so tests can
+    independently recompute an expected crop via plain NumPy slicing rather
+    than by re-running the code under test."""
+    xs, ys = np.meshgrid(np.arange(size), np.arange(size), indexing="ij")
+    base = xs * 1000 + ys
+    image = np.zeros((cycles, channels, size, size), dtype=np.int32)
+    for c in range(cycles):
+        for ch in range(channels):
+            image[c, ch] = base + c * 10_000_000 + ch * 1_000_000
+    return image
+
+
+def _expected_crop(image: np.ndarray, cx: int, cy: int, window: int) -> np.ndarray:
+    """Independent oracle for _crop_cell's image crop: pad by a full window
+    on every side (more than enough to cover any clipping _crop_cell could
+    do), then slice -- deliberately a different implementation strategy
+    (pad-then-slice) than _crop_cell's own (clip-then-place)."""
+    window_low = window // 2
+    padded = np.pad(image, ((0, 0), (window, window), (window, window)))
+    px, py = cx + window, cy + window
+    return padded[
+        :,
+        px - window_low : px - window_low + window,
+        py - window_low : py - window_low + window,
+    ]
+
+
+def _expected_mask_crop(
+    mask: np.ndarray, cx: int, cy: int, label: int, window: int
+) -> np.ndarray:
+    window_low = window // 2
+    padded = np.pad(mask, ((window, window), (window, window)))
+    px, py = cx + window, cy + window
+    region = padded[
+        px - window_low : px - window_low + window,
+        py - window_low : py - window_low + window,
+    ]
+    return (region == label).astype(np.uint8)
+
+
+@pytest.mark.parametrize(
+    "cx,cy",
+    [
+        (10, 10),  # interior -- no clipping
+        (2, 2),  # near the low edge on both axes
+        (17, 17),  # near the high edge on both axes (TILE_SIZE=20)
+        (2, 17),  # low-x, high-y
+    ],
+)
+def test_crop_cell_matches_independent_pad_based_oracle(cx: int, cy: int):
+    image = _make_deterministic_image(1, NUM_CHANNELS, TILE_SIZE)[0]  # (C, H, W)
+    mask = np.zeros((TILE_SIZE, TILE_SIZE), dtype=np.int32)
+    mask[cx, cy] = 1
+
+    crop, crop_mask = _crop_cell(image, mask, cx, cy, label=1, window=WINDOW)
+
+    np.testing.assert_array_equal(crop, _expected_crop(image, cx, cy, WINDOW))
+    np.testing.assert_array_equal(
+        crop_mask, _expected_mask_crop(mask, cx, cy, 1, WINDOW)
+    )
+    assert crop.shape == (NUM_CHANNELS, WINDOW, WINDOW)
+    assert crop_mask.shape == (WINDOW, WINDOW)
+    assert crop_mask.dtype == np.uint8
+
+
+# ---------------------------------------------------------------------------
+# write_dataset_shards (Story 1.2 / 1.4)
+# ---------------------------------------------------------------------------
 
 
 def _write_populated_tile(
     tile_dir: Path,
-    cell_ids: list[int],
-    barcodes: list[str],
-    aa_changes: list[str],
-    edit_distances: list[int],
+    cell_ids: Sequence[int],
+    centers: Sequence[Tuple[int, int]],
+    barcodes: Sequence[str],
+    aa_changes: Sequence[str],
+    edit_distances: Sequence[int],
     segmentation_type: str = "cells",
-    window: int = WINDOW,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Write a synthetic tile's cell table + crops/mask tifs, matching
-    make_cell_images's real output shape closely enough for
-    write_dataset_shards() to ingest without special-casing. Returns the
-    (crops, masks) arrays actually written, for round-trip comparison."""
+    cycles: int = 1,
+    channels: int = NUM_CHANNELS,
+    size: int = TILE_SIZE,
+    use_corrected: bool = False,
+    squeeze_single_cycle: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+    """Write a synthetic tile's cell table + stitched phenotype image +
+    segmentation mask, matching starcall-workflow's real stitch_tile_pt /
+    stitch_tile_from_well_segmentation / tabulate_cells output shapes
+    closely enough for write_dataset_shards() to ingest without
+    special-casing.
+
+    Each cell's mask footprint is a single pixel at its center, painted
+    with its *positional* label (1-based row order, i + 1) -- deliberately
+    using cell_ids that are not 1, 2, 3, ... so a test can tell "used
+    positional label" apart from "used cell_index as the label" (the
+    make_cell_images quirk write_dataset_shards() ports on purpose).
+
+    Returns (image, mask, table) -- the full synthetic arrays/table, for
+    independent-oracle comparison in tests.
+    """
     tile_dir.mkdir(parents=True, exist_ok=True)
-    n = len(cell_ids)
 
     table = pd.DataFrame(
         {
-            "upBarcode": barcodes,
-            "aaChanges": aa_changes,
-            "editDistance": edit_distances,
+            "bbox_x1": [cx for cx, _ in centers],
+            "bbox_y1": [cy for _, cy in centers],
+            "bbox_x2": [cx for cx, _ in centers],
+            "bbox_y2": [cy for _, cy in centers],
+            "upBarcode": list(barcodes),
+            "aaChanges": list(aa_changes),
+            "editDistance": list(edit_distances),
         },
-        index=cell_ids,
+        index=list(cell_ids),
     )
     table.to_csv(tile_dir / f"{segmentation_type}.csv")
 
-    rng = np.random.default_rng(0)
-    crops = rng.integers(0, 4096, size=(n, NUM_CHANNELS, window, window)).astype(
-        np.uint16
-    )
-    masks = rng.integers(0, 2, size=(n, window, window)).astype(np.uint8)
-    # photometric="minisblack" -- these are multi-channel fluorescence
-    # crops, not RGB; without it tifffile's 3-channel heuristic guesses RGB.
-    tifffile.imwrite(
-        tile_dir / f"{segmentation_type}_crops_{window}.tif",
-        crops,
-        photometric="minisblack",
-    )
-    tifffile.imwrite(
-        tile_dir / f"{segmentation_type}_mask_crops_{window}.tif",
-        masks,
-        photometric="minisblack",
-    )
+    image = _make_deterministic_image(cycles, channels, size)
+    mask = np.zeros((size, size), dtype=np.int32)
+    for i, (cx, cy) in enumerate(centers):
+        mask[cx, cy] = i + 1
 
-    return crops, masks
+    pt_name = "corrected_pt.tif" if use_corrected else "raw_pt.tif"
+    on_disk_image = image[0] if squeeze_single_cycle else image
+    # photometric="minisblack" -- these are multi-channel fluorescence
+    # images, not RGB; without it tifffile's heuristics can misinterpret
+    # a 3-channel array as RGB.
+    tifffile.imwrite(tile_dir / pt_name, on_disk_image, photometric="minisblack")
+    tifffile.imwrite(tile_dir / f"{segmentation_type}_mask.tif", mask)
+
+    return image, mask, table
 
 
 def _write_empty_tile(
-    tile_dir: Path, segmentation_type: str = "cells", window: int = WINDOW
+    tile_dir: Path, segmentation_type: str = "cells", size: int = TILE_SIZE
 ) -> None:
-    """A genuinely 0-byte cell table, matching make_cell_images's real
-    `touch`-only behavior for an empty tile (not a header-only CSV)."""
-    tile_dir.mkdir(parents=True, exist_ok=True)
-    (tile_dir / f"{segmentation_type}.csv").touch()
-    (tile_dir / f"{segmentation_type}_crops_{window}.tif").touch()
-    (tile_dir / f"{segmentation_type}_mask_crops_{window}.tif").touch()
+    """An empty tile, matching what starcall-workflow's real rules produce
+    for zero cells: tabulate_cells still writes a header-only CSV (plain
+    DataFrame.to_csv, never a 0-byte file), and stitch_tile_pt /
+    stitch_tile_from_well_segmentation still write well-formed tile-level
+    outputs regardless of cell count."""
+    _write_populated_tile(
+        tile_dir,
+        cell_ids=[],
+        centers=[],
+        barcodes=[],
+        aa_changes=[],
+        edit_distances=[],
+        segmentation_type=segmentation_type,
+        size=size,
+    )
 
 
 def test_write_dataset_shards_skips_empty_tile_without_erroring(tmp_path: Path):
@@ -205,7 +313,7 @@ def test_write_dataset_shards_skips_empty_tile_without_erroring(tmp_path: Path):
     empty_tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
     _write_empty_tile(empty_tile_dir)
     populated_tile_dir = phenotyping_dir / "well1_grid4" / "tile0x1y"
-    _write_populated_tile(populated_tile_dir, [1], ["bc1"], ["A1B"], [0])
+    _write_populated_tile(populated_tile_dir, [1], [(10, 10)], ["bc1"], ["A1B"], [0])
 
     cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
     cfg.window = WINDOW
@@ -223,11 +331,14 @@ def test_write_dataset_shards_round_trips_crops_masks_and_metadata(tmp_path: Pat
 
     tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
     cell_ids = [10, 11, 12]
+    # Interior, low-edge, and high-edge centers -- exercises both the
+    # centered and the edge-clipped/zero-padded crop paths in one tile.
+    centers = [(10, 10), (2, 2), (17, 17)]
     barcodes = ["bcA", "bcB", "bcC"]
     aa_changes = ["A1A", "A1B", "WT"]
     edit_distances = [0, 1, -1]
-    crops, masks = _write_populated_tile(
-        tile_dir, cell_ids, barcodes, aa_changes, edit_distances
+    image, mask, _table = _write_populated_tile(
+        tile_dir, cell_ids, centers, barcodes, aa_changes, edit_distances
     )
 
     cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
@@ -255,10 +366,17 @@ def test_write_dataset_shards_round_trips_crops_masks_and_metadata(tmp_path: Pat
     }
     assert set(samples) == {f"well1_tile0x0y_{cid}" for cid in cell_ids}
 
-    for i, cid in enumerate(cell_ids):
+    flat_image = image[0]  # single cycle -> (C, H, W)
+    for i, (cid, (cx, cy)) in enumerate(zip(cell_ids, centers)):
         sample = samples[f"well1_tile0x0y_{cid}"]
-        np.testing.assert_array_equal(sample["crop.npy"], crops[i])
-        np.testing.assert_array_equal(sample["mask.npy"], masks[i])
+        np.testing.assert_array_equal(
+            sample["crop.npy"], _expected_crop(flat_image, cx, cy, WINDOW)
+        )
+        # Positional label (i + 1), not the (non-sequential) cell_index --
+        # regression guard for the ported make_cell_images convention.
+        np.testing.assert_array_equal(
+            sample["mask.npy"], _expected_mask_crop(mask, cx, cy, i + 1, WINDOW)
+        )
         assert sample["meta.json"][META_BATCH_COL] == "batchA"
         assert sample["meta.json"]["meta_cell_index"] == cid
         assert sample["meta.json"][META_BARCODE_COL] == barcodes[i]
@@ -266,11 +384,84 @@ def test_write_dataset_shards_round_trips_crops_masks_and_metadata(tmp_path: Pat
         assert sample["meta.json"][META_EDIT_DISTANCE_COL] == edit_distances[i]
 
 
+def test_write_dataset_shards_flattens_multi_cycle_multi_channel_in_cycle_major_order(
+    tmp_path: Path,
+):
+    phenotyping_dir = tmp_path / "phenotyping"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
+    cycles, channels = 2, 3
+    image, _mask, _table = _write_populated_tile(
+        tile_dir,
+        cell_ids=[1],
+        centers=[(10, 10)],
+        barcodes=["bc1"],
+        aa_changes=["A1A"],
+        edit_distances=[0],
+        cycles=cycles,
+        channels=channels,
+    )
+
+    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
+    cfg.window = WINDOW
+    write_dataset_shards(output_dir, cfg)
+
+    shard_files = sorted(output_dir.glob("dataset-*.tar"))
+    samples = list(wds.WebDataset(str(shard_files[0]), shardshuffle=False).decode())
+    assert len(samples) == 1
+    crop = samples[0]["crop.npy"]
+
+    flat_image = image.reshape(-1, *image.shape[-2:])  # (cycles*channels, H, W)
+    assert crop.shape == (cycles * channels, WINDOW, WINDOW)
+    np.testing.assert_array_equal(crop, _expected_crop(flat_image, 10, 10, WINDOW))
+
+
+def test_write_dataset_shards_handles_squeezed_3d_single_cycle_pt_tif(
+    tmp_path: Path,
+):
+    """A (1, C, H, W) stitch_tile_pt output can round-trip through
+    tifffile as a squeezed (C, H, W) 3D array -- write_dataset_shards()
+    must produce the same crop either way."""
+    phenotyping_dir = tmp_path / "phenotyping"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
+    image, _mask, _table = _write_populated_tile(
+        tile_dir,
+        cell_ids=[1],
+        centers=[(10, 10)],
+        barcodes=["bc1"],
+        aa_changes=["A1A"],
+        edit_distances=[0],
+        squeeze_single_cycle=True,
+    )
+    assert tifffile.imread(tile_dir / "raw_pt.tif").ndim == 3
+
+    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
+    cfg.window = WINDOW
+    write_dataset_shards(output_dir, cfg)
+
+    shard_files = sorted(output_dir.glob("dataset-*.tar"))
+    samples = list(wds.WebDataset(str(shard_files[0]), shardshuffle=False).decode())
+    crop = samples[0]["crop.npy"]
+    np.testing.assert_array_equal(crop, _expected_crop(image[0], 10, 10, WINDOW))
+
+
 def test_main_runs_end_to_end_via_cli(tmp_path: Path):
     phenotyping_dir = tmp_path / "phenotyping"
     output_dir = tmp_path / "out"
     tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
-    _write_populated_tile(tile_dir, [1, 2], ["bc1", "bc2"], ["A1A", "A1B"], [0, 0])
+    _write_populated_tile(
+        tile_dir,
+        [1, 2],
+        [(8, 8), (12, 12)],
+        ["bc1", "bc2"],
+        ["A1A", "A1B"],
+        [0, 0],
+    )
 
     result = subprocess.run(
         [

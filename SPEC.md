@@ -49,8 +49,8 @@ A variant's identity is preserved throughout by its label column (`meta_aa_chang
 | Diagram node | This pipeline's stage | Reuses / adapts from `fisseq-data-pipeline` |
 | --- | --- | --- |
 | Cell Info Table | upstream input, unchanged | `starcall-workflow`'s `cells.csv` — same `upBarcode`/`aaChanges`/`editDistance` columns `qcfilter.py` already expects |
-| Cell Images | upstream input, unchanged | `starcall-workflow`'s per-cell crop rule — **on the `origin/devel` branch**, `rule make_cell_images` in `workflow/rules/phenotyping.smk` (`{segmentation_type}_crops_{window}.tif` + `{segmentation_type}_mask_crops_{window}.tif`), not the similarly-named rule in `master`'s `segmentation.smk` — see §5.2 |
-| Cell Dataset | `BUILD_DATASET` (new) | packages a whole experiment's crops into a WebDataset; no direct analog, but `phenotyping.smk`'s `rule extract_embeddings` (also `devel`-only) is the closest existing precedent for "read per-tile crops + cell table, run a model, write per-cell output" — see §6.1 |
+| Cell Images | upstream input, unchanged | `starcall-workflow`'s stitched tile image + mask — **on the `origin/devel` branch**, `rule stitch_tile_pt` (`workflow/rules/stitching.smk`) and `rule stitch_tile_from_well_segmentation` (`workflow/rules/segmentation.smk`); `BUILD_DATASET` crops these itself rather than depending on `rule make_cell_images`'s (`phenotyping.smk`) pre-cropped output, which isn't reliably produced for every experiment — see §5.2 |
+| Cell Dataset | `BUILD_DATASET` (new) | crops a whole experiment's cells from stitched tile images into a WebDataset, porting `make_cell_images`'s crop-window algorithm; no direct analog, but `phenotyping.smk`'s `rule extract_embeddings` (`devel`-only) is the closest existing precedent for "read per-tile cell table, run a model, write per-cell output" — see §6.1 |
 | QC Filtering | `QC_FILTER` (vendored, ~unchanged) | `qcfilter.py` directly |
 | Cell Embeddings (Cell DINO) | `EMBED_CELLS` (new) | none — wraps Meta's `dinov2` Cell-DINO, bag-of-channels mode |
 | Filter Embeddings | `FILTER_EMBEDDINGS` (adapted) | `normalize.py`'s `Normalizer`, retargeted to a synonymous control query (à la `aggregate.py`'s `variant_classification`) — publishes a join key + fitted stats, not a normalized copy of the embeddings (§3 decision 10) |
@@ -186,17 +186,28 @@ One row per segmented cell. Columns `qcfilter.py` already reads (unchanged, per 
 | `upBarcode` | sequenced/matched barcode string |
 | `aaChanges` | variant label (renamed to `meta_aa_changes` on ingest) |
 | `editDistance` | base changes needed to match the barcode; `-1` = unmatched |
-| `xpos`, `ypos`, `bbox_x1/y1/x2/y2` | cell centroid + bounding box, in phenotype-image scale |
+| `bbox_x1/y1/x2/y2` | cell bounding box, in phenotype-image scale |
 
-On `devel`, this is `phenotyping_dir + '{path}/{segmentation_type}.csv'` — the same table `rule make_cell_images` (§5.2) and `rule extract_embeddings` both key off of by `cell_table.index`, so row order/index is how Cell Info Table rows and Cell Images crops line up. `BUILD_DATASET` (§6.1) must carry that index explicitly rather than relying on row order surviving every intermediate step untouched.
+On `devel`, this is `phenotyping_dir + '{path}/{segmentation_type}.csv'`, written by `rule tabulate_cells` (`segmentation.smk`) via `starcall.cells.make_cell_table()` (a thin wrapper over `skimage.measure.regionprops`) — the same table `rule extract_embeddings` keys off of by `cell_table.index`, so row order/index is how Cell Info Table rows and Cell Images crops line up. `BUILD_DATASET` (§6.1) must carry that index explicitly rather than relying on row order surviving every intermediate step untouched.
+
+**Verified correction:** the real schema has no `xpos`/`ypos` columns — only `bbox_x1/y1/x2/y2` (confirmed by reading `tabulate_cells`/`make_cell_table` directly and grepping the whole `origin/devel` tree; the only `xpos`/`ypos` references anywhere are commented-out code in `segmentation.smk` and unrelated local Python variable names in `qc.smk`'s montage rule, assigned *from* `bbox_x1`/`bbox_y1`). `rule make_cell_images` (§5.2) reads `cell_table['xpos']`/`['ypos']` directly and would raise `KeyError` against this real schema — almost certainly why it isn't reliably run for every experiment. `BUILD_DATASET` (§6.1) computes each cell's crop center as the bbox midpoint, `((bbox_x1+bbox_x2)//2, (bbox_y1+bbox_y2)//2)`, matching the convention `rule make_variant_cell_images_with_annotation` (`qc.smk`) already uses correctly for the same purpose.
 
 ### 5.2 Cell Images (input, from `starcall-workflow`)
 
 Per Alyssa's guidance (Slack, quoted in review), there are three ways to pull cell imagery out of `starcall-workflow`, and they answer different needs:
 
-- **`rule stitch_tile_pt`** (`workflow/rules/stitching.smk`) — the entire stitched phenotype image for one tile, shape `(num_phenotyping_cycles, num_channels, width, height)`. Not per-cell; would need cropping logic of our own on top.
+- **`rule stitch_tile_pt`** (`workflow/rules/stitching.smk`) — the entire stitched phenotype image for one tile:
+  ```
+  output: image = '{path}/{corrected|raw}_pt.tif'   # (num_phenotyping_cycles, num_channels, width, height)
+  ```
+  `raw` vs `corrected` selected by `config.phenotyping.use_corrected` (`starcall-workflow`'s own default: `False`). Not per-cell. **This, plus `rule stitch_tile_from_well_segmentation`'s mask and `rule tabulate_cells`'s cell table below, is what `BUILD_DATASET` (§6.1) reads directly** — it does its own cropping in Python rather than depending on `make_cell_images`'s output (see below).
+- **`rule stitch_tile_from_well_segmentation`** (`workflow/rules/segmentation.smk`, `devel`) — the tile's segmentation label mask, same tile-directory convention:
+  ```
+  output: image = '{path}/{segmentation_type}_mask.tif'
+  ```
+  Always produced regardless of cell count (unlike `make_cell_images`'s own crop outputs below, which are `touch`-emptied for a zero-cell tile).
 - **`rule make_variant_cell_images_with_annotation`** (`workflow/rules/qc.smk`, `devel`) — pulls specific cells by well + cell id into an annotated montage image, for spot-checking/visual QC. A utility for grabbing a handful of named cells, not a bulk per-experiment path.
-- **`rule make_cell_images`** (`workflow/rules/phenotyping.smk`, `devel`) — **this is the one `BUILD_DATASET` consumes.** Per tile:
+- **`rule make_cell_images`** (`workflow/rules/phenotyping.smk`, `devel`) — **`BUILD_DATASET` ports this rule's crop-window algorithm directly into Python rather than depending on its output.** It isn't reliably run for every experiment, and (per §5.1's verified correction) reads `xpos`/`ypos` columns that don't exist in the real cell-table schema, which is almost certainly why. Per tile:
   ```
   input:  image = get_phenotyping_pt   (corrected_pt.tif or raw_pt.tif, per config.phenotyping.use_corrected)
           cells = '{path}/{segmentation_type}_mask.tif'
@@ -204,13 +215,13 @@ Per Alyssa's guidance (Slack, quoted in review), there are three ways to pull ce
   output: cell_images = '{path}/{segmentation_type}_crops_{window}.tif'       # (num_cells, num_channels, window, window)
           mask_images = '{path}/{segmentation_type}_mask_crops_{window}.tif'  # (num_cells, window, window), uint8 label mask
   ```
-  `window` is a filename wildcard with no default in `starcall-workflow` — **must be set to whatever crop size the loaded Cell-DINO checkpoint expects** (the channel-adaptive eval config uses `global_crops_size: 224`; confirm against your actual checkpoint, since Cell-DINO ships several pretrained variants — HPA single-cell, HPA FoV, HPA FoV at larger resolution, cell-painting). Note `rule extract_embeddings` in the same file hardcodes `cells_crops_100.tif` (window=100) for its own (morphem) embedding model — that's that model's crop size, not necessarily Cell-DINO's.
+  `window` is a filename wildcard with no default in `starcall-workflow` — **must be set to whatever crop size the loaded Cell-DINO checkpoint expects** (the channel-adaptive eval config uses `global_crops_size: 224`; confirm against your actual checkpoint, since Cell-DINO ships several pretrained variants — HPA single-cell, HPA FoV, HPA FoV at larger resolution, cell-painting). Note `rule extract_embeddings` in the same file hardcodes `cells_crops_100.tif` (window=100) for its own (morphem) embedding model — that's that model's crop size, not necessarily Cell-DINO's. The crop-window algorithm itself (window-centered box, clipped and zero-padded at tile edges, mask label matched positionally as `i + 1`) is what `BUILD_DATASET` (§6.1) ports.
 
-An experiment is covered by many `make_cell_images` outputs (one per tile/well), which is exactly why `BUILD_DATASET` (§6.1) exists — to gather every tile's crops + cell table into one per-experiment dataset.
+An experiment is covered by many tiles (one `stitch_tile_pt`/mask/cell-table triple per tile/well), which is exactly why `BUILD_DATASET` (§6.1) exists — to crop and gather every tile's cells into one per-experiment dataset.
 
 ### 5.3 Cell Dataset (this pipeline's join)
 
-Per experiment: a **WebDataset** (sharded `.tar` archives, one sample per cell — see §6.1) built by reading every tile's `make_cell_images` output and repackaging each row as one sample keyed by a unique cell id, carrying the crop array, the mask array, and `meta_*` fields (barcode, variant label, edit distance, well/tile, cell index). Unlike a Parquet-with-a-path-column manifest, a WebDataset is what `EMBED_CELLS` actually streams from a `DataLoader` — no separate "resolve the array on disk" step downstream.
+Per experiment: a **WebDataset** (sharded `.tar` archives, one sample per cell — see §6.1) built by cropping every tile's stitched phenotype image (`stitch_tile_pt`) and segmentation mask (`stitch_tile_from_well_segmentation`) around each cell's bbox-derived center — via `BUILD_DATASET`'s own port of `make_cell_images`'s crop-window algorithm — and repackaging each row as one sample keyed by a unique cell id, carrying the crop array, the mask array, and `meta_*` fields (barcode, variant label, edit distance, well/tile, cell index). Unlike a Parquet-with-a-path-column manifest, a WebDataset is what `EMBED_CELLS` actually streams from a `DataLoader` — no separate "resolve the array on disk" step downstream.
 
 ---
 
@@ -218,7 +229,7 @@ Per experiment: a **WebDataset** (sharded `.tar` archives, one sample per cell �
 
 ### 6.1 Cell Dataset — `BUILD_DATASET`
 
-**Purpose:** gather every tile's `make_cell_images` output (§5.2) for one experiment into a single **WebDataset** — a sharded `.tar` archive holding every cell in the experiment, unfiltered — that `EMBED_CELLS` streams from directly. Building it (and running `EMBED_CELLS` over it) is deliberately decoupled from `QC_FILTER`: QC thresholds get tuned and re-run often, and the whole reason to make embedding a separate, unconditional branch off Cell Dataset (rather than gating it behind QC, the way `FILTER_EMBEDDINGS` gates *use* of the embeddings) is so that changing a QC threshold never re-triggers the expensive GPU embedding pass — you pay for embedding every cell once, up front, and `FILTER_EMBEDDINGS` (§6.4) is what's cheap to rerun.
+**Purpose:** crop every tile's stitched phenotype image and segmentation mask (§5.2) around each of that experiment's cells into a single **WebDataset** — a sharded `.tar` archive holding every cell in the experiment, unfiltered — that `EMBED_CELLS` streams from directly. Building it (and running `EMBED_CELLS` over it) is deliberately decoupled from `QC_FILTER`: QC thresholds get tuned and re-run often, and the whole reason to make embedding a separate, unconditional branch off Cell Dataset (rather than gating it behind QC, the way `FILTER_EMBEDDINGS` gates *use* of the embeddings) is so that changing a QC threshold never re-triggers the expensive GPU embedding pass — you pay for embedding every cell once, up front, and `FILTER_EMBEDDINGS` (§6.4) is what's cheap to rerun.
 
 Applies the `upBarcode`/`aaChanges`/`editDistance` → `meta_*` rename `qcfilter.py` already expects at write time, so both `QC_FILTER` (which only needs the metadata) and `EMBED_CELLS` (which needs the metadata *and* the crops) can read directly from shard contents without a separate join step later.
 
@@ -230,18 +241,24 @@ class BuildDatasetConfig(AppConfig):
     """
     phenotyping_dir : str
         starcall-workflow's phenotyping output root -- the same directory
-        make_cell_images (phenotyping.smk, devel branch) writes into.
+        stitch_tile_pt (stitching.smk) and stitch_tile_from_well_segmentation
+        / tabulate_cells (segmentation.smk, devel branch) write into.
     wells : list[str]
         Wells belonging to this experiment, e.g. ["well1", "well2"].
     grid_size : int
         Tile grid size, matching starcall-workflow's own
         {well}_grid{grid_size}/tile{x}x{y}y/ directory convention.
     segmentation_type : str
-        Which segmentation output to use (make_cell_images's
-        {segmentation_type} wildcard). Defaults to "cells".
+        Which segmentation output to use ({segmentation_type}.csv /
+        {segmentation_type}_mask.tif). Defaults to "cells".
+    use_corrected : bool
+        Whether to read corrected_pt.tif or raw_pt.tif (mirrors
+        starcall-workflow's config.phenotyping.use_corrected, itself
+        defaulting to False). Defaults to False.
     window : int
-        Expected crop size (must match every discovered *_crops_{window}.tif's
-        actual shape, and the loaded Cell-DINO checkpoint's expected input).
+        Crop size BUILD_DATASET itself produces around each cell's
+        bbox-derived center (§5.1), matching the loaded Cell-DINO
+        checkpoint's expected input.
     shard_maxcount : int
         Max samples per WebDataset shard, passed to webdataset.ShardWriter.
         Defaults to 2000 -- see the sizing note below.
@@ -257,6 +274,7 @@ class BuildDatasetConfig(AppConfig):
     wells: List[str] = MISSING
     grid_size: int = MISSING
     segmentation_type: str = "cells"
+    use_corrected: bool = False
     window: int = MISSING
     shard_maxcount: int = 2000
     batch_stem: str = MISSING
@@ -265,7 +283,9 @@ class BuildDatasetConfig(AppConfig):
     edit_distance_col_name: str = "editDistance"
 ```
 
-**Shard sizing:** at a rough 224×224 crop across a handful of fluorescence channels plus its mask (order of ~500KB/sample once decoded, before tar overhead), `shard_maxcount=2000` lands each shard around ~1GB — a normal webdataset shard size. With experiments running to millions of cells, that's low thousands of shards total per experiment, which is squarely within webdataset's normal operating range (it's designed for shard counts far larger than that). Worth sanity-checking against the real per-sample byte size once `window` and channel count are finalized, but not blocking.
+`bbox_x1/y1/x2/y2` are read under fixed column names (not additional config fields) — they're a structural contract of `tabulate_cells`'s schema (§5.1), not a project-configurable annotation like the barcode/aa-changes/edit-distance columns.
+
+**Shard sizing:** at a rough 224×224 crop across a handful of fluorescence channels plus its mask (order of ~500KB/sample once decoded, before tar overhead), `shard_maxcount=2000` lands each shard around ~1GB — a normal webdataset shard size. With experiments running to millions of cells, that's low thousands of shards total per experiment, which is squarely within webdataset's normal operating range (it's designed for shard counts far larger than that). Worth sanity-checking against the real per-sample byte size once `window` and channel count are finalized, but not blocking. This assumes the default single phenotype cycle (`phenotype_cycles: ['PT']`); a deployment configuring more cycles scales the crop's channel dimension (`num_phenotyping_cycles × num_channels`, flattened cycle-major) proportionally.
 
 ```python
 import glob
@@ -275,11 +295,13 @@ import re
 def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
     """Glob starcall-workflow's own phenotyping_dir layout for this experiment's tiles.
 
-    No manifest file -- derives (cell_table_csv, cell_crops_tif,
-    mask_crops_tif, well, tile) directly from the {well}_grid{grid_size}/
-    tile{x}x{y}y/ convention starcall-workflow's own rules (split_grid_table,
-    make_cell_images) already use, for every well in cfg.wells.
+    No manifest file -- derives (cell_table_csv, pt_tif, mask_tif, well,
+    tile) directly from the {well}_grid{grid_size}/tile{x}x{y}y/ convention
+    starcall-workflow's own rules (split_grid_table, stitch_tile_pt,
+    stitch_tile_from_well_segmentation) already use, for every well in
+    cfg.wells.
     """
+    phenotype_filename = "corrected_pt.tif" if cfg.use_corrected else "raw_pt.tif"
     rows = []
     for well in cfg.wells:
         pattern = f"{cfg.phenotyping_dir}/{well}_grid{cfg.grid_size}/tile*x*y"
@@ -290,8 +312,8 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
                 "well": well,
                 "tile": tile,
                 "cell_table_csv": f"{tile_dir}/{cfg.segmentation_type}.csv",
-                "cell_crops_tif": f"{tile_dir}/{cfg.segmentation_type}_crops_{cfg.window}.tif",
-                "mask_crops_tif": f"{tile_dir}/{cfg.segmentation_type}_mask_crops_{cfg.window}.tif",
+                "pt_tif": f"{tile_dir}/{phenotype_filename}",
+                "mask_tif": f"{tile_dir}/{cfg.segmentation_type}_mask.tif",
             })
     return pd.DataFrame(rows)
 ```
@@ -300,8 +322,8 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
 
 | Sample field | Contents |
 | --- | --- |
-| `crop.npy` | `(num_channels, window, window)` array, from that tile's `*_crops_{window}.tif` |
-| `mask.npy` | `(window, window)` uint8 label mask, from that tile's `*_mask_crops_{window}.tif` |
+| `crop.npy` | `(num_phenotyping_cycles × num_channels, window, window)` array, cropped from that tile's `stitch_tile_pt` output around the cell's bbox center |
+| `mask.npy` | `(window, window)` uint8 label mask, cropped from that tile's `stitch_tile_from_well_segmentation` output the same way |
 | `meta.json` | `meta_batch`, `meta_well`, `meta_tile`, `meta_cell_index`, `meta_barcode`, `meta_aa_changes`, `meta_edit_distance` |
 
 `BUILD_DATASET` also writes `metadata.parquet` alongside the shards — the same per-cell `meta_*` fields as a plain table, no images. `QC_FILTER` (§6.2, needs metadata only) and the join key `FILTER_EMBEDDINGS` (§6.4) uses both read this rather than paying to decode WebDataset shards just for metadata; only `EMBED_CELLS` (§6.3, needs the crops) actually streams the shards.
@@ -310,10 +332,34 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
 import webdataset as wds
 import tifffile
 import pandas as pd
+import numpy as np
+
+
+def _crop_cell(image, mask, cx, cy, label, window):
+    """Ports make_cell_images's (phenotyping.smk, origin/devel) crop-window
+    algorithm verbatim, except (cx, cy) comes from the bbox midpoint (§5.1)
+    rather than the nonexistent xpos/ypos columns make_cell_images itself
+    reads. `label` is the mask's positional label for this cell (i + 1,
+    matching make_cell_images's own convention -- see §5.1's flagged risk
+    on this assumption)."""
+    window_low = window // 2
+    window_high = window - window_low
+    x1, x2 = cx - window_low, cx + window_high
+    y1, y2 = cy - window_low, cy + window_high
+    x1, x2, y1, y2 = max(0, x1), min(mask.shape[0], x2), max(0, y1), min(mask.shape[1], y2)
+    subset = image[:, x1:x2, y1:y2]
+    cell_mask = (mask[x1:x2, y1:y2] == label).astype(np.uint8)
+    ox1, ox2 = window_low - (cx - x1), window_low + (x2 - cx)
+    oy1, oy2 = window_low - (cy - y1), window_low + (y2 - cy)
+    crop = np.zeros((image.shape[0], window, window), image.dtype)
+    crop_mask = np.zeros((window, window), dtype=np.uint8)
+    crop[:, ox1:ox2, oy1:oy2] = subset
+    crop_mask[ox1:ox2, oy1:oy2] = cell_mask
+    return crop, crop_mask
 
 
 def write_dataset_shards(output_pattern: str, cfg: BuildDatasetConfig) -> None:
-    """Repackage every tile's make_cell_images output into per-cell WebDataset samples.
+    """Crop every tile's stitched phenotype image into per-cell WebDataset samples.
 
     output_pattern: e.g. "dataset-%06d.tar", the pattern webdataset.ShardWriter
     expects. Tiles come from discover_tiles(cfg), not a hand-authored manifest.
@@ -323,14 +369,20 @@ def write_dataset_shards(output_pattern: str, cfg: BuildDatasetConfig) -> None:
         for row in tile_manifest.itertuples():
             table = pd.read_csv(row.cell_table_csv, index_col=0)
             if len(table.index) == 0:
-                continue  # make_cell_images touches empty files for empty tiles
-            crops = tifffile.imread(row.cell_crops_tif)   # (n_cells, C, window, window)
-            masks = tifffile.imread(row.mask_crops_tif)   # (n_cells, window, window)
+                continue  # tabulate_cells always writes a header row; only a genuine 0-row table needs skipping
+            image = tifffile.imread(row.pt_tif)          # (cycles, C, H, W) or (C, H, W)
+            if image.ndim == 3:
+                image = image[None]
+            image = image.reshape(-1, *image.shape[-2:])  # (cycles*C, H, W)
+            mask = tifffile.imread(row.mask_tif)           # (H, W)
+            cx = ((table["bbox_x1"] + table["bbox_x2"]) // 2).astype("int64").to_numpy()
+            cy = ((table["bbox_y1"] + table["bbox_y2"]) // 2).astype("int64").to_numpy()
             for i, cell_index in enumerate(table.index):
+                crop, crop_mask = _crop_cell(image, mask, int(cx[i]), int(cy[i]), label=i + 1, window=cfg.window)
                 sink.write({
                     "__key__": f"{row.well}_{row.tile}_{cell_index}",
-                    "crop.npy": crops[i],
-                    "mask.npy": masks[i],
+                    "crop.npy": crop,
+                    "mask.npy": crop_mask,
                     "meta.json": {
                         META_BATCH_COL: cfg.batch_stem,
                         "meta_well": row.well,
@@ -343,7 +395,7 @@ def write_dataset_shards(output_pattern: str, cfg: BuildDatasetConfig) -> None:
                 })
 ```
 
-This is the same "read crops tif + cell table, iterate `cell_table.index`, write one output per cell" shape as `phenotyping.smk`'s `rule extract_embeddings` (`devel` branch) — that rule reads `cells_crops_100.tif` + `cells.csv` and calls `starcall.embedding.morphem(images, device='cuda', ...)`, writing one CSV row per cell. That `starcall.embedding` module itself isn't something this pipeline depends on or builds against — `EMBED_CELLS` (§6.3) is an independent, from-scratch Cell-DINO wrapper.
+Unlike the original design, this no longer reads a pre-made crops file — the flattening (`image.reshape(-1, *image.shape[-2:])`) and windowing that used to happen implicitly inside `make_cell_images` now happen in `BUILD_DATASET` itself. It's closer in *cropping* shape to `make_cell_images` (§5.2) than to `phenotyping.smk`'s `rule extract_embeddings` (`devel` branch) now, though it still shares `extract_embeddings`'s "one output per cell, keyed by `cell_table.index`" iteration shape. That `starcall.embedding` module `extract_embeddings` calls isn't something this pipeline depends on or builds against — `EMBED_CELLS` (§6.3) is an independent, from-scratch Cell-DINO wrapper.
 
 ### 6.2 QC Filtering — `QC_FILTER`
 
@@ -502,7 +554,7 @@ def filter_and_fit_normalizer(
     """
     join_keys = ["meta_batch", "meta_well", "meta_tile", "meta_cell_index"]
     # meta_cell_index alone repeats across tiles (it's a local pandas index
-    # per make_cell_images invocation, not experiment-unique) -- the full
+    # per-tile cell table, not experiment-unique) -- the full
     # composite key is what BUILD_DATASET used as each WebDataset sample's
     # __key__ (§6.1), so it's what both metadata.parquet and
     # embeddings.parquet carry consistently.

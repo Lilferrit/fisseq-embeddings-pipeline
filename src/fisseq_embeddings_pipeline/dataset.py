@@ -2,11 +2,21 @@
 
 Hydra entry point (`python -m fisseq_embeddings_pipeline.dataset`), backing
 the Nextflow process BUILD_DATASET (modules/local/build_dataset.nf).
-Gathers one experiment's `make_cell_images` output (starcall-workflow,
-origin/devel branch -- see SPEC.md §5.2) into a sharded WebDataset
-(dataset-*.tar) plus a companion metadata.parquet, with no hand-authored
-tile manifest -- see SPEC.md §6.1's discover_tiles()/write_dataset_shards()
-sketch, and IMPLEMENTATION_CHECKLIST.md Epic 1 for acceptance criteria.
+Gathers one experiment's cells into a sharded WebDataset (dataset-*.tar)
+plus a companion metadata.parquet, with no hand-authored tile manifest --
+see SPEC.md §6.1's discover_tiles()/write_dataset_shards() sketch, and
+IMPLEMENTATION_CHECKLIST.md Epic 1 for acceptance criteria.
+
+Reads directly from starcall-workflow's (origin/devel branch) per-tile
+outputs -- `rule stitch_tile_pt` (stitching.smk)'s stitched phenotype image,
+`rule stitch_tile_from_well_segmentation` (segmentation.smk)'s segmentation
+mask, and `rule tabulate_cells` (segmentation.smk)'s cell table -- and does
+its own per-cell cropping, rather than depending on `rule make_cell_images`
+(phenotyping.smk)'s pre-cropped output. `make_cell_images` isn't reliably
+run for every experiment (and, per SPEC.md §5.1, reads `xpos`/`ypos`
+columns that don't exist in the real cell table schema -- almost certainly
+why), so its crop-window *algorithm* is ported here directly rather than
+its output being consumed -- see SPEC.md §5.2/§6.1.
 """
 
 import dataclasses
@@ -14,9 +24,10 @@ import glob
 import logging
 import pathlib
 import re
-from typing import List
+from typing import List, Tuple
 
 import hydra
+import numpy as np
 import pandas as pd
 import polars as pl
 import tifffile
@@ -27,6 +38,16 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 from .config import AppConfig
 from .utils.constants import META_BARCODE_COL, META_BATCH_COL, META_EDIT_DISTANCE_COL
 from .utils.log import setup_logging
+
+# Fixed structural contract of starcall-workflow's `tabulate_cells` rule
+# (starcall.cells.make_cell_table(), regionprops-derived bbox columns) --
+# not configurable, unlike barcode_col_name/aa_changes_col_name/
+# edit_distance_col_name, which name columns from a project-specific
+# downstream annotation step.
+_BBOX_X1_COL = "bbox_x1"
+_BBOX_Y1_COL = "bbox_y1"
+_BBOX_X2_COL = "bbox_x2"
+_BBOX_Y2_COL = "bbox_y2"
 
 
 @dataclasses.dataclass
@@ -42,18 +63,24 @@ class BuildDatasetConfig(AppConfig):
     ----------
     phenotyping_dir : str
         starcall-workflow's phenotyping output root -- the same directory
-        make_cell_images (phenotyping.smk, devel branch) writes into.
+        stitch_tile_pt (stitching.smk) and stitch_tile_from_well_segmentation
+        / tabulate_cells (segmentation.smk, devel branch) write into.
     wells : list[str]
         Wells belonging to this experiment, e.g. ["well1", "well2"].
     grid_size : int
         Tile grid size, matching starcall-workflow's own
         {well}_grid{grid_size}/tile{x}x{y}y/ directory convention.
     segmentation_type : str
-        Which segmentation output to use (make_cell_images's
-        {segmentation_type} wildcard). Defaults to "cells".
+        Which segmentation output to use ({segmentation_type}.csv /
+        {segmentation_type}_mask.tif). Defaults to "cells".
+    use_corrected : bool
+        Whether to read corrected_pt.tif or raw_pt.tif (mirrors
+        starcall-workflow's config['phenotyping']['use_corrected'], whose
+        own default is False). Defaults to False.
     window : int
-        Expected crop size (must match every discovered *_crops_{window}.tif's
-        actual shape, and the loaded Cell-DINO checkpoint's expected input).
+        Crop size BUILD_DATASET itself produces around each cell's
+        bbox-derived center, matching the loaded Cell-DINO checkpoint's
+        expected input.
     shard_maxcount : int
         Max samples per WebDataset shard, passed to webdataset.ShardWriter.
         Defaults to 2000 -- see docs/configuration.md's sizing note
@@ -77,6 +104,7 @@ class BuildDatasetConfig(AppConfig):
     wells: List[str] = MISSING
     grid_size: int = MISSING
     segmentation_type: str = "cells"
+    use_corrected: bool = False
     window: int = MISSING
     shard_maxcount: int = 2000
     batch_stem: str = MISSING
@@ -91,13 +119,15 @@ _TILE_DIR_RE = re.compile(r"tile(\d+)x(\d+)y$")
 def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
     """Glob starcall-workflow's own phenotyping_dir layout for this experiment's tiles.
 
-    No manifest file -- derives (cell_table_csv, cell_crops_tif,
-    mask_crops_tif, well, tile) directly from the
-    ``{well}_grid{grid_size}/tile{x}x{y}y/`` convention starcall-workflow's
-    own rules already use (confirmed against a real ``starcall-workflow``
-    ``origin/devel`` checkout: ``stitching.smk``'s ``rule stitch_tile_pt``
-    writes ``'{well}_grid{grid_size}/tile{x}x{y}y/{corrected}_pt.tif'``),
-    for every well in ``cfg.wells``.
+    No manifest file -- derives (cell_table_csv, pt_tif, mask_tif, well,
+    tile) directly from the ``{well}_grid{grid_size}/tile{x}x{y}y/``
+    convention starcall-workflow's own rules already use (confirmed against
+    a real ``starcall-workflow`` ``origin/devel`` checkout: ``stitching.smk``'s
+    ``rule stitch_tile_pt`` writes
+    ``'{well}_grid{grid_size}/tile{x}x{y}y/{corrected|raw}_pt.tif'``, and
+    ``segmentation.smk``'s ``rule stitch_tile_from_well_segmentation`` writes
+    ``'{well}_grid{grid_size}/tile{x}x{y}y/{segmentation_type}_mask.tif'``
+    into the same tile directory), for every well in ``cfg.wells``.
 
     Rows are sorted by ``(well, tile_x, tile_y)`` as integers, not by the
     lexical order ``sorted(glob.glob(...))`` would give -- SPEC.md's own
@@ -109,17 +139,20 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
     Parameters
     ----------
     cfg : BuildDatasetConfig
-        Supplies ``phenotyping_dir``, ``wells``, ``grid_size``, and
-        ``segmentation_type``/``window`` (used to build the expected
-        per-tile file paths).
+        Supplies ``phenotyping_dir``, ``wells``, ``grid_size``,
+        ``segmentation_type``, and ``use_corrected`` (used to build the
+        expected per-tile file paths). ``cfg.window`` isn't used here --
+        it only matters once cropping happens, in
+        :func:`write_dataset_shards`.
 
     Returns
     -------
     pd.DataFrame
-        Columns ``well``, ``tile``, ``cell_table_csv``, ``cell_crops_tif``,
-        ``mask_crops_tif``, one row per discovered tile, sorted
-        deterministically.
+        Columns ``well``, ``tile``, ``cell_table_csv``, ``pt_tif``,
+        ``mask_tif``, one row per discovered tile, sorted deterministically.
     """
+    phenotype_filename = "corrected_pt.tif" if cfg.use_corrected else "raw_pt.tif"
+
     rows = []
     for well in cfg.wells:
         pattern = f"{cfg.phenotyping_dir}/{well}_grid{cfg.grid_size}/tile*x*y"
@@ -136,8 +169,8 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
                     "tile_x": tile_x,
                     "tile_y": tile_y,
                     "cell_table_csv": f"{tile_dir}/{cfg.segmentation_type}.csv",
-                    "cell_crops_tif": f"{tile_dir}/{cfg.segmentation_type}_crops_{cfg.window}.tif",
-                    "mask_crops_tif": f"{tile_dir}/{cfg.segmentation_type}_mask_crops_{cfg.window}.tif",
+                    "pt_tif": f"{tile_dir}/{phenotype_filename}",
+                    "mask_tif": f"{tile_dir}/{cfg.segmentation_type}_mask.tif",
                 }
             )
 
@@ -149,16 +182,81 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
             "tile_x",
             "tile_y",
             "cell_table_csv",
-            "cell_crops_tif",
-            "mask_crops_tif",
+            "pt_tif",
+            "mask_tif",
         ],
     )
     manifest = manifest.sort_values(["well", "tile_x", "tile_y"]).reset_index(drop=True)
     return manifest.drop(columns=["tile_x", "tile_y"])
 
 
+def _crop_cell(
+    image: np.ndarray,
+    mask: np.ndarray,
+    cx: int,
+    cy: int,
+    label: int,
+    window: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Crop one cell from a flattened tile image + its label mask.
+
+    Ports starcall-workflow's ``rule make_cell_images`` (phenotyping.smk,
+    ``origin/devel``) crop-window algorithm verbatim, except the caller
+    supplies ``(cx, cy)`` derived from ``bbox_x1/y1/x2/y2`` (SPEC.md §5.1)
+    rather than the nonexistent ``xpos``/``ypos`` columns
+    ``make_cell_images`` itself reads.
+
+    The crop is centered at ``(cx, cy)``, zero-padded wherever the window
+    extends past ``image``/``mask``'s bounds.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape ``(C, H, W)`` -- already flattened across any leading
+        cycle dimension.
+    mask : np.ndarray
+        Shape ``(H, W)`` integer label mask, same spatial shape as
+        ``image``.
+    cx, cy : int
+        Crop center, in the same pixel coordinates as ``image``/``mask``.
+    label : int
+        The mask's integer label for this cell. starcall-workflow's own
+        ``make_cell_images`` uses ``i + 1`` (the cell's 1-based position in
+        the cell table's row order), not the cell table's index value --
+        preserved here as-is; see IMPLEMENTATION_CHECKLIST.md Epic 1 Story
+        1.4 for the open risk this ported convention carries.
+    window : int
+        Output crop size (both dimensions).
+
+    Returns
+    -------
+    (crop, crop_mask) : tuple[np.ndarray, np.ndarray]
+        ``crop`` is ``(C, window, window)``, ``image.dtype``. ``crop_mask``
+        is ``(window, window)`` ``uint8``, ``1`` where ``mask == label``,
+        ``0`` elsewhere (including any zero-padded region).
+    """
+    window_low = window // 2
+    window_high = window - window_low
+    x1, x2 = cx - window_low, cx + window_high
+    y1, y2 = cy - window_low, cy + window_high
+    x1c, x2c = max(0, x1), min(mask.shape[0], x2)
+    y1c, y2c = max(0, y1), min(mask.shape[1], y2)
+
+    subset = image[:, x1c:x2c, y1c:y2c]
+    cell_mask = (mask[x1c:x2c, y1c:y2c] == label).astype(np.uint8)
+
+    ox1, ox2 = window_low - (cx - x1c), window_low + (x2c - cx)
+    oy1, oy2 = window_low - (cy - y1c), window_low + (y2c - cy)
+
+    crop = np.zeros((image.shape[0], window, window), dtype=image.dtype)
+    crop_mask = np.zeros((window, window), dtype=np.uint8)
+    crop[:, ox1:ox2, oy1:oy2] = subset
+    crop_mask[ox1:ox2, oy1:oy2] = cell_mask
+    return crop, crop_mask
+
+
 def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> None:
-    """Repackage every tile's make_cell_images output into per-cell WebDataset samples.
+    """Crop every tile's stitched phenotype image into per-cell WebDataset samples.
 
     Writes ``{output_dir}/dataset-%06d.tar`` shards (via
     ``webdataset.ShardWriter(maxcount=cfg.shard_maxcount)``) and a
@@ -168,15 +266,23 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
     shards just for metadata.
 
     Tiles come from :func:`discover_tiles`, not a hand-authored manifest.
-    A tile whose cell table is empty is skipped without erroring -- matches
-    ``make_cell_images``'s own behavior of touching empty output files for
-    empty tiles (confirmed against the real ``starcall-workflow``
-    ``origin/devel`` rule: ``os.system('touch {}'.format(output.cell_images))``,
-    i.e. a genuinely 0-byte file, not a CSV with only a header row).
-    ``pandas.read_csv`` raises ``EmptyDataError`` on a 0-byte file rather
-    than returning a 0-row frame -- SPEC.md §6.1's own sketch assumes
-    ``len(table.index) == 0`` alone catches this, which is only true for a
-    header-only CSV. Both cases are handled here.
+    Per tile, this reads the stitched phenotype image (``pt_tif``) and
+    segmentation mask (``mask_tif``) directly and crops around each cell's
+    bbox-derived center via :func:`_crop_cell` -- porting
+    ``make_cell_images``'s crop algorithm rather than depending on its
+    (unreliably-produced) pre-cropped output. See the module docstring and
+    SPEC.md §5.2/§6.1.
+
+    A tile whose cell table has zero rows is skipped without erroring.
+    Unlike ``make_cell_images`` (which ``touch``-empties its own crop
+    outputs for an empty tile, producing genuinely 0-byte files),
+    ``tabulate_cells`` writes ``{segmentation_type}.csv`` via plain
+    ``DataFrame.to_csv`` unconditionally -- always at least a header row --
+    and ``stitch_tile_pt``/``stitch_tile_from_well_segmentation`` always
+    produce their tile-level outputs regardless of cell count. So only the
+    ``len(table.index) == 0`` case needs guarding here; a missing/corrupt
+    ``pt_tif``/``mask_tif`` for a non-empty tile is a genuine data problem
+    and is allowed to raise.
 
     Parameters
     ----------
@@ -184,8 +290,9 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
         Directory to write ``dataset-*.tar`` shards and ``metadata.parquet``
         into. Must already exist.
     cfg : BuildDatasetConfig
-        Supplies the tile manifest (via :func:`discover_tiles`), column-name
-        overrides, ``batch_stem``, and ``shard_maxcount``.
+        Supplies the tile manifest (via :func:`discover_tiles`), the crop
+        ``window``, column-name overrides, ``batch_stem``, and
+        ``shard_maxcount``.
     """
     tile_manifest = discover_tiles(cfg)
     output_pattern = str(output_dir / "dataset-%06d.tar")
@@ -193,24 +300,41 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
 
     with wds.ShardWriter(output_pattern, maxcount=cfg.shard_maxcount) as sink:
         for row in tile_manifest.itertuples():
-            try:
-                table = pd.read_csv(row.cell_table_csv, index_col=0)
-            except pd.errors.EmptyDataError:
-                # make_cell_images touches a genuinely 0-byte file for an
-                # empty tile -- pd.read_csv can't even parse a header from
-                # that, let alone return a 0-row frame.
-                logging.info(
-                    "Skipping empty tile %s/%s (0-byte cell table)", row.well, row.tile
-                )
-                continue
+            table = pd.read_csv(row.cell_table_csv, index_col=0)
             if len(table.index) == 0:
                 logging.info("Skipping empty tile %s/%s", row.well, row.tile)
                 continue
 
-            crops = tifffile.imread(row.cell_crops_tif)  # (n_cells, C, window, window)
-            masks = tifffile.imread(row.mask_crops_tif)  # (n_cells, window, window)
+            image = tifffile.imread(row.pt_tif)  # (cycles, C, H, W) or (C, H, W)
+            if image.ndim == 3:
+                # stitch_tile_pt's docstring promises 4D always, but with
+                # the common single-cycle case (phenotype_cycles=['PT']) a
+                # (1, C, H, W) array can come back squeezed to 3D on
+                # write/read -- guard for both.
+                image = image[None]
+            image = image.reshape(-1, *image.shape[-2:])  # (cycles*C, H, W)
+            mask = tifffile.imread(row.mask_tif)  # (H, W)
+            assert mask.shape == image.shape[1:], (
+                f"pt_tif/mask_tif spatial shape mismatch for "
+                f"{row.well}/{row.tile}: image {image.shape[1:]} vs "
+                f"mask {mask.shape}"
+            )
+
+            cx = (
+                ((table[_BBOX_X1_COL] + table[_BBOX_X2_COL]) // 2)
+                .astype("int64")
+                .to_numpy()
+            )
+            cy = (
+                ((table[_BBOX_Y1_COL] + table[_BBOX_Y2_COL]) // 2)
+                .astype("int64")
+                .to_numpy()
+            )
 
             for i, cell_index in enumerate(table.index):
+                crop, crop_mask = _crop_cell(
+                    image, mask, int(cx[i]), int(cy[i]), label=i + 1, window=cfg.window
+                )
                 meta = {
                     META_BATCH_COL: cfg.batch_stem,
                     "meta_well": row.well,
@@ -225,8 +349,8 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
                 sink.write(
                     {
                         "__key__": f"{row.well}_{row.tile}_{cell_index}",
-                        "crop.npy": crops[i],
-                        "mask.npy": masks[i],
+                        "crop.npy": crop,
+                        "mask.npy": crop_mask,
                         "meta.json": meta,
                     }
                 )
