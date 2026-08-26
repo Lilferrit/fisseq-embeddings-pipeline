@@ -123,8 +123,8 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 - [x] Recorded all of the above in `docs/architecture.md` (replacing the placeholder).
 
 ### Story 3.2 — Config & dataloader
-- [ ] `EmbedCellsConfig(AppConfig)` implemented per SPEC.md's dataclass (`shard_pattern`, `checkpoint_path`, `arch="vit_large"`, `patch_size=16`, `crop_size=224`, `channel_pool="mean"`, `mask_mode="none"`, `device="cuda"`, `batch_size=256`, `num_workers=4`).
-- [ ] `load_embedding_dataloader()` streams `(key, crop, mask, meta)` from `BUILD_DATASET`'s shards via `webdataset.WebDataset(...).decode().to_tuple(...).batched(...)`.
+- [x] `EmbedCellsConfig(AppConfig)` implemented per SPEC.md's dataclass (`shard_pattern`, `checkpoint_path`, `arch="vit_large"`, `patch_size=16`, `crop_size=224`, `channel_pool="mean"`, `mask_mode="none"`, `device="cuda"`, `batch_size=256`, `num_workers=4`).
+- [x] `load_embedding_dataloader()` streams `(key, crop, mask, meta)` from `BUILD_DATASET`'s shards via `webdataset.WebDataset(...).decode().to_tuple(...).batched(...)`. **Correction versus SPEC.md's sketch**: verified against the installed `webdataset==1.0.2` that a bare glob `shard_pattern` (e.g. `"dataset-*.tar"`, what `embed_cells.nf` actually passes) is *not* expanded by `wds.WebDataset` itself -- only brace patterns are (`webdataset.shardlists.expand_urls`). `load_embedding_dataloader()` expands a non-brace pattern via `glob.glob()` itself before constructing the `WebDataset`, and raises a clear `ValueError` if that glob matches nothing.
 
 ### Story 3.3 — Model wrapper & masking
 - [ ] `load_cell_dino()` implemented against the real API confirmed in Story 3.1 (not the SPEC.md placeholder).
