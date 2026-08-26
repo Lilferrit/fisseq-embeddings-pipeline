@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -169,6 +170,154 @@ def test_load_cell_dino_strips_prefixes_and_loads_nonstrict(tmp_path: Path):
         assert torch.allclose(loaded[name], ref_param), name
 
 
+def test_load_cell_dino_infers_chunked_blocks_and_layerscale(tmp_path: Path):
+    """The real checkpoint that motivated this (weights/cell_dino_vits8_
+    pretrain_cp-37d20e9c.pth, see the module docstring) stores its 12
+    transformer blocks chunked (block_chunks=4) and has LayerScale
+    (ls1.gamma/ls2.gamma) -- neither of which the original hardcoded
+    in_chans=1/no-layerscale construction accounted for. Reproduce that
+    shape with a small reference model and confirm load_cell_dino() infers
+    both correctly (a real-numbered LayerScale gamma, not left at its
+    default, proves the checkpoint's values -- not just freshly
+    initialized ones -- actually made it into the loaded model)."""
+    reference = vit_small(
+        patch_size=8,
+        in_chans=1,
+        channel_adaptive=True,
+        img_size=CROP,
+        block_chunks=4,
+        init_values=1e-5,
+    )
+    with torch.no_grad():
+        for p in reference.parameters():
+            if p.ndim == 1 and p.numel() == reference.embed_dim:
+                p.uniform_(0.1, 0.2)  # give ls*.gamma (among others) a distinctive value
+    checkpoint_path = tmp_path / "checkpoint.pth"
+    torch.save(reference.state_dict(), checkpoint_path)
+
+    cfg = _base_cfg(
+        tmp_path,
+        arch="vit_small",
+        patch_size=8,
+        checkpoint_path=str(checkpoint_path),
+        device="cpu",
+    )
+    model = load_cell_dino(cfg)
+
+    assert model.blocks[3][11].ls1.gamma.shape == (reference.embed_dim,)
+    loaded = dict(model.named_parameters())
+    for name, ref_param in reference.named_parameters():
+        assert torch.allclose(loaded[name], ref_param), name
+
+
+def test_load_cell_dino_infers_joint_multichannel_in_chans(tmp_path: Path):
+    """The real checkpoint's patch_embed.proj.weight is (384, 5, 8, 8) --
+    a fixed 5-channel backbone, not bag-of-channels. Reproduce that shape
+    via the same vit_small factory load_cell_dino() itself dispatches
+    through, and confirm it infers in_chans=5 (not the old hardcoded 1)
+    and builds a non-channel-adaptive model."""
+    reference = vit_small(
+        patch_size=8, in_chans=5, channel_adaptive=False, img_size=CROP, block_chunks=0
+    )
+    checkpoint_path = tmp_path / "checkpoint.pth"
+    torch.save(reference.state_dict(), checkpoint_path)
+
+    cfg = _base_cfg(
+        tmp_path,
+        arch="vit_small",
+        patch_size=8,
+        checkpoint_path=str(checkpoint_path),
+        device="cpu",
+    )
+
+    model = load_cell_dino(cfg)
+
+    assert model.patch_embed.in_chans == 5
+    assert model.bag_of_channels is False
+    loaded = dict(model.named_parameters())
+    for name, ref_param in reference.named_parameters():
+        assert torch.allclose(loaded[name], ref_param), name
+
+
+def test_load_cell_dino_raises_on_patch_size_mismatch(tmp_path: Path):
+    reference = vit_small(patch_size=16, in_chans=1, channel_adaptive=True, img_size=CROP)
+    checkpoint_path = tmp_path / "checkpoint.pth"
+    torch.save(reference.state_dict(), checkpoint_path)
+
+    cfg = _base_cfg(
+        tmp_path,
+        arch="vit_small",
+        patch_size=8,  # checkpoint is actually patch_size=16
+        checkpoint_path=str(checkpoint_path),
+        device="cpu",
+    )
+
+    with pytest.raises(ValueError, match="patch_size"):
+        load_cell_dino(cfg)
+
+
+def test_load_cell_dino_raises_on_incompatible_checkpoint(tmp_path: Path):
+    """A checkpoint architecturally incompatible with cfg.arch (here:
+    vit_small's depth=12 vs. a 2-block checkpoint) must not silently leave
+    most of the backbone at its random initialization -- see the "Correction
+    found once a real checkpoint became available" module-docstring note on
+    why missing_keys is escalated to a raise instead of just logged."""
+    tiny = DinoVisionTransformer(
+        img_size=CROP, patch_size=16, in_chans=1, embed_dim=384,
+        depth=2, num_heads=6, channel_adaptive=True, block_chunks=0,
+    )
+    checkpoint_path = tmp_path / "checkpoint.pth"
+    torch.save(tiny.state_dict(), checkpoint_path)
+
+    cfg = _base_cfg(
+        tmp_path, arch="vit_small", checkpoint_path=str(checkpoint_path), device="cpu"
+    )
+
+    with pytest.raises(RuntimeError, match="unloaded"):
+        load_cell_dino(cfg)
+
+
+# ---------------------------------------------------------------------------
+# load_cell_dino -- against the real Cell-DINO checkpoint, when present
+# ---------------------------------------------------------------------------
+
+_REAL_CHECKPOINT = (
+    Path(__file__).parents[2] / "weights" / "cell_dino_vits8_pretrain_cp-37d20e9c.pth"
+)
+
+
+@pytest.mark.skipif(
+    not _REAL_CHECKPOINT.exists(), reason="real Cell-DINO checkpoint not present"
+)
+def test_load_cell_dino_and_embed_batch_against_real_checkpoint(tmp_path: Path):
+    """The real checkpoint this repo has on disk: ViT-Small/patch8, a fixed
+    5-channel backbone (not bag-of-channels), chunked blocks, LayerScale --
+    see the module docstring. Confirms load_cell_dino()/embed_batch()
+    actually load and run it end to end, not just against synthetic
+    stand-ins reproducing its shape."""
+    cfg = _base_cfg(
+        tmp_path,
+        arch="vit_small",
+        patch_size=8,
+        checkpoint_path=str(_REAL_CHECKPOINT),
+        channel_pool="mean",
+        mask_mode="zero_background",
+        device="cpu",
+    )
+
+    model = load_cell_dino(cfg)
+
+    assert model.patch_embed.in_chans == 5
+    assert model.embed_dim == 384
+
+    crops = torch.randint(0, 4096, (2, 5, CROP, CROP), dtype=torch.uint16)
+    masks = (torch.rand(2, CROP, CROP) > 0.5).to(torch.uint8)
+    out = embed_batch(model, crops, masks, cfg)
+
+    assert out.shape == (2, 384)
+    assert torch.isfinite(out).all()
+
+
 # ---------------------------------------------------------------------------
 # embed_batch -- deterministic stub model (isolates reshape/mask/pool logic
 # from real transformer numerics)
@@ -176,17 +325,21 @@ def test_load_cell_dino_strips_prefixes_and_loads_nonstrict(tmp_path: Path):
 
 
 class _MeanPixelStub(nn.Module):
-    """Stand-in backbone: returns each single-channel image's mean pixel
-    value broadcast across embed_dim, so embed_batch()'s bag-of-channels
-    reshape and mask/pool logic can be checked against hand-computed
-    expected values."""
+    """Stand-in backbone: returns each image's mean pixel value broadcast
+    across embed_dim, so embed_batch()'s reshape/mask/pool logic can be
+    checked against hand-computed expected values, independent of real
+    transformer numerics. `patch_embed.in_chans` is the real
+    `load_cell_dino()`-built model's own dispatch point for embed_batch()'s
+    bag-of-channels-vs-joint branch (see the module docstring's real-
+    checkpoint note) -- mocked here so this stub is dispatched the same way."""
 
-    def __init__(self, embed_dim: int = 4):
+    def __init__(self, embed_dim: int = 4, in_chans: int = 1):
         super().__init__()
         self.embed_dim = embed_dim
+        self.patch_embed = types.SimpleNamespace(in_chans=in_chans)
         self._unused_param = nn.Parameter(torch.zeros(1))  # gives the module a device
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # x: (N, 1, H, W)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # x: (N, in_chans, H, W)
         means = x.mean(dim=(1, 2, 3))
         return means.unsqueeze(-1).expand(-1, self.embed_dim).clone()
 
@@ -251,6 +404,42 @@ def test_embed_batch_raises_on_unknown_channel_pool():
         embed_batch(
             model, torch.zeros(1, 1, 4, 4), torch.zeros(1, 4, 4, dtype=torch.uint8), cfg
         )
+
+
+def test_embed_batch_joint_multichannel_skips_split_and_pool():
+    """model.patch_embed.in_chans != 1 (a fixed-channel-count backbone, per
+    the real checkpoint this repo has -- see the module docstring) must be
+    fed all its channels jointly in one forward pass, not split per-channel
+    like the bag-of-channels path. _MeanPixelStub's mean-over-everything
+    forward makes the two paths numerically distinguishable: joint mode
+    means one mean over all C*H*W pixels; bag-of-channels would mean each
+    channel separately, then pool -- different numbers whenever channel
+    means differ."""
+    model = _MeanPixelStub(embed_dim=1, in_chans=2)
+    # channel 0 uniformly 1.0, channel 1 uniformly 9.0 -- bag-of-channels
+    # mean-pool would give 5.0; one joint forward over both channels'
+    # pixels together gives (1.0 + 9.0) / 2 = 5.0 too by coincidence here,
+    # so also assert dispatch never reshaped batch*channels into the batch
+    # dimension (which raise_on_unknown_channel_pool below would trigger
+    # for an unset channel_pool if the bag-of-channels branch ran instead).
+    crops = torch.stack([torch.full((4, 4), 1.0), torch.full((4, 4), 9.0)]).unsqueeze(0)
+    mask = torch.ones(1, 4, 4, dtype=torch.uint8)
+
+    out = embed_batch(
+        model, crops, mask, _base_cfg(Path("."), channel_pool="bogus", mask_mode="none")
+    )  # channel_pool is irrelevant/unused in joint mode -- an invalid value must not raise
+
+    assert out.shape == (1, 1)
+    assert torch.allclose(out, torch.full((1, 1), 5.0))
+
+
+def test_embed_batch_raises_on_channel_count_mismatch_in_joint_mode():
+    model = _MeanPixelStub(embed_dim=1, in_chans=5)
+    crops = torch.zeros(1, 3, 4, 4)  # 3 channels, model expects exactly 5
+    mask = torch.ones(1, 4, 4, dtype=torch.uint8)
+
+    with pytest.raises(ValueError, match="in_chans=5"):
+        embed_batch(model, crops, mask, _base_cfg(Path("."), mask_mode="none"))
 
 
 def test_embed_batch_against_random_weight_real_model():

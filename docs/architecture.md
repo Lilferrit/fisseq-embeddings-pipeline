@@ -102,12 +102,97 @@ needed for inference is vendored into
 `src/fisseq_embeddings_pipeline/vendor/dinov2/` -- see that directory's
 `VENDORED_FROM.md` for the exact commit and file list.
 
-### Still unresolved
+### 5. Real checkpoint: `weights/cell_dino_vits8_pretrain_cp-37d20e9c.pth`
 
-No Cell-DINO checkpoint (`.pth`) exists anywhere in this sandbox, so the
-checkpoint's real state-dict key (`"teacher"` vs. top-level) and shape
-compatibility with `vit_large(in_chans=1, channel_adaptive=True,
-patch_size=16)` remain unverified against real weights. Everything above
-is verified against the real `dinov2` *source*, not a real *checkpoint* --
-matching SPEC.md §10 item 1's own framing of what needed implementation-time
-judgment. Revisit once a real checkpoint is available.
+A real Cell-DINO checkpoint is now present locally (`weights/`, gitignored
+via the repo's blanket `*.pth` rule -- not the same "no checkpoint exists
+anywhere" situation the rest of this page was written against). Inspecting
+its state dict directly (`torch.load(..., map_location="cpu")`) resolved
+the item above **and surfaced a real architecture mismatch** the
+`in_chans=1`/`channel_adaptive=True` assumption above got wrong for this
+specific file:
+
+| Property | Assumed (this page, §1 above) | This real checkpoint |
+|---|---|---|
+| Checkpoint key | `"teacher"` | top-level (no wrapper key at all) |
+| Architecture | `vit_large`, patch 16 | `vit_small` (embed_dim 384), patch **8** |
+| `in_chans` | `1` (bag of channels) | **`5`** -- a fixed 5-channel backbone |
+| `channel_adaptive` | `True` | `False` (structurally -- `patch_embed.proj.weight` is `(384, 5, 8, 8)`, so each patch is convolved jointly over all 5 channels, not one at a time) |
+| `pos_embed` / native `img_size` | 224 (`global_crops_size`) | 128 (`pos_embed` has 257 = 256+1 entries → 16×16 patches × patch 8) |
+| `block_chunks` | unchunked (implicit) | **4** -- block keys are `blocks.<chunk 0-3>.<original position 0-11>.*`, not flat `blocks.<0-11>.*` |
+| LayerScale | not considered | present (`ls1.gamma`/`ls2.gamma` on every block, non-trivial values ~1e-3 to 1e-1 -- not safely droppable) |
+
+None of this is guessable from the filename or from `dinov2`'s public
+per-variant docs alone -- `README_CELL_DINO.md` (plain, fixed-channel-count
+Cell-DINO) and `README_CHANNEL_ADAPTIVE_DINO.md` (bag-of-channels) describe
+two genuinely different model families, and this checkpoint (going by its
+own structure) is the former, not the latter this pipeline's SPEC.md §6.3
+assumed as its only supported case.
+
+**Fix:** `load_cell_dino()` no longer hardcodes `in_chans=1`/
+`channel_adaptive=True`/`block_chunks` implicit-default/no-LayerScale. It
+inspects the (prefix-stripped) checkpoint state dict itself and derives:
+- `in_chans` and a cross-checked `patch_size` from `patch_embed.proj.
+  weight`'s shape (`(embed_dim, in_chans, patch, patch)`) -- raising a
+  clear `ValueError` if `cfg.patch_size` disagrees with the checkpoint's
+  own kernel size, rather than silently building the wrong grid.
+- `img_size` (for a matching `pos_embed` parameter shape only -- *not* a
+  claim about what crop size can be embedded later) from `pos_embed`'s
+  patch-token count. This is genuinely decoupled from `cfg.crop_size`:
+  `DinoVisionTransformer.interpolate_pos_encoding` already reconciles any
+  difference between the checkpoint's native grid and the actual input
+  size on every forward call, so construction only needs to reproduce the
+  checkpoint's own shape for `load_state_dict` to succeed.
+- `block_chunks` from whether block keys match the chunked
+  `blocks.<chunk>.<pos>.` pattern (chunk count = `block_chunks`) or the
+  flat `blocks.<pos>.` pattern (`block_chunks=0`).
+- Whether to pass a (placeholder, checkpoint-overwritten) nonzero
+  `init_values` at all, from whether any `ls1.gamma`/`ls2.gamma` key
+  exists in the checkpoint.
+
+`embed_batch()` correspondingly branches on the *loaded model's own*
+`patch_embed.in_chans` rather than assuming bag-of-channels
+unconditionally: `in_chans == 1` still gets the original per-channel
+split-and-pool treatment; anything else is fed to the model jointly in one
+plain forward pass (`model(crops)`, no split, no `channel_pool`), raising
+a clear error if the crop's channel count doesn't match exactly.
+
+One more correction this forced: the original code's `model.load_state_
+dict(state, strict=False)` only ever *logged* `missing_keys`/
+`unexpected_keys`, on the theory that a backbone-only checkpoint
+legitimately lacks head/EMA keys. That's true for `unexpected_keys`
+(checkpoint has keys the model doesn't need), but before this fix, the
+old `in_chans=1`/no-`block_chunks` construction against *this* checkpoint
+would have produced **9 of 12 transformer blocks worth of `missing_keys`**
+(only chunk 0's 3 blocks would have keys the un-chunked model recognized)
+-- silently leaving three-quarters of the backbone at its random
+initialization while `embed_batch()` ran anyway, no crash, no warning
+above INFO level, just quietly wrong embeddings. `load_cell_dino()` now
+raises a `RuntimeError` on any non-empty `missing_keys` (never on
+`unexpected_keys`, which stays informational) -- since this pipeline's own
+`head` is always `nn.Identity()` (no parameters that could ever
+legitimately be missing), any missing key really does mean the
+constructed architecture doesn't match the checkpoint.
+
+Verified end to end against the real file: `load_cell_dino()` loads it
+with **zero** missing keys and zero unexpected keys once `arch="vit_small"`/
+`patch_size=8` are set; `embed_batch()` on a synthetic 5-channel, 128×128
+crop batch returns finite, non-degenerate `(B, 384)` embeddings (mean/std
+per dimension well within a normal transformer's output range -- not NaN,
+not exploding). See `tests/unit/test_embed.py::
+test_load_cell_dino_and_embed_batch_against_real_checkpoint` (skipped
+automatically when the checkpoint file isn't present, e.g. in CI) and the
+synthetic-shape regression tests alongside it that lock in each inferred
+property (`test_load_cell_dino_infers_chunked_blocks_and_layerscale`,
+`test_load_cell_dino_infers_joint_multichannel_in_chans`) independent of
+the real file's availability.
+
+**Not resolved by this fix:** whether this `vit_small`/patch-8/5-channel
+checkpoint or the SPEC.md-documented `vit_large`/patch-16/bag-of-channels
+config is the pipeline's actual intended production checkpoint is a
+product decision, not a code question -- `EmbedCellsConfig`'s defaults
+(`arch="vit_large"`, `patch_size=16`, `crop_size=224`) and `params.yaml`'s
+`cell_dino_checkpoint: null` are deliberately left as SPEC.md originally
+specified them; `load_cell_dino()` now works correctly with *either* real
+checkpoint shape, but picking which one a real run should point at is
+left to whoever configures that run.
