@@ -1,6 +1,8 @@
 """Tests for FILTER_EMBEDDINGS (SPEC.md §6.4, IMPLEMENTATION_CHECKLIST.md Epic 4).
 
-Story 4.1 covers filter_and_fit_normalizer()/variant_classification().
+Story 4.1 covers filter_and_fit_normalizer()/variant_classification(), Story
+4.2 covers load_filtered_embeddings() (including the output-equivalence
+test the checklist calls for).
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from fisseq_embeddings_pipeline.filter import (
     JOIN_KEYS,
     FilterEmbeddingsConfig,
     filter_and_fit_normalizer,
+    load_filtered_embeddings,
     variant_classification,
 )
 from fisseq_embeddings_pipeline.utils.constants import CONTROL_COLUMN_NAME
@@ -170,6 +173,94 @@ def test_normalizer_returned_is_a_normalizer_instance():
     embeddings_lf, qc_passed_lf = _fixture_lfs()
     _, normalizer = filter_and_fit_normalizer(embeddings_lf, qc_passed_lf, LABEL_COLUMN)
     assert isinstance(normalizer, Normalizer)
+
+
+# ---------------------------------------------------------------------------
+# load_filtered_embeddings (Story 4.2)
+# ---------------------------------------------------------------------------
+
+
+def test_load_filtered_embeddings_excludes_qc_failed_rows():
+    embeddings_lf, qc_passed_lf = _fixture_lfs()
+    filtered_keys, normalizer = filter_and_fit_normalizer(
+        embeddings_lf, qc_passed_lf, LABEL_COLUMN
+    )
+    out = load_filtered_embeddings(embeddings_lf, filtered_keys, normalizer).collect()
+    assert sorted(out["meta_cell_index"].to_list()) == [0, 1, 2, 3, 4]
+
+
+def test_load_filtered_embeddings_applies_normalizer():
+    embeddings_lf, qc_passed_lf = _fixture_lfs()
+    filtered_keys, normalizer = filter_and_fit_normalizer(
+        embeddings_lf, qc_passed_lf, LABEL_COLUMN
+    )
+    out = load_filtered_embeddings(embeddings_lf, filtered_keys, normalizer).collect()
+    out = out.sort("meta_cell_index")
+    # control mean/std for emb_0000 is (2.0, sqrt(2))
+    got = out["emb_0000"].to_list()
+    std = 2.0**0.5
+    for g, v in zip(got, [1.0, 3.0, 999.0, 5.0, 7.0]):
+        assert g == pytest.approx((v - 2.0) / std)
+
+
+def test_load_filtered_embeddings_carries_control_column():
+    embeddings_lf, qc_passed_lf = _fixture_lfs()
+    filtered_keys, normalizer = filter_and_fit_normalizer(
+        embeddings_lf, qc_passed_lf, LABEL_COLUMN
+    )
+    out = load_filtered_embeddings(embeddings_lf, filtered_keys, normalizer).collect()
+    assert CONTROL_COLUMN_NAME in out.columns
+
+
+def test_load_filtered_embeddings_no_duplicate_columns():
+    """Regression test for this module's documented fix to SPEC.md's naive
+    join sketch: joining against the whole filtered_keys frame (rather than
+    just JOIN_KEYS + CONTROL_COLUMN_NAME) would produce Polars `_right`
+    duplicate columns for every meta_* column shared by both sides."""
+    embeddings_lf, qc_passed_lf = _fixture_lfs()
+    filtered_keys, normalizer = filter_and_fit_normalizer(
+        embeddings_lf, qc_passed_lf, LABEL_COLUMN
+    )
+    out_columns = (
+        load_filtered_embeddings(embeddings_lf, filtered_keys, normalizer)
+        .collect_schema()
+        .names()
+    )
+    assert len(out_columns) == len(set(out_columns))
+    assert not any(c.endswith("_right") for c in out_columns)
+
+
+def test_load_filtered_embeddings_output_equivalent_to_old_single_step_approach():
+    """SPEC.md's superseded single-step filter_and_normalize() would have
+    joined+classified+fit+applied in one shot, materializing the normalized
+    embedding table directly. The redesign (filter_and_fit_normalizer() +
+    load_filtered_embeddings(), composed) must be output-equivalent, not
+    merely differently shaped (IMPLEMENTATION_CHECKLIST.md Epic 4 Story
+    4.2)."""
+    embeddings_lf, qc_passed_lf = _fixture_lfs()
+
+    # -- "old" superseded single-step approach --
+    old_filtered = embeddings_lf.join(
+        qc_passed_lf.select(JOIN_KEYS), on=JOIN_KEYS, how="inner"
+    )
+    old_classified = variant_classification(old_filtered, LABEL_COLUMN)
+    old_normalizer = Normalizer.from_lazyframe(old_classified, fit_only_on_control=True)
+    old_result = old_normalizer.apply(old_classified).collect().sort("meta_cell_index")
+
+    # -- new, decomposed approach --
+    filtered_keys, normalizer = filter_and_fit_normalizer(
+        embeddings_lf, qc_passed_lf, LABEL_COLUMN
+    )
+    new_result = (
+        load_filtered_embeddings(embeddings_lf, filtered_keys, normalizer)
+        .collect()
+        .sort("meta_cell_index")
+    )
+
+    assert set(old_result.columns) == set(new_result.columns)
+    old_result = old_result.select(sorted(old_result.columns))
+    new_result = new_result.select(sorted(new_result.columns))
+    assert old_result.equals(new_result)
 
 
 # ---------------------------------------------------------------------------

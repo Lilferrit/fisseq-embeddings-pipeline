@@ -151,9 +151,9 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 - [x] Unit test asserting `filtered_keys`'s column set contains no `emb_*` columns (this is the single most important regression test for decision 10 — write it before moving on). See `test_filtered_keys_has_no_embedding_columns` in `tests/unit/test_filter.py`.
 
 ### Story 4.2 — `load_filtered_embeddings()` (shared helper)
-- [ ] Joins `embeddings_lf` to `filtered_keys_lf` by composite key, then applies the normalizer.
-- [ ] Importable from both `aggregate.py` (Epic 5) and `ovwt.py` (Epic 6) without duplicating the join/apply logic.
-- [ ] Unit test: `load_filtered_embeddings()` output matches what the *old* single-step `filter_and_normalize()` (SPEC.md's superseded version) would have produced, on the same synthetic input — i.e. the redesign is output-equivalent, not just differently-shaped.
+- [x] Joins `embeddings_lf` to `filtered_keys_lf` by composite key, then applies the normalizer. **Deviation from SPEC.md's sketch**: joins against only `JOIN_KEYS + [CONTROL_COLUMN_NAME]` from `filtered_keys_lf`, not the whole frame — `filtered_keys_lf` already carries every other `meta_*` column `embeddings_lf` has, verbatim, so joining the whole frame would collide and force Polars' `_right`-suffixing (caught by `test_load_filtered_embeddings_no_duplicate_columns`). See `filter.py`'s module docstring.
+- [x] Importable from both `aggregate.py` (Epic 5) and `ovwt.py` (Epic 6) without duplicating the join/apply logic — `load_filtered_embeddings`/`variant_classification` are public functions in `filter.py`; full exercise of this happens once Epic 5/6 actually import them.
+- [x] Unit test: `load_filtered_embeddings()` output matches what the *old* single-step `filter_and_normalize()` (SPEC.md's superseded version) would have produced, on the same synthetic input — i.e. the redesign is output-equivalent, not just differently-shaped. See `test_load_filtered_embeddings_output_equivalent_to_old_single_step_approach`.
 
 ### Story 4.3 — Output & Nextflow wiring
 - [ ] Outputs `filtered_keys.parquet`, `normalizer.parquet` (no `filtered_embeddings.parquet`).
