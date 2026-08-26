@@ -144,20 +144,20 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 *Goal: the no-copy/foreign-key redesign (SPEC.md §3 decision 10) — publish a join key + fitted stats, never a second copy of the embedding matrix.*
 
 ### Story 4.1 — `filter_and_fit_normalizer()`
-- [ ] Inner-joins `embeddings_lf` to `qc_passed_lf` on the composite key (`meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index`).
-- [ ] Calls `variant_classification()` to mark `meta_is_control` (synonymous/untagged).
-- [ ] Fits `Normalizer.from_lazyframe(filtered, fit_only_on_control=True)`.
-- [ ] Returns `filtered_keys` (join key + `meta_is_control`/`meta_aa_changes`/other `meta_*` — **verified to contain zero `emb_*` columns**) and the fitted `Normalizer` — **never** a materialized normalized embedding table.
-- [ ] Unit test asserting `filtered_keys`'s column set contains no `emb_*` columns (this is the single most important regression test for decision 10 — write it before moving on).
+- [x] Inner-joins `embeddings_lf` to `qc_passed_lf` on the composite key (`meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index`).
+- [x] Calls `variant_classification()` to mark `meta_is_control` (synonymous/untagged). **Placement note**: `variant_classification()` was ported into `filter.py` itself (not `utils/variant.py`, not `aggregate.py`) since Epic 4 needs it before Epic 5's `aggregate.py` exists — Epic 5/8 will import it from `.filter` rather than duplicating it, per `utils/variant.py`'s own Epic 0 correction note.
+- [x] Fits `Normalizer.from_lazyframe(filtered, fit_only_on_control=True)`. `Normalizer` itself was vendored unchanged into a new `utils/normalizer.py` (not part of Epic 0 — it wasn't needed until now).
+- [x] Returns `filtered_keys` (join key + `meta_is_control`/`meta_aa_changes`/other `meta_*` — **verified to contain zero `emb_*` columns**) and the fitted `Normalizer` — **never** a materialized normalized embedding table.
+- [x] Unit test asserting `filtered_keys`'s column set contains no `emb_*` columns (this is the single most important regression test for decision 10 — write it before moving on). See `test_filtered_keys_has_no_embedding_columns` in `tests/unit/test_filter.py`.
 
 ### Story 4.2 — `load_filtered_embeddings()` (shared helper)
-- [ ] Joins `embeddings_lf` to `filtered_keys_lf` by composite key, then applies the normalizer.
-- [ ] Importable from both `aggregate.py` (Epic 5) and `ovwt.py` (Epic 6) without duplicating the join/apply logic.
-- [ ] Unit test: `load_filtered_embeddings()` output matches what the *old* single-step `filter_and_normalize()` (SPEC.md's superseded version) would have produced, on the same synthetic input — i.e. the redesign is output-equivalent, not just differently-shaped.
+- [x] Joins `embeddings_lf` to `filtered_keys_lf` by composite key, then applies the normalizer. **Deviation from SPEC.md's sketch**: joins against only `JOIN_KEYS + [CONTROL_COLUMN_NAME]` from `filtered_keys_lf`, not the whole frame — `filtered_keys_lf` already carries every other `meta_*` column `embeddings_lf` has, verbatim, so joining the whole frame would collide and force Polars' `_right`-suffixing (caught by `test_load_filtered_embeddings_no_duplicate_columns`). See `filter.py`'s module docstring.
+- [x] Importable from both `aggregate.py` (Epic 5) and `ovwt.py` (Epic 6) without duplicating the join/apply logic — `load_filtered_embeddings`/`variant_classification` are public functions in `filter.py`; full exercise of this happens once Epic 5/6 actually import them.
+- [x] Unit test: `load_filtered_embeddings()` output matches what the *old* single-step `filter_and_normalize()` (SPEC.md's superseded version) would have produced, on the same synthetic input — i.e. the redesign is output-equivalent, not just differently-shaped. See `test_load_filtered_embeddings_output_equivalent_to_old_single_step_approach`.
 
 ### Story 4.3 — Output & Nextflow wiring
-- [ ] Outputs `filtered_keys.parquet`, `normalizer.parquet` (no `filtered_embeddings.parquet`).
-- [ ] `modules/local/filter_embeddings.nf` takes `embeddings.parquet` + `filtered_cells.parquet` as input, matching the stub's `input:` block.
+- [x] Outputs `filtered_keys.parquet`, `normalizer.parquet` (no `filtered_embeddings.parquet`). Hydra `main()` entry point implemented in `filter.py`, exercised end-to-end via `test_main_runs_end_to_end_via_cli` (subprocess, mirroring `test_qcfilter.py`'s pattern).
+- [x] `modules/local/filter_embeddings.nf` takes `embeddings.parquet` + `filtered_cells.parquet` as input, matching the stub's `input:` block. Added the previously-missing `label_column=${params.filter_label_column}` CLI arg (every other field was already wired) and a new `filter_label_column` entry in `params.yaml`, matching `embed_cells.nf`'s convention of wiring every config field explicitly, even ones with defaults.
 - [ ] `workflows/embeddings.nf`'s `embed_and_filtered_ch = embed_ch.join(filtered_ch)` wiring (feeding both Epic 5 and Epic 6) is in place and tested against a real (small) Nextflow run once Epic 9 starts.
 
 ---

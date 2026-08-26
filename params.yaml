@@ -31,6 +31,9 @@ cell_dino_device: "cuda"
 cell_dino_batch_size: 256
 cell_dino_num_workers: 4
 
+# ── Filter Embeddings (FILTER_EMBEDDINGS, §6.4) ─────────────────────────────
+filter_label_column: "meta_aa_changes"
+
 # ── OVWT Distinguish-ability Scores (OVWT_BATCHWISE, §6.6) ──────────────────
 ovwt_n_folds: 5
 ovwt_calibrate: true
