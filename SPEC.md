@@ -593,34 +593,44 @@ Note the embedding-column equivalent of `Normalizer` needs no change at all — 
 
 ### 6.5 Aggregation (Synonymous STD Corrected) — `AGGREGATE_EMBEDDINGS`
 
-**Purpose:** per-variant median pooling of the (already synonymous-corrected) cell-level embeddings, producing one aggregate embedding vector per variant for this experiment — this experiment's contribution to `Experiment N Aggregates`.
+**Purpose:** per-variant pooling of the (already synonymous-corrected) cell-level embeddings, producing one aggregate embedding vector (or, for reference-based methods, one distinguish-ability statistic) per variant for this experiment — this experiment's contribution to `Experiment N Aggregates`.
 
-**Input note (§3 decision 10):** `filtered_lf` below is no longer a file this stage reads directly — `FILTER_EMBEDDINGS` (§6.4) stopped materializing it. The Nextflow process (§7) now takes `embeddings.parquet`, `filtered_keys.parquet`, and `normalizer.parquet` as three separate inputs and constructs `filtered_lf = load_filtered_embeddings(embeddings_lf, filtered_keys_lf, normalizer)` (§6.4) itself, right before calling `aggregate_embeddings`; the function body below is otherwise unchanged.
+**Revised (Epic 5):** generalized beyond this section's original median-only design to support any combination of mean, median, KS, and AUROC aggregation, mirroring `fisseq-data-pipeline`'s `BaseAggregator`/`ReferenceBasedAggregator` class hierarchy (ported into `aggregate.py`, trimmed: no `per_barcode`/`block_list`, no WT-null-bootstrap machinery — both Resolved notes below still hold). `MAD`/`std`/`signedKS`/`QQ`/`*negLogP` are not ported (not requested); add another `BaseAggregator` subclass + a `_AGGREGATORS` registry entry if one is ever needed. This also introduces a control-row-exclusion rule the original sketch didn't have — see below.
+
+**Input note (§3 decision 10):** `filtered_lf` below is no longer a file this stage reads directly — `FILTER_EMBEDDINGS` (§6.4) stopped materializing it. The Nextflow process (§7) now takes `embeddings.parquet`, `filtered_keys.parquet`, and `normalizer.parquet` as three separate inputs and constructs `filtered_lf = load_filtered_embeddings(embeddings_lf, filtered_keys_lf, normalizer)` (§6.4) itself, right before calling `aggregate_embeddings`.
+
+**Control-row exclusion:** every aggregator, including mean/median, excludes control (synonymous, untagged) rows before grouping by variant — `lf.filter(~CONTROL_COLUMN).group_by(label_col)`, matching `fisseq-data-pipeline`'s `BaseAggregator._native_aggregate_feature_batch` exactly. This is required structurally for KS/AUROC (comparing the reference pool to itself is meaningless) and is applied uniformly here as one consistent rule rather than a per-method special case. Literal `"WT"` rows are unaffected (`classify_variant("WT") == "WT"`, never `"Synonymous"`, so WT is never marked control) — only genuinely-synonymous variant labels drop out of the per-variant output, since they exist only to define the reference baseline, not to be scored against it.
 
 ```python
 def aggregate_embeddings(
-    filtered_lf: pl.LazyFrame, label_column: str
+    filtered_lf: pl.LazyFrame,
+    label_column: str,
+    aggregators: Sequence[str] = ("median",),
 ) -> pl.DataFrame:
-    """Median-pool synonymous-corrected embedding dimensions per variant.
+    """Aggregate synonymous-corrected embeddings per variant via one or more methods.
 
-    Adapted from fisseq_data_pipeline.aggregate.MedianAggregator; unlike the
-    CellProfiler version, no separate normalizer fit/apply happens here —
-    the caller already ran load_filtered_embeddings() (§6.4) to produce
-    filtered_lf — so this is just a group_by().median().
+    Unlike the CellProfiler version, no separate normalizer fit/apply
+    happens here -- the caller already ran load_filtered_embeddings()
+    (§6.4) to produce filtered_lf. Runs each requested aggregator (mean,
+    median, KS, AUROC), joins their outputs on label_column (each
+    aggregator's _stat_suffix already namespaces columns, so no collision
+    across methods), then joins in get_aggregate_meta_data() (vendored
+    unchanged). Validates aggregators up front -- empty, unknown, or
+    duplicate names all raise before any aggregator runs.
+
+    Output-shape backward-compat rule: when aggregators is exactly
+    ("median",) (the default), the "_median" suffix is stripped before
+    returning, producing bare emb_0000..emb_{D-1} columns -- this
+    section's original single-method contract. Any other selection
+    (multiple methods, or a single non-median method) keeps suffixed
+    columns (emb_0000_mean, emb_0000_KS, etc.).
     """
-    embedding_cols = filtered_lf.select(EMBEDDING_SELECTOR).columns
-    agg_df = (
-        filtered_lf.group_by(label_column)
-        .agg([pl.col(c).median() for c in embedding_cols])
-        .collect()
-    )
-    meta_lf = get_aggregate_meta_data(filtered_lf, label_column)  # vendored unchanged
-    return agg_df.join(meta_lf.collect(), on=label_column)
+    ...  # see aggregate.py for the full implementation
 ```
 
-**Output:** published as `Experiment N Aggregates` — `feature_select_batchwise/<batch>/aggregate.parquet` in the output tree (§8), one row per variant, `emb_0000..emb_{D-1}` (now variant-level, median-pooled and synonymous-corrected) plus `meta_num_cells`, `meta_barcode_num_unique`, etc.
+**Output:** published as `Experiment N Aggregates` — `feature_select_batchwise/<batch>/aggregate.parquet` in the output tree (§8), one row per non-control variant. With the default `aggregators=("median",)`: `emb_0000..emb_{D-1}` (variant-level, median-pooled and synonymous-corrected) plus `meta_num_cells`, `meta_barcode_num_unique`, etc. With any other `aggregators` selection: the same metadata columns, plus one `{emb_col}_{stat_suffix}` column per requested method per embedding dimension (e.g. `emb_0000_mean`, `emb_0000_KS`) instead of bare `emb_*` columns — a future consumer of a specific method's columns from a multi-method run (e.g. `GLOBAL_VARIANT_EMBEDDINGS`, §6.7) will need to select by suffix explicitly; not resolved here.
 
-**Resolved:** no `per_barcode` pooling option — always pool all of a variant's cells directly (the code above), unlike `aggregate.py`'s optional median-per-barcode-then-median-across-barcodes mode.
+**Resolved:** no `per_barcode` pooling option — always pool all of a variant's cells directly, unlike `aggregate.py`'s optional median-per-barcode-then-median-across-barcodes mode.
 
 **Resolved:** `fisseq-data-pipeline`'s WT-null bootstrap / blocklist reproducibility-gate machinery (the `AGGREGATE_FEATURE_TYPE` → `WT_NULL_AGGREGATE` → `WT_NULL_BLOCKLIST` branch that flags individual CellProfiler features as unreproducible) has no counterpart here — out of scope for v1. Per-dimension reproducibility filtering doesn't obviously translate to dense, non-interpretable embedding dimensions the way it does to named morphological features; revisit if real runs show embedding dimensions need their own reproducibility gate.
 

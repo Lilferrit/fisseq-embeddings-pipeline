@@ -2,7 +2,11 @@
 // filtered_keys.parquet + normalizer.parquet (three inputs, §3 decision 10 --
 // NOT a pre-normalized single file) and reconstructs filtered_lf itself via
 // load_filtered_embeddings() before aggregating.
-// TODO(Epic 9): implement per IMPLEMENTATION_CHECKLIST.md Epic 9.
+// TODO(Epic 9): wire into workflows/embeddings.nf and verify against a real
+// (small) Nextflow run per IMPLEMENTATION_CHECKLIST.md Epic 9 / Epic 5
+// Story 5.3's last bullet. The `aggregators=[...]` list interpolation below
+// is new, unverified-until-Epic-9 territory -- no other module in this repo
+// passes a List-typed param through to a Hydra CLI override yet.
 
 process AGGREGATE_EMBEDDINGS {
     errorStrategy 'ignore'
@@ -22,6 +26,8 @@ process AGGREGATE_EMBEDDINGS {
         embeddings_file=${embeddings_parquet} \\
         filtered_keys_file=${filtered_keys_parquet} \\
         normalizer_file=${normalizer_parquet} \\
+        label_column=${params.filter_label_column} \\
+        'aggregators=[${params.aggregate_methods.join(",")}]' \\
         random_seed=${params.random_seed}
     """
 }
