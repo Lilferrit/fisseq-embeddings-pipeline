@@ -164,15 +164,31 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 
 ## Epic 5 — Aggregation: `AGGREGATE_EMBEDDINGS` (SPEC.md §6.5)
 
-*Goal: per-variant median pooling of the (reconstructed) synonymous-corrected embeddings.*
+*Goal: per-variant pooling of the (reconstructed) synonymous-corrected embeddings — generalized beyond SPEC.md's original median-only sketch to support any combination of mean/median/KS/AUROC (user-directed scope expansion, mirroring fisseq-data-pipeline's `BaseAggregator`/`ReferenceBasedAggregator` architecture), with a backward-compat rule keeping the single-method default byte-shape-identical to SPEC.md's original Output note.*
 
-### Story 5.1 — `aggregate_embeddings()`
-- [ ] Takes `filtered_lf` (built by the **caller** via `load_filtered_embeddings()`, Epic 4 — not read from a file directly).
-- [ ] Median-pools all `emb_*` columns per variant (`group_by(label_column).agg(median)`) — **no** `per_barcode` option (SPEC.md §6.5's first Resolved note — deliberate, not a gap).
-- [ ] Joins in `get_aggregate_meta_data()` (vendored unchanged) for `meta_num_cells`/`meta_barcode_num_unique`/etc.
+**Deviation from SPEC.md's original sketch, applying to every story below**: all aggregators, including mean/median, exclude control (synonymous, untagged) rows before grouping by variant — matching fisseq-data-pipeline's `BaseAggregator._native_aggregate_feature_batch` (`lf.filter(~CONTROL_COLUMN).group_by(label_col)`) exactly, not SPEC.md's original literal every-row `group_by()`. Required structurally for KS/AUROC (comparing the reference pool to itself is meaningless); applied uniformly to mean/median too for one consistent rule instead of a per-method special case — user-confirmed decision. Literal `"WT"` rows are unaffected (`classify_variant("WT") == "WT"`, never `"Synonymous"`, so WT is never marked control) — only genuinely-synonymous variant labels drop out of the per-variant output.
+
+### Story 5.1 — Aggregator classes & registry
+- [x] `BaseAggregator`/`ReferenceBasedAggregator` ported from `fisseq_data_pipeline.aggregate` (trimmed: no `per_barcode`/`block_list`/`barcode_column`, no WT-null-bootstrap `null_statistic_transform`/`null_comparison_statistic` — SPEC.md §6.5's Resolved notes already ruled out `per_barcode` and WT-null/blocklist for v1). `_feature_columns` keys off `EMBEDDING_SELECTOR`, not `FEATURE_SELECTOR`.
+- [x] `MeanAggregator`, `MedianAggregator`, `KSAggregator`, `AUROCAggregator` ported (only `MAD`/`std`/`signedKS`/`QQ`/`*negLogP` are out of scope — not requested; add via the same registry pattern later if ever needed).
+- [x] `_AGGREGATORS: dict[str, type[BaseAggregator]]` registry with exactly `{"mean", "median", "KS", "AUROC"}`.
+- [x] Unit tests: KS matches `scipy.stats.ks_2samp`, AUROC matches `sklearn.metrics.roc_auc_score` (unsymmetrized) across RANDOM/TIES/SINGLE value shapes; mean/median match `np.mean`/`np.median`; all four aggregators exclude control rows uniformly; a literal `"WT"` label (not classified control) still gets its own row.
+
+### Story 5.2 — `aggregate_embeddings()` combination & backward-compat
+- [ ] Takes `filtered_lf` (built by the **caller** via `load_filtered_embeddings()`, Epic 4 — not read from a file directly) plus a `label_column` and an `aggregators: Sequence[str]` (defaults to `("median",)`).
+- [ ] Validates `aggregators` up front (empty, unknown name, or duplicate name all raise `ValueError` before any aggregator runs — mirrors `fisseq_data_pipeline.aggregate.aggregate()`'s fail-fast validation).
+- [ ] Runs each requested aggregator and joins their outputs on `label_column` (each aggregator's own `_stat_suffix` already namespaces columns, so no collision across methods).
+- [ ] Output-shape backward-compat rule: when `aggregators == ("median",)` (the default), strips the `_median` suffix so output columns are bare `emb_0000..emb_{D-1}`, matching SPEC.md's original Output note exactly; any other selection keeps suffixed columns (`emb_0000_mean`, `emb_0000_KS`, etc.).
+- [ ] Joins in `get_aggregate_meta_data()` (vendored unchanged, new `utils/metadata.py`) for `meta_num_cells`/`meta_barcode_num_unique`/etc. — the control/WT-label metadata row is naturally dropped by the join (no separate filtering needed, since no aggregator ever produces a control-row group to join against).
 - [ ] Confirmed **no** WT-null bootstrap/blocklist reproducibility-gate machinery is ported (SPEC.md §6.5's second Resolved note — explicitly out of scope for v1).
-- [ ] Output `aggregate.parquet` matches SPEC.md's column description: one row per variant, `emb_0000..emb_{D-1}` plus `meta_*` aggregate columns.
-- [ ] Unit test against a small synthetic `filtered_lf` with a known median.
+- [ ] Unit tests: default single-method output is unsuffixed; multi-method output is suffixed with no collisions; a single non-median method is also suffixed; empty/unknown/duplicate `aggregators` all raise.
+- [ ] SPEC.md §6.5's code sketch and Output note updated to reflect the generalized design and the control-row-exclusion deviation above.
+
+### Story 5.3 — Output & Nextflow wiring
+- [ ] `AggregateEmbeddingsConfig(AppConfig)`: `embeddings_file`/`filtered_keys_file`/`normalizer_file` (`str = MISSING`, matching `aggregate_embeddings.nf`'s already-fixed CLI contract), `label_column: str = "meta_aa_changes"`, `aggregators: List[str]` (default `["median"]`). Hydra `main()` entry point reads all three parquet files, reconstructs `filtered_lf` via `load_filtered_embeddings()`, calls `aggregate_embeddings()`, writes `{prefix}aggregate.parquet` (no `filtered_embeddings.parquet` or other materialized copy).
+- [ ] `modules/local/aggregate_embeddings.nf` gains the previously-missing `label_column=${params.filter_label_column}` (direct precedent: `filter_embeddings.nf`) and a new `aggregators=[...]` CLI arg, single-quoted (`'aggregators=[${params.aggregate_methods.join(",")}]'`, matching `embed_cells.nf`'s `'shard_pattern=./*.tar'` precedent for shell-glob-unsafe characters) sourced from a new `params.yaml` entry `aggregate_methods: ["median"]`. **New pattern with no prior precedent in this repo** (no `List`-typed `params.yaml` entry or Groovy list-to-CLI interpolation existed before this story) — the Groovy-interpolation half is unverified until Epic 9's real Nextflow run; the Python/Hydra half (`AggregateEmbeddingsConfig.aggregators` parsing a bracketed CLI override) is covered by a direct subprocess CLI test in this story.
+- [ ] Unit test: CLI end-to-end (subprocess, mirroring `test_qcfilter.py`'s/`test_filter.py`'s pattern) — once with default config (unsuffixed `emb_*` columns) and once with `'aggregators=[mean,median]'` (both suffix families present).
+- [ ] `workflows/embeddings.nf`'s `agg_ch = AGGREGATE_EMBEDDINGS(embed_and_filtered_ch)` wiring is in place and tested against a real (small) Nextflow run once Epic 9 starts.
 
 ---
 
