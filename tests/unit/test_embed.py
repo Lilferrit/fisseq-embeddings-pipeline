@@ -11,9 +11,12 @@ transformer numerics.
 from __future__ import annotations
 
 import dataclasses
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 import pytest
 import torch
 import torch.nn as nn
@@ -24,6 +27,7 @@ from fisseq_embeddings_pipeline.embed import (
     embed_batch,
     load_cell_dino,
     load_embedding_dataloader,
+    main,
 )
 from fisseq_embeddings_pipeline.vendor.dinov2.models.vision_transformer import (
     DinoVisionTransformer,
@@ -271,3 +275,56 @@ def test_embed_batch_against_random_weight_real_model():
     out = embed_batch(model, crops, masks, cfg)
 
     assert out.shape == (2, 8)
+
+
+# ---------------------------------------------------------------------------
+# main() -- end-to-end CLI smoke test
+# ---------------------------------------------------------------------------
+
+
+def test_main_runs_end_to_end_via_cli(tmp_path: Path):
+    shard_dir = _write_shard(tmp_path, n_cells=4, channels=3, crop_size=CROP)
+    reference = vit_small(
+        patch_size=16, in_chans=1, channel_adaptive=True, img_size=CROP
+    )
+    checkpoint_path = tmp_path / "checkpoint.pth"
+    torch.save({"teacher": reference.state_dict()}, checkpoint_path)
+    output_dir = tmp_path / "out"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "fisseq_embeddings_pipeline.embed",
+            f"output_dir={output_dir}",
+            f"shard_pattern={shard_dir}/dataset-*.tar",
+            f"checkpoint_path={checkpoint_path}",
+            "arch=vit_small",
+            f"crop_size={CROP}",
+            "device=cpu",
+            "batch_size=2",
+            "num_workers=0",
+            "random_seed=0",
+        ],
+        capture_output=True,
+        text=True,
+        # Hydra's own working-directory management writes outputs/<date>/
+        # <time>/ under the process cwd -- run from tmp_path, matching
+        # test_dataset.py's own CLI smoke test.
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    out = pl.read_parquet(output_dir / "embeddings.parquet")
+    assert out.height == 4
+    assert "emb_0000" in out.columns
+    assert "emb_0383" in out.columns  # vit_small embed_dim=384
+    assert out["meta_batch"].unique().to_list() == ["batch1"]
+
+
+def test_main_is_hydra_entry_point():
+    """Sanity check that `main` is importable and hydra-wrapped (the real
+    invocation path is exercised via subprocess above -- hydra.main-wrapped
+    functions parse sys.argv, so they aren't meant to be called directly
+    from a test process)."""
+    assert callable(main)

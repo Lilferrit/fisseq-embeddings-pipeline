@@ -133,9 +133,9 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 - [x] Unit test: `embed_batch()` against a random-weight (not pretrained) model of the same architecture, confirming output shape `(B, D)`; `mask_mode="zero_background"`'s actual zeroing and the `mean`/`max` pooling behavior are each isolated and asserted against hand-computed expected values via a small deterministic stub backbone, independent of real transformer numerics.
 
 ### Story 3.4 — Output & Nextflow wiring
-- [ ] Output `embeddings.parquet`: one row per cell, `meta.json` fields passed through, plus zero-padded `emb_0000..emb_{D-1}` columns (`EMBEDDING_SELECTOR` from Epic 0 matches these).
-- [ ] `modules/local/embed_cells.nf` given `label 'process_gpu'` and wired to a GPU-capable executor/queue in `nextflow.config`.
-- [ ] End-to-end smoke test (small synthetic shard, real or stub checkpoint) produces `embeddings.parquet` with the expected shape.
+- [x] Output `embeddings.parquet`: one row per cell, `meta.json` fields passed through, plus zero-padded `emb_0000..emb_{D-1}` columns (`EMBEDDING_SELECTOR` from Epic 0 matches these).
+- [x] `modules/local/embed_cells.nf` given `label 'process_gpu'` and wired to a GPU-capable executor/queue in `nextflow.config` -- confirmed already present in the scaffold, and its CLI arg names already match `EmbedCellsConfig`'s real field names exactly (unlike `qc_filter.nf`/`build_dataset.nf`, no Epic 9 reconciliation needed here).
+- [x] End-to-end smoke test (small synthetic shard, real `vit_small`-arch random-weight checkpoint via the CLI's `python -m fisseq_embeddings_pipeline.embed` entry point) produces `embeddings.parquet` with the expected shape -- the "(a) tiny random-init checkpoint" option SPEC.md §9.3 raises for CI, decided here since a real GPU/checkpoint isn't available in this environment anyway.
 
 ---
 

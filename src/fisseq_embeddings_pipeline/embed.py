@@ -44,13 +44,18 @@ before handing shard paths to `wds.WebDataset`.
 import dataclasses
 import glob
 import logging
+import pathlib
 from typing import Callable, Dict
 
+import hydra
+import polars as pl
 import torch
 import webdataset as wds
-from omegaconf import MISSING
+from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
+from .utils.log import setup_logging
 from .vendor.dinov2.models.vision_transformer import (
     vit_base,
     vit_giant2,
@@ -302,3 +307,71 @@ def embed_batch(
     elif cfg.channel_pool == "max":
         return tokens.max(dim=1).values
     raise ValueError(f"Unknown channel_pool {cfg.channel_pool!r}")
+
+
+_cs = ConfigStore.instance()
+_cs.store(name="embed_main", node=EmbedCellsConfig)
+
+
+@hydra.main(version_base=None, config_path=None, config_name="embed_main")
+def main(cfg: DictConfig) -> None:
+    """
+    Hydra entry point: embed every cell in a Cell Dataset via Cell-DINO.
+
+    Steps
+    -----
+    1. Create ``output_dir``.
+    2. Build the dataloader (:func:`load_embedding_dataloader`) and model
+       (:func:`load_cell_dino`).
+    3. For each batch, embed via :func:`embed_batch` and accumulate one row
+       per cell: passthrough ``meta.json`` fields plus zero-padded
+       ``emb_0000``..``emb_{D-1}`` columns (``EMBEDDING_SELECTOR``,
+       ``utils/constants.py``, matches these).
+    4. Write ``embeddings.parquet``.
+
+    Configuration
+    -------------
+    Override any field on the command line, e.g.::
+
+        python -m fisseq_embeddings_pipeline.embed \\
+            output_dir=./out \\
+            'shard_pattern=./dataset-*.tar' \\
+            checkpoint_path=/data/cell_dino_teacher.pth \\
+            device=cpu \\
+            random_seed=0
+    """
+    embed_cfg: EmbedCellsConfig = OmegaConf.to_object(cfg)
+
+    output_dir = pathlib.Path(embed_cfg.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    embed_cfg.output_dir = str(output_dir)
+    setup_logging(embed_cfg, "embed")
+
+    logging.info(
+        "Embedding cells from %s (arch=%s, checkpoint=%s, device=%s)",
+        embed_cfg.shard_pattern,
+        embed_cfg.arch,
+        embed_cfg.checkpoint_path,
+        embed_cfg.device,
+    )
+
+    dataloader = load_embedding_dataloader(embed_cfg)
+    model = load_cell_dino(embed_cfg)
+
+    rows = []
+    n_cells = 0
+    for keys, crops, masks, metas in dataloader:
+        embeddings = embed_batch(model, crops, masks, embed_cfg).cpu().numpy()
+        n_dims = embeddings.shape[1]
+        emb_cols = [f"emb_{i:04d}" for i in range(n_dims)]
+        for meta, emb_row in zip(metas, embeddings):
+            rows.append({**meta, **dict(zip(emb_cols, emb_row.tolist()))})
+        n_cells += len(keys)
+
+    logging.info("Writing embeddings.parquet (%d cells)", n_cells)
+    pl.DataFrame(rows).write_parquet(output_dir / "embeddings.parquet")
+    logging.info("Done")
+
+
+if __name__ == "__main__":
+    main()
