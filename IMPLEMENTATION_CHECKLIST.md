@@ -116,26 +116,26 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 *Goal: stream every cell through Cell-DINO in bag-of-channels mode. This is the epic SPEC.md flags as resting most heavily on assumptions — budget real time to read `dinov2` source before trusting any of its sketch.*
 
 ### Story 3.1 — Verify Cell-DINO's real inference API (SPEC.md §10, item 1 — do this first)
-- [ ] Read `dinov2/eval/setup.py` and `dinov2/models/vision_transformer.py` (or the channel-adaptive equivalent) against your actual checkpoint.
-- [ ] Confirm (or correct) `load_cell_dino`'s construction path — does it really go through `dinov2.eval.setup`/`build_model_from_cfg`, or something else?
-- [ ] Confirm the checkpoint's state-dict key (`"teacher"` vs. top-level) against a real `.pth`.
-- [ ] Confirm the correct pooling operator for per-channel CLS tokens (SPEC.md assumes mean/max over a channel-adaptive `in_chans=1` backbone — verify this matches how Cell-DINO was actually evaluated).
-- [ ] Record what you found in `docs/architecture.md` (replacing SPEC.md's placeholder assumptions) so this verification isn't silently lost.
+- [x] Read `dinov2/eval/setup.py` and `dinov2/models/vision_transformer.py` against the real `facebookresearch/dinov2` source (commit `7764ea0f912e53c92e82eb78a2a1631e92725fc8`, fetched from GitHub — neither the real `dinov2` repo nor a checkpoint is mounted in this sandbox, unlike the other sibling repos).
+- [x] Corrected `load_cell_dino`'s construction path: the real path goes through `build_model_from_cfg`/`dinov2.eval.setup`, but that needs a full training-style cfg this pipeline doesn't have — **decided** to call the architecture factory (`vision_transformer.vit_large(...)`) directly instead, documented as a deliberate simplification in `docs/architecture.md`.
+- [ ] Confirm the checkpoint's state-dict key (`"teacher"` vs. top-level) against a real `.pth` — **blocked**: no Cell-DINO checkpoint exists anywhere in this environment. `load_cell_dino()` (Story 3.3) implements the real `load_pretrained_weights()` logic (checkpoint-key indexing + `module.`/`backbone.` prefix stripping + non-strict load) verified against source, but this specific sub-item needs a real checkpoint to actually confirm against and stays open.
+- [x] Confirmed the correct pooling operator: `DinoVisionTransformer.forward()` returns the CLS token straight through an identity head, so SPEC.md's mean/max-over-channel-CLS-tokens sketch is correct as written; documented why `channel_adaptive`'s own `get_intermediate_layers` bag-of-channels path (used by the paper's linear-probe scripts) is deliberately not used instead.
+- [x] Recorded all of the above in `docs/architecture.md` (replacing the placeholder).
 
 ### Story 3.2 — Config & dataloader
-- [ ] `EmbedCellsConfig(AppConfig)` implemented per SPEC.md's dataclass (`shard_pattern`, `checkpoint_path`, `arch="vit_large"`, `patch_size=16`, `crop_size=224`, `channel_pool="mean"`, `mask_mode="none"`, `device="cuda"`, `batch_size=256`, `num_workers=4`).
-- [ ] `load_embedding_dataloader()` streams `(key, crop, mask, meta)` from `BUILD_DATASET`'s shards via `webdataset.WebDataset(...).decode().to_tuple(...).batched(...)`.
+- [x] `EmbedCellsConfig(AppConfig)` implemented per SPEC.md's dataclass (`shard_pattern`, `checkpoint_path`, `arch="vit_large"`, `patch_size=16`, `crop_size=224`, `channel_pool="mean"`, `mask_mode="none"`, `device="cuda"`, `batch_size=256`, `num_workers=4`).
+- [x] `load_embedding_dataloader()` streams `(key, crop, mask, meta)` from `BUILD_DATASET`'s shards via `webdataset.WebDataset(...).decode().to_tuple(...).batched(...)`. **Correction versus SPEC.md's sketch**: verified against the installed `webdataset==1.0.2` that a bare glob `shard_pattern` (e.g. `"dataset-*.tar"`, what `embed_cells.nf` actually passes) is *not* expanded by `wds.WebDataset` itself -- only brace patterns are (`webdataset.shardlists.expand_urls`). `load_embedding_dataloader()` expands a non-brace pattern via `glob.glob()` itself before constructing the `WebDataset`, and raises a clear `ValueError` if that glob matches nothing.
 
 ### Story 3.3 — Model wrapper & masking
-- [ ] `load_cell_dino()` implemented against the real API confirmed in Story 3.1 (not the SPEC.md placeholder).
-- [ ] `embed_batch()` implements bag-of-channels embedding: split `(B, C, H, W)` into `C` single-channel images, run through the shared backbone, pool per-channel CLS tokens (`channel_pool="mean"|"max"`) into `(B, D)`.
-- [ ] `mask_mode="zero_background"` zeroes non-target pixels using `mask.npy` before embedding; `mask_mode="none"` passes crops through untouched. Both paths covered by tests.
-- [ ] Unit test: `embed_batch()` against a random-weight (not pretrained) model of the same architecture, confirming output shape `(B, D)` and that `mask_mode="zero_background"` actually zeroes the expected pixels before the forward pass.
+- [x] `load_cell_dino()` implemented against the real API confirmed in Story 3.1 (not the SPEC.md placeholder): builds via the named architecture factory (`in_chans=1, channel_adaptive=True`) and ports `dinov2.utils.utils.load_pretrained_weights`'s real checkpoint-key/prefix-stripping/non-strict-load logic.
+- [x] `embed_batch()` implements bag-of-channels embedding: split `(B, C, H, W)` into `C` single-channel images, run through the shared backbone, pool per-channel CLS tokens (`channel_pool="mean"|"max"`) into `(B, D)`.
+- [x] `mask_mode="zero_background"` zeroes non-target pixels using `mask.npy` before embedding; `mask_mode="none"` passes crops through untouched. Both paths covered by tests.
+- [x] Unit test: `embed_batch()` against a random-weight (not pretrained) model of the same architecture, confirming output shape `(B, D)`; `mask_mode="zero_background"`'s actual zeroing and the `mean`/`max` pooling behavior are each isolated and asserted against hand-computed expected values via a small deterministic stub backbone, independent of real transformer numerics.
 
 ### Story 3.4 — Output & Nextflow wiring
-- [ ] Output `embeddings.parquet`: one row per cell, `meta.json` fields passed through, plus zero-padded `emb_0000..emb_{D-1}` columns (`EMBEDDING_SELECTOR` from Epic 0 matches these).
-- [ ] `modules/local/embed_cells.nf` given `label 'process_gpu'` and wired to a GPU-capable executor/queue in `nextflow.config`.
-- [ ] End-to-end smoke test (small synthetic shard, real or stub checkpoint) produces `embeddings.parquet` with the expected shape.
+- [x] Output `embeddings.parquet`: one row per cell, `meta.json` fields passed through, plus zero-padded `emb_0000..emb_{D-1}` columns (`EMBEDDING_SELECTOR` from Epic 0 matches these).
+- [x] `modules/local/embed_cells.nf` given `label 'process_gpu'` and wired to a GPU-capable executor/queue in `nextflow.config` -- confirmed already present in the scaffold, and its CLI arg names already match `EmbedCellsConfig`'s real field names exactly (unlike `qc_filter.nf`/`build_dataset.nf`, no Epic 9 reconciliation needed here).
+- [x] End-to-end smoke test (small synthetic shard, real `vit_small`-arch random-weight checkpoint via the CLI's `python -m fisseq_embeddings_pipeline.embed` entry point) produces `embeddings.parquet` with the expected shape -- the "(a) tiny random-init checkpoint" option SPEC.md §9.3 raises for CI, decided here since a real GPU/checkpoint isn't available in this environment anyway.
 
 ---
 
