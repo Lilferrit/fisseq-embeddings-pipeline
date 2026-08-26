@@ -14,7 +14,11 @@ test-writing oversight.
 
 from __future__ import annotations
 
-from fisseq_embeddings_pipeline.ovwt import OvwtEmbeddingConfig
+import polars as pl
+from omegaconf import OmegaConf
+
+from fisseq_embeddings_pipeline.ovwt import OvwtEmbeddingConfig, predict_binary
+from fisseq_embeddings_pipeline.utils.xgbparams import train_binary_xgboost
 
 # ---------------------------------------------------------------------------
 # OvwtEmbeddingConfig (Story 6.1)
@@ -74,3 +78,48 @@ def test_xgboost_sub_config_has_defaults():
 
 def test_min_cells_can_be_disabled():
     assert _cfg(min_cells=None).min_cells is None
+
+
+# ---------------------------------------------------------------------------
+# predict_binary() (Story 6.2)
+# ---------------------------------------------------------------------------
+
+
+def _separable_df() -> pl.DataFrame:
+    """WT cells cluster around emb_0000=1.0, variant cells around emb_0000=0.0
+    -- trivially separable, so a fitted model's predicted P(wildtype) should
+    land near 1 for WT rows and near 0 for variant rows."""
+    n = 20
+    return pl.DataFrame(
+        {
+            "meta_aa_changes": ["WT"] * n + ["M1K"] * n,
+            "emb_0000": [1.0 + 0.01 * i for i in range(n)]
+            + [0.0 + 0.01 * i for i in range(n)],
+        }
+    )
+
+
+def _xgb_cfg():
+    return OmegaConf.structured(_cfg())
+
+
+def test_predict_binary_separates_wt_from_variant():
+    df = _separable_df()
+    model = train_binary_xgboost(df, df, "meta_aa_changes", "WT", _xgb_cfg())
+    scores = predict_binary(df, model, "meta_aa_changes", "WT")
+
+    wt_scores = scores[: len(df) // 2]
+    variant_scores = scores[len(df) // 2 :]
+    # Early stopping (5 rounds) means predicted probabilities aren't fully
+    # saturated to 0/1 even on trivially-separable data -- assert clear
+    # directional separation rather than a strict >0.9/<0.1 threshold.
+    assert wt_scores.mean() > 0.7
+    assert variant_scores.mean() < 0.3
+    assert wt_scores.mean() > variant_scores.mean()
+
+
+def test_predict_binary_returns_one_score_per_row():
+    df = _separable_df()
+    model = train_binary_xgboost(df, df, "meta_aa_changes", "WT", _xgb_cfg())
+    scores = predict_binary(df, model, "meta_aa_changes", "WT")
+    assert len(scores) == len(df)

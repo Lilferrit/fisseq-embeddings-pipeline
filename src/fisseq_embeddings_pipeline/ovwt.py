@@ -10,17 +10,20 @@ line that must change (train_binary_xgboost's `cfg.random_state` ->
 `cfg.random_seed`, SPEC.md §3 decision 11) -- already applied inside
 utils/xgbparams.py (Epic 0).
 
-TODO(Epic 6 Story 6.2+): predict_binary(), ovwt_batchwise(), and the Hydra
-`main()` entry point. See IMPLEMENTATION_CHECKLIST.md Epic 6.
+TODO(Epic 6 Story 6.3+): ovwt_batchwise() and the Hydra `main()` entry
+point. See IMPLEMENTATION_CHECKLIST.md Epic 6.
 """
 
 import dataclasses
 from typing import Optional
 
+import numpy as np
+import polars as pl
+import xgboost as xgb
 from omegaconf import MISSING
 
 from .config import AppConfig
-from .utils.xgbparams import XGBoostConfig
+from .utils.xgbparams import XGBoostConfig, get_dmatrix
 
 
 @dataclasses.dataclass
@@ -83,3 +86,44 @@ class OvwtEmbeddingConfig(AppConfig):
     min_cells: Optional[int] = 250
     downsample_wt: bool = True
     xgboost: XGBoostConfig = dataclasses.field(default_factory=XGBoostConfig)
+
+
+def predict_binary(
+    df: pl.DataFrame, model: xgb.Booster, label_col: str, wt_label: str
+) -> np.ndarray:
+    """
+    Raw predicted P(wildtype) scores for every row of ``df``.
+
+    Thin wrapper around the vendored :func:`get_dmatrix` + ``model.predict``
+    -- no metric computation (contrast
+    :func:`fisseq_embeddings_pipeline.utils.xgbparams.evaluate_binary`,
+    which also computes AUROC/accuracy against known labels; this pipeline
+    needs raw per-cell scores instead, since every cell -- including ones
+    whose true label doesn't matter for this call -- gets exactly one
+    out-of-fold score). Reuses ``get_dmatrix``'s own feature-column
+    handling and non-finite-to-NaN masking, so scoring stays identical to
+    what :func:`fisseq_embeddings_pipeline.utils.xgbparams.train_binary_xgboost`
+    used to fit the model.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Rows to score. Every non-``label_col`` column is treated as a
+        feature column.
+    model : xgb.Booster
+        A trained booster (e.g. from :func:`fisseq_embeddings_pipeline.utils.xgbparams.train_binary_xgboost`).
+    label_col : str
+        Name of the label column (used only to exclude it from features --
+        the true labels themselves are not read).
+    wt_label : str
+        Wildtype label string, passed through to :func:`get_dmatrix` (only
+        affects that function's own label encoding, which this function
+        discards).
+
+    Returns
+    -------
+    np.ndarray
+        1-D array of predicted P(wildtype) scores, one per row of ``df``,
+        in the same row order.
+    """
+    return model.predict(get_dmatrix(df, label_col, wt_label))

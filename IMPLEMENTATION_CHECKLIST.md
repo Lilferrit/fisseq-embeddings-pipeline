@@ -201,8 +201,8 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 - [x] No `random_state` field — inherits `random_seed` from `AppConfig` only (Epic 0).
 
 ### Story 6.2 — `predict_binary()` helper
-- [ ] Thin wrapper around vendored `get_dmatrix()` + `model.predict()`, no metric computation.
-- [ ] Unit test against a trivially-separable synthetic dataset (predicted scores near 0/1 in the expected direction).
+- [x] Thin wrapper around vendored `get_dmatrix()` + `model.predict()`, no metric computation.
+- [x] Unit test against a trivially-separable synthetic dataset (predicted scores near 0/1 in the expected direction). Note: with `early_stopping_rounds=5` scores don't fully saturate to 0/1 even on trivially-separable data, so the test asserts clear directional separation (`>0.7`/`<0.3`) rather than a stricter `>0.9`/`<0.1` bound.
 
 ### Story 6.3 — `ovwt_batchwise()` core loop
 - [ ] Per non-WT variant: builds the variant-vs-WT `subset`, computes the composite `(meta_barcode, is_wt)` stratification key.
