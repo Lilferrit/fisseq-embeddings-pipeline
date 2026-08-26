@@ -289,3 +289,108 @@ def test_wt_label_is_not_treated_as_control() -> None:
     result = m.MeanAggregator().aggregate(df.lazy()).collect()
     assert "WT" in result["meta_aa_changes"].to_list()
     assert "A1A" not in result["meta_aa_changes"].to_list()
+
+
+# ---------------------------------------------------------------------------
+# aggregate_embeddings() -- combination & backward-compat (Story 5.2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def agg_embeddings_lf() -> pl.LazyFrame:
+    """A1A is control (excluded from output); M1K and WT are reportable
+    variants. meta_barcode/meta_batch are present so get_aggregate_meta_data
+    produces its optional columns too."""
+    return pl.DataFrame(
+        {
+            "meta_aa_changes": ["A1A", "A1A", "M1K", "M1K", "M1K", "WT", "WT"],
+            "meta_is_control": [True, True, False, False, False, False, False],
+            "meta_barcode": ["bc0", "bc1", "bc2", "bc2", "bc3", "bc4", "bc4"],
+            "meta_batch": ["batch1"] * 7,
+            "emb_0000": [0.0, 1.0, 10.0, 11.0, 12.0, 20.0, 21.0],
+            "emb_0001": [0.0, 2.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        }
+    ).lazy()
+
+
+def test_aggregate_embeddings_default_median_is_unsuffixed(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    result = m.aggregate_embeddings(agg_embeddings_lf, "meta_aa_changes")
+    assert {"emb_0000", "emb_0001"}.issubset(set(result.columns))
+    assert "emb_0000_median" not in result.columns
+
+
+def test_aggregate_embeddings_default_excludes_control_row(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    result = m.aggregate_embeddings(agg_embeddings_lf, "meta_aa_changes")
+    assert "A1A" not in result["meta_aa_changes"].to_list()
+    assert set(result["meta_aa_changes"].to_list()) == {"M1K", "WT"}
+
+
+def test_aggregate_embeddings_default_median_values_correct(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    result = m.aggregate_embeddings(agg_embeddings_lf, "meta_aa_changes")
+    row = _get_row(result, "M1K")
+    assert row["emb_0000"] == pytest.approx(np.median([10.0, 11.0, 12.0]))
+
+
+def test_aggregate_embeddings_default_includes_metadata_columns(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    result = m.aggregate_embeddings(agg_embeddings_lf, "meta_aa_changes")
+    assert "meta_num_cells" in result.columns
+    row = _get_row(result, "M1K")
+    assert row["meta_num_cells"] == 3
+
+
+def test_aggregate_embeddings_multi_method_columns_suffixed_and_joined(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    result = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", aggregators=("mean", "median")
+    )
+    assert {
+        "emb_0000_mean",
+        "emb_0000_median",
+        "emb_0001_mean",
+        "emb_0001_median",
+    }.issubset(set(result.columns))
+    assert "emb_0000" not in result.columns
+
+
+def test_aggregate_embeddings_single_non_median_method_is_suffixed(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    result = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", aggregators=("KS",)
+    )
+    assert "emb_0000_KS" in result.columns
+    assert "emb_0000" not in result.columns
+
+
+def test_aggregate_embeddings_empty_aggregators_raises(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        m.aggregate_embeddings(agg_embeddings_lf, "meta_aa_changes", aggregators=())
+
+
+def test_aggregate_embeddings_unknown_aggregator_raises(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    with pytest.raises(ValueError, match="Unknown aggregator"):
+        m.aggregate_embeddings(
+            agg_embeddings_lf, "meta_aa_changes", aggregators=("bogus",)
+        )
+
+
+def test_aggregate_embeddings_duplicate_aggregator_raises(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    with pytest.raises(ValueError, match="Duplicate aggregator"):
+        m.aggregate_embeddings(
+            agg_embeddings_lf, "meta_aa_changes", aggregators=("median", "median")
+        )

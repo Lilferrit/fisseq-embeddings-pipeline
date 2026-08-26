@@ -28,20 +28,32 @@ reference baseline, not to be scored against it.
 (``^emb_\\d+$``) instead of fisseq-data-pipeline's FEATURE_SELECTOR -- the
 pipeline only ever aggregates emb_* dimensions.
 
-TODO(Epic 5 Story 5.2): aggregate_embeddings() (registry dispatch,
-multi-method join, output-shape backward-compat rule, get_aggregate_meta_data
-join).
+:func:`aggregate_embeddings` dispatches over one or more requested
+aggregator names (validating the whole set up front -- empty, unknown, or
+duplicate names all raise before any aggregator runs), joins their outputs
+on ``label_column`` (each aggregator's ``_stat_suffix`` already namespaces
+columns, so no collision across methods), then joins in
+:func:`fisseq_embeddings_pipeline.utils.metadata.get_aggregate_meta_data`.
+When ``aggregators`` is exactly ``("median",)`` (the default), the
+``_median`` suffix is stripped before returning, producing bare
+``emb_0000..emb_{D-1}`` columns -- matching SPEC.md's original single-method
+Output note byte-for-byte and keeping ``EMBEDDING_SELECTOR`` valid for any
+future consumer in the default case. Any other selection (multiple methods,
+or a single non-median method) keeps suffixed columns.
+
 TODO(Epic 5 Story 5.3): AggregateEmbeddingsConfig and the Hydra `main()`
 entry point.
 """
 
 import abc
 import logging
-from typing import ClassVar, Optional
+from collections import Counter
+from typing import ClassVar, Optional, Sequence
 
 import polars as pl
 
 from .utils.constants import CONTROL_COLUMN, EMBEDDING_SELECTOR
+from .utils.metadata import get_aggregate_meta_data
 
 
 class BaseAggregator(abc.ABC):
@@ -372,3 +384,86 @@ _AGGREGATORS: dict[str, type[BaseAggregator]] = {
     "KS": KSAggregator,
     "AUROC": AUROCAggregator,
 }
+
+
+def aggregate_embeddings(
+    filtered_lf: pl.LazyFrame,
+    label_column: str,
+    aggregators: Sequence[str] = ("median",),
+) -> pl.DataFrame:
+    """
+    Aggregate synonymous-corrected embeddings per variant via one or more methods.
+
+    Runs each requested aggregator (see :data:`_AGGREGATORS`) against
+    ``filtered_lf`` and joins their outputs together on ``label_column``,
+    then joins in :func:`fisseq_embeddings_pipeline.utils.metadata.get_aggregate_meta_data`
+    for `meta_num_cells`/`meta_barcode_num_unique`/etc. The control/WT-label
+    metadata row is naturally dropped by this join -- no aggregator ever
+    produces a control-row group to join against, so the inner join between
+    aggregator output and metadata output already excludes it without any
+    separate filtering step.
+
+    Parameters
+    ----------
+    filtered_lf : pl.LazyFrame
+        QC-passed, synonymous-corrected cell-level embeddings, as returned
+        by :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`
+        (Epic 4) -- carries a boolean ``CONTROL_COLUMN`` column, ``emb_*``
+        embedding-dimension columns, and ``label_column``.
+    label_column : str
+        Name of the column identifying variant labels.
+    aggregators : Sequence[str]
+        Aggregation method(s) to run, in the given order. One or more of
+        ``"mean"``, ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to
+        ``("median",)``, matching SPEC.md's original single-method
+        contract.
+
+    Returns
+    -------
+    pl.DataFrame
+        One row per non-control variant group. If ``aggregators`` is
+        exactly ``("median",)``, embedding columns are bare
+        ``emb_0000..emb_{D-1}``; otherwise each is suffixed by its
+        aggregator's ``_stat_suffix`` (e.g. ``emb_0000_mean``,
+        ``emb_0000_KS``).
+
+    Raises
+    ------
+    ValueError
+        If ``aggregators`` is empty, contains a name not in
+        :data:`_AGGREGATORS`, or contains a duplicate name.
+    """
+    aggregators = tuple(aggregators)
+    if not aggregators:
+        raise ValueError("aggregators must not be empty")
+
+    unknown = sorted(set(aggregators) - set(_AGGREGATORS))
+    if unknown:
+        raise ValueError(
+            f"Unknown aggregator(s) {unknown}. Choose from: {sorted(_AGGREGATORS)}"
+        )
+
+    duplicates = sorted(
+        name for name, count in Counter(aggregators).items() if count > 1
+    )
+    if duplicates:
+        raise ValueError(f"Duplicate aggregator(s) requested: {duplicates}")
+
+    result_lf: Optional[pl.LazyFrame] = None
+    for name in aggregators:
+        agg_lf = _AGGREGATORS[name](label_col=label_column).aggregate(filtered_lf)
+        result_lf = (
+            agg_lf
+            if result_lf is None
+            else result_lf.join(agg_lf, on=label_column, how="inner")
+        )
+
+    if aggregators == ("median",):
+        suffix = MedianAggregator._stat_suffix
+        schema_names = result_lf.collect_schema().names()
+        rename_map = {c: c[: -len(suffix)] for c in schema_names if c.endswith(suffix)}
+        result_lf = result_lf.rename(rename_map)
+
+    meta_lf = get_aggregate_meta_data(filtered_lf, label_column)
+    result_lf = result_lf.join(meta_lf, on=label_column, how="inner")
+    return result_lf.collect()

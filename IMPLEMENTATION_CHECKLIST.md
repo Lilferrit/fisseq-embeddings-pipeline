@@ -175,14 +175,14 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 - [x] Unit tests: KS matches `scipy.stats.ks_2samp`, AUROC matches `sklearn.metrics.roc_auc_score` (unsymmetrized) across RANDOM/TIES/SINGLE value shapes; mean/median match `np.mean`/`np.median`; all four aggregators exclude control rows uniformly; a literal `"WT"` label (not classified control) still gets its own row.
 
 ### Story 5.2 — `aggregate_embeddings()` combination & backward-compat
-- [ ] Takes `filtered_lf` (built by the **caller** via `load_filtered_embeddings()`, Epic 4 — not read from a file directly) plus a `label_column` and an `aggregators: Sequence[str]` (defaults to `("median",)`).
-- [ ] Validates `aggregators` up front (empty, unknown name, or duplicate name all raise `ValueError` before any aggregator runs — mirrors `fisseq_data_pipeline.aggregate.aggregate()`'s fail-fast validation).
-- [ ] Runs each requested aggregator and joins their outputs on `label_column` (each aggregator's own `_stat_suffix` already namespaces columns, so no collision across methods).
-- [ ] Output-shape backward-compat rule: when `aggregators == ("median",)` (the default), strips the `_median` suffix so output columns are bare `emb_0000..emb_{D-1}`, matching SPEC.md's original Output note exactly; any other selection keeps suffixed columns (`emb_0000_mean`, `emb_0000_KS`, etc.).
-- [ ] Joins in `get_aggregate_meta_data()` (vendored unchanged, new `utils/metadata.py`) for `meta_num_cells`/`meta_barcode_num_unique`/etc. — the control/WT-label metadata row is naturally dropped by the join (no separate filtering needed, since no aggregator ever produces a control-row group to join against).
-- [ ] Confirmed **no** WT-null bootstrap/blocklist reproducibility-gate machinery is ported (SPEC.md §6.5's second Resolved note — explicitly out of scope for v1).
-- [ ] Unit tests: default single-method output is unsuffixed; multi-method output is suffixed with no collisions; a single non-median method is also suffixed; empty/unknown/duplicate `aggregators` all raise.
-- [ ] SPEC.md §6.5's code sketch and Output note updated to reflect the generalized design and the control-row-exclusion deviation above.
+- [x] Takes `filtered_lf` (built by the **caller** via `load_filtered_embeddings()`, Epic 4 — not read from a file directly) plus a `label_column` and an `aggregators: Sequence[str]` (defaults to `("median",)`).
+- [x] Validates `aggregators` up front (empty, unknown name, or duplicate name all raise `ValueError` before any aggregator runs — mirrors `fisseq_data_pipeline.aggregate.aggregate()`'s fail-fast validation).
+- [x] Runs each requested aggregator and joins their outputs on `label_column` (each aggregator's own `_stat_suffix` already namespaces columns, so no collision across methods).
+- [x] Output-shape backward-compat rule: when `aggregators == ("median",)` (the default), strips the `_median` suffix so output columns are bare `emb_0000..emb_{D-1}`, matching SPEC.md's original Output note exactly; any other selection keeps suffixed columns (`emb_0000_mean`, `emb_0000_KS`, etc.).
+- [x] Joins in `get_aggregate_meta_data()` (vendored unchanged, new `utils/metadata.py`) for `meta_num_cells`/`meta_barcode_num_unique`/etc. — the control/WT-label metadata row is naturally dropped by the join (no separate filtering needed, since no aggregator ever produces a control-row group to join against).
+- [x] Confirmed **no** WT-null bootstrap/blocklist reproducibility-gate machinery is ported (SPEC.md §6.5's second Resolved note — explicitly out of scope for v1).
+- [x] Unit tests: default single-method output is unsuffixed; multi-method output is suffixed with no collisions; a single non-median method is also suffixed; empty/unknown/duplicate `aggregators` all raise.
+- [x] SPEC.md §6.5's code sketch and Output note updated to reflect the generalized design and the control-row-exclusion deviation above.
 
 ### Story 5.3 — Output & Nextflow wiring
 - [ ] `AggregateEmbeddingsConfig(AppConfig)`: `embeddings_file`/`filtered_keys_file`/`normalizer_file` (`str = MISSING`, matching `aggregate_embeddings.nf`'s already-fixed CLI contract), `label_column: str = "meta_aa_changes"`, `aggregators: List[str]` (default `["median"]`). Hydra `main()` entry point reads all three parquet files, reconstructs `filtered_lf` via `load_filtered_embeddings()`, calls `aggregate_embeddings()`, writes `{prefix}aggregate.parquet` (no `filtered_embeddings.parquet` or other materialized copy).
