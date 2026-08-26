@@ -156,8 +156,8 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 - [x] Unit test: `load_filtered_embeddings()` output matches what the *old* single-step `filter_and_normalize()` (SPEC.md's superseded version) would have produced, on the same synthetic input — i.e. the redesign is output-equivalent, not just differently-shaped. See `test_load_filtered_embeddings_output_equivalent_to_old_single_step_approach`.
 
 ### Story 4.3 — Output & Nextflow wiring
-- [ ] Outputs `filtered_keys.parquet`, `normalizer.parquet` (no `filtered_embeddings.parquet`).
-- [ ] `modules/local/filter_embeddings.nf` takes `embeddings.parquet` + `filtered_cells.parquet` as input, matching the stub's `input:` block.
+- [x] Outputs `filtered_keys.parquet`, `normalizer.parquet` (no `filtered_embeddings.parquet`). Hydra `main()` entry point implemented in `filter.py`, exercised end-to-end via `test_main_runs_end_to_end_via_cli` (subprocess, mirroring `test_qcfilter.py`'s pattern).
+- [x] `modules/local/filter_embeddings.nf` takes `embeddings.parquet` + `filtered_cells.parquet` as input, matching the stub's `input:` block. Added the previously-missing `label_column=${params.filter_label_column}` CLI arg (every other field was already wired) and a new `filter_label_column` entry in `params.yaml`, matching `embed_cells.nf`'s convention of wiring every config field explicitly, even ones with defaults.
 - [ ] `workflows/embeddings.nf`'s `embed_and_filtered_ch = embed_ch.join(filtered_ch)` wiring (feeding both Epic 5 and Epic 6) is in place and tested against a real (small) Nextflow run once Epic 9 starts.
 
 ---

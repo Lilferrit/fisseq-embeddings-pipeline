@@ -30,23 +30,22 @@ instead joins against only the join key plus ``CONTROL_COLUMN_NAME`` -- the
 one genuinely new column :func:`filter_and_fit_normalizer` adds -- which is
 exactly what this module's output-equivalence unit test is designed to
 catch (IMPLEMENTATION_CHECKLIST.md Epic 4 Story 4.2).
-
-TODO(Epic 4 Story 4.3): the Hydra `main()` entry point (writes
-filtered_keys.parquet/normalizer.parquet) is not implemented yet.
 """
 
 import dataclasses
+import logging
+import pathlib
 
+import hydra
 import polars as pl
-from omegaconf import MISSING
+from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
 from .utils.constants import CONTROL_COLUMN_NAME, META_SELECTOR
+from .utils.log import setup_logging
 from .utils.normalizer import Normalizer
 from .utils.variant import classify_variant
-
-# TODO(Epic 4 Story 4.3): finish the Hydra `main()` entry point (writes
-# filtered_keys.parquet/normalizer.parquet, ConfigStore registration).
 
 # The composite key BUILD_DATASET's WebDataset sample keys are built from
 # (SPEC.md §6.1) -- the only column set that's both experiment-unique and
@@ -215,3 +214,71 @@ def load_filtered_embeddings(
         how="inner",
     )
     return normalizer.apply(filtered)
+
+
+_cs = ConfigStore.instance()
+_cs.store(name="filter_main", node=FilterEmbeddingsConfig)
+
+
+@hydra.main(version_base=None, config_path=None, config_name="filter_main")
+def main(cfg: DictConfig) -> None:
+    """
+    Hydra entry point: determine QC-passed cells and fit the synonymous z-score.
+
+    Reads ``embeddings_file`` and ``qc_passed_file``, calls
+    :func:`filter_and_fit_normalizer`, and writes two output files to
+    ``output_dir`` -- ``filtered_keys.parquet`` (no ``emb_*`` columns) and
+    ``normalizer.parquet`` (the fitted stats). Neither a normalized nor a
+    QC-filtered copy of the embedding matrix itself is ever written
+    (SPEC.md §3 decision 10).
+
+    Output files
+    ------------
+    - ``{prefix}filtered_keys.parquet``
+    - ``{prefix}normalizer.parquet``
+
+    where ``prefix`` is ``{output_root}.`` when ``output_root`` is set,
+    otherwise empty.
+
+    Configuration
+    -------------
+    Override any field on the command line, e.g.::
+
+        python -m fisseq_embeddings_pipeline.filter \\
+            output_dir=./out \\
+            embeddings_file=embeddings.parquet \\
+            qc_passed_file=filtered_cells.parquet \\
+            random_seed=0
+    """
+    filter_cfg: FilterEmbeddingsConfig = OmegaConf.to_object(cfg)
+
+    output_dir = pathlib.Path(filter_cfg.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filter_cfg.output_dir = str(output_dir)
+    setup_logging(filter_cfg, "filter")
+
+    prefix = f"{filter_cfg.output_root}." if filter_cfg.output_root is not None else ""
+
+    logging.info("Reading embeddings from %s", filter_cfg.embeddings_file)
+    embeddings_lf = pl.scan_parquet(filter_cfg.embeddings_file)
+    logging.info("Reading QC-passed cells from %s", filter_cfg.qc_passed_file)
+    qc_passed_lf = pl.scan_parquet(filter_cfg.qc_passed_file)
+
+    logging.info("Determining QC-passed keys and fitting normalizer")
+    filtered_keys_lf, normalizer = filter_and_fit_normalizer(
+        embeddings_lf, qc_passed_lf, filter_cfg.label_column
+    )
+
+    keys_path = output_dir / f"{prefix}filtered_keys.parquet"
+    logging.info("Writing %s", keys_path)
+    filtered_keys_lf.sink_parquet(keys_path)
+
+    normalizer_path = output_dir / f"{prefix}normalizer.parquet"
+    logging.info("Writing %s", normalizer_path)
+    normalizer.save(normalizer_path)
+
+    logging.info("Done")
+
+
+if __name__ == "__main__":
+    main()

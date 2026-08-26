@@ -2,11 +2,15 @@
 
 Story 4.1 covers filter_and_fit_normalizer()/variant_classification(), Story
 4.2 covers load_filtered_embeddings() (including the output-equivalence
-test the checklist calls for).
+test the checklist calls for), Story 4.3 covers the Hydra `main()` CLI
+end-to-end.
 """
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
 from typing import List
 
 import polars as pl
@@ -17,6 +21,7 @@ from fisseq_embeddings_pipeline.filter import (
     FilterEmbeddingsConfig,
     filter_and_fit_normalizer,
     load_filtered_embeddings,
+    main,
     variant_classification,
 )
 from fisseq_embeddings_pipeline.utils.constants import CONTROL_COLUMN_NAME
@@ -284,3 +289,54 @@ def test_filter_embeddings_config_inherits_random_seed_default():
         qc_passed_file="filtered_cells.parquet",
     )
     assert cfg.random_seed == 0
+
+
+# ---------------------------------------------------------------------------
+# main() -- CLI end-to-end (subprocess, mirroring test_qcfilter.py's pattern)
+# ---------------------------------------------------------------------------
+
+
+def _run_filter(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "fisseq_embeddings_pipeline.filter", *args],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+
+
+def test_main_runs_end_to_end_via_cli(tmp_path: Path):
+    embeddings_path = tmp_path / "embeddings.parquet"
+    qc_passed_path = tmp_path / "filtered_cells.parquet"
+    _embeddings_lf(
+        cell_index=[0, 1, 2, 3],
+        aa_changes=["A1A", "A1A", "M1K", "WT"],
+        emb_0000=[1.0, 3.0, 5.0, 7.0],
+        emb_0001=[10.0, 30.0, 50.0, 70.0],
+    ).collect().write_parquet(embeddings_path)
+    _qc_passed_lf(cell_index=[0, 1, 2, 3]).collect().write_parquet(qc_passed_path)
+    output_dir = tmp_path / "out"
+
+    result = _run_filter(
+        tmp_path,
+        f"output_dir={output_dir}",
+        f"embeddings_file={embeddings_path}",
+        f"qc_passed_file={qc_passed_path}",
+        "random_seed=0",
+    )
+    assert result.returncode == 0, result.stderr
+
+    filtered_keys = pl.read_parquet(output_dir / "filtered_keys.parquet")
+    assert not any(c.startswith("emb_") for c in filtered_keys.columns)
+    assert filtered_keys.height == 4
+
+    normalizer = Normalizer.load(output_dir / "normalizer.parquet")
+    assert normalizer.means["emb_0000"][0] == pytest.approx(2.0)
+
+
+def test_main_is_hydra_entry_point():
+    """Sanity check that `main` is importable and hydra-wrapped (the real
+    invocation path is exercised via subprocess above -- hydra.main-wrapped
+    functions parse sys.argv, so they aren't meant to be called directly
+    from a test process)."""
+    assert callable(main)
