@@ -127,10 +127,10 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 - [x] `load_embedding_dataloader()` streams `(key, crop, mask, meta)` from `BUILD_DATASET`'s shards via `webdataset.WebDataset(...).decode().to_tuple(...).batched(...)`. **Correction versus SPEC.md's sketch**: verified against the installed `webdataset==1.0.2` that a bare glob `shard_pattern` (e.g. `"dataset-*.tar"`, what `embed_cells.nf` actually passes) is *not* expanded by `wds.WebDataset` itself -- only brace patterns are (`webdataset.shardlists.expand_urls`). `load_embedding_dataloader()` expands a non-brace pattern via `glob.glob()` itself before constructing the `WebDataset`, and raises a clear `ValueError` if that glob matches nothing.
 
 ### Story 3.3 — Model wrapper & masking
-- [ ] `load_cell_dino()` implemented against the real API confirmed in Story 3.1 (not the SPEC.md placeholder).
-- [ ] `embed_batch()` implements bag-of-channels embedding: split `(B, C, H, W)` into `C` single-channel images, run through the shared backbone, pool per-channel CLS tokens (`channel_pool="mean"|"max"`) into `(B, D)`.
-- [ ] `mask_mode="zero_background"` zeroes non-target pixels using `mask.npy` before embedding; `mask_mode="none"` passes crops through untouched. Both paths covered by tests.
-- [ ] Unit test: `embed_batch()` against a random-weight (not pretrained) model of the same architecture, confirming output shape `(B, D)` and that `mask_mode="zero_background"` actually zeroes the expected pixels before the forward pass.
+- [x] `load_cell_dino()` implemented against the real API confirmed in Story 3.1 (not the SPEC.md placeholder): builds via the named architecture factory (`in_chans=1, channel_adaptive=True`) and ports `dinov2.utils.utils.load_pretrained_weights`'s real checkpoint-key/prefix-stripping/non-strict-load logic.
+- [x] `embed_batch()` implements bag-of-channels embedding: split `(B, C, H, W)` into `C` single-channel images, run through the shared backbone, pool per-channel CLS tokens (`channel_pool="mean"|"max"`) into `(B, D)`.
+- [x] `mask_mode="zero_background"` zeroes non-target pixels using `mask.npy` before embedding; `mask_mode="none"` passes crops through untouched. Both paths covered by tests.
+- [x] Unit test: `embed_batch()` against a random-weight (not pretrained) model of the same architecture, confirming output shape `(B, D)`; `mask_mode="zero_background"`'s actual zeroing and the `mean`/`max` pooling behavior are each isolated and asserted against hand-computed expected values via a small deterministic stub backbone, independent of real transformer numerics.
 
 ### Story 3.4 — Output & Nextflow wiring
 - [ ] Output `embeddings.parquet`: one row per cell, `meta.json` fields passed through, plus zero-padded `emb_0000..emb_{D-1}` columns (`EMBEDDING_SELECTOR` from Epic 0 matches these).
