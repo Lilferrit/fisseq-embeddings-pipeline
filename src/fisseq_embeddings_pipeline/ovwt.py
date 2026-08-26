@@ -14,26 +14,30 @@ utils/xgbparams.py (Epic 0).
 output column name (not a hardcoded ``"meta_aa_changes"`` literal, unlike
 SPEC.md §6.6's sketch) -- consistent with Epic 5's `aggregate_embeddings()`,
 which does the same.
-
-TODO(Epic 6 Story 6.5): the Hydra `main()` entry point. See
-IMPLEMENTATION_CHECKLIST.md Epic 6.
 """
 
 import dataclasses
 import logging
+import pathlib
+import pickle
 from collections import Counter
 from typing import Optional
 
+import hydra
 import numpy as np
 import polars as pl
 import sklearn.calibration
 import sklearn.metrics
 import sklearn.model_selection
 import xgboost as xgb
-from omegaconf import MISSING, OmegaConf
+from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
+from .filter import load_filtered_embeddings
 from .utils.constants import EMBEDDING_SELECTOR, META_BARCODE_COL, META_SELECTOR
+from .utils.log import setup_logging
+from .utils.normalizer import Normalizer
 from .utils.xgbparams import (
     XGBoostConfig,
     get_dmatrix,
@@ -503,3 +507,88 @@ def ovwt_batchwise(
         cell_scores_df = pl.concat(per_cell_scores)
 
     return results_df, cell_scores_df, models
+
+
+_cs = ConfigStore.instance()
+_cs.store(name="ovwt_main", node=OvwtEmbeddingConfig)
+
+
+@hydra.main(version_base=None, config_path=None, config_name="ovwt_main")
+def main(cfg: DictConfig) -> None:
+    """
+    Hydra entry point: k-fold one-vs-wildtype scoring for every variant in an experiment.
+
+    Reads ``embeddings_file``, ``filtered_keys_file``, and
+    ``normalizer_file``, reconstructs the QC-passed, synonymous-corrected
+    embedding table via :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`
+    (Epic 4), calls :func:`ovwt_batchwise`, and writes
+    ``{prefix}results.parquet``, ``{prefix}cell_scores.parquet``, and
+    ``{prefix}models.pkl`` to ``output_dir``.
+
+    Output files
+    ------------
+    - ``{prefix}results.parquet``
+    - ``{prefix}cell_scores.parquet``
+    - ``{prefix}models.pkl``
+
+    where ``prefix`` is ``{output_root}.`` when ``output_root`` is set,
+    otherwise empty.
+
+    Configuration
+    -------------
+    Override any field on the command line, e.g.::
+
+        python -m fisseq_embeddings_pipeline.ovwt \\
+            output_dir=./out \\
+            embeddings_file=embeddings.parquet \\
+            filtered_keys_file=filtered_keys.parquet \\
+            normalizer_file=normalizer.parquet \\
+            n_folds=5 \\
+            calibrate=true \\
+            min_cells=250 \\
+            downsample_wt=true
+    """
+    ovwt_cfg: OvwtEmbeddingConfig = OmegaConf.to_object(cfg)
+
+    output_dir = pathlib.Path(ovwt_cfg.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ovwt_cfg.output_dir = str(output_dir)
+    setup_logging(ovwt_cfg, "ovwt")
+
+    prefix = f"{ovwt_cfg.output_root}." if ovwt_cfg.output_root is not None else ""
+
+    logging.info("Reading embeddings from %s", ovwt_cfg.embeddings_file)
+    embeddings_lf = pl.scan_parquet(ovwt_cfg.embeddings_file)
+    logging.info("Reading filtered keys from %s", ovwt_cfg.filtered_keys_file)
+    filtered_keys_lf = pl.scan_parquet(ovwt_cfg.filtered_keys_file)
+    logging.info("Loading normalizer from %s", ovwt_cfg.normalizer_file)
+    normalizer = Normalizer.load(ovwt_cfg.normalizer_file)
+
+    logging.info("Reconstructing QC-passed, synonymous-corrected embeddings")
+    filtered_lf = load_filtered_embeddings(embeddings_lf, filtered_keys_lf, normalizer)
+
+    logging.info(
+        "Running %d-fold one-vs-wildtype scoring (calibrate=%s)",
+        ovwt_cfg.n_folds,
+        ovwt_cfg.calibrate,
+    )
+    results_df, cell_scores_df, models = ovwt_batchwise(filtered_lf, ovwt_cfg)
+
+    results_path = output_dir / f"{prefix}results.parquet"
+    logging.info("Writing %s", results_path)
+    results_df.write_parquet(results_path)
+
+    cell_scores_path = output_dir / f"{prefix}cell_scores.parquet"
+    logging.info("Writing %s", cell_scores_path)
+    cell_scores_df.write_parquet(cell_scores_path)
+
+    models_path = output_dir / f"{prefix}models.pkl"
+    logging.info("Writing %s", models_path)
+    with open(models_path, "wb") as f:
+        pickle.dump(models, f)
+
+    logging.info("Done")
+
+
+if __name__ == "__main__":
+    main()
