@@ -197,8 +197,8 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 *Goal: k-fold CV stratified jointly on `(meta_barcode, is_wt)`, with per-fold calibration, producing an out-of-fold score for every cell and two distinguish-ability numbers per variant. The most algorithmically involved epic — budget real review time for the fold/stratification logic.*
 
 ### Story 6.1 — Config
-- [ ] `OvwtEmbeddingConfig(AppConfig)` with `label_column`, `wt_label="WT"`, `n_folds: int = 5`, `calibrate: bool = True`, `min_cells=250`, `downsample_wt=True` (thresholds carried over from `ovwt.py` as a starting point, per SPEC.md's Resolved note), plus the vendored `xgboost: XGBoostConfig` sub-config.
-- [ ] No `random_state` field — inherits `random_seed` from `AppConfig` only (Epic 0).
+- [x] `OvwtEmbeddingConfig(AppConfig)` with `label_column`, `wt_label="WT"`, `n_folds: int = 5`, `calibrate: bool = True`, `min_cells=250`, `downsample_wt=True` (thresholds carried over from `ovwt.py` as a starting point, per SPEC.md's Resolved note), plus the vendored `xgboost: XGBoostConfig` sub-config. **Scope note**: `downsample_wt` is a plain `bool` here, not fisseq-data-pipeline's `Union[bool, int]` explicit-target variant — not requested by this story's field list.
+- [x] No `random_state` field — inherits `random_seed` from `AppConfig` only (Epic 0).
 
 ### Story 6.2 — `predict_binary()` helper
 - [ ] Thin wrapper around vendored `get_dmatrix()` + `model.predict()`, no metric computation.
