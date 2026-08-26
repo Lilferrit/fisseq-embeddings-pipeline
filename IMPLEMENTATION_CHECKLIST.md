@@ -82,10 +82,32 @@ Every story cites the `SPEC.md` section it implements — read that section (and
 *Goal: near-verbatim port of `qcfilter.py`, retargeted to read `BUILD_DATASET`'s `metadata.parquet`.*
 
 ### Story 2.1 — Port `qcfilter.py`
-- [ ] `QcFilterConfig` fields match SPEC.md's list (`bc_threshold=10`, `variant_bc_threshold=4`, `edit_distance_threshold=1`) with `downsample_amounts`/`downsample_classes`/`downsample_seed` **omitted** (SPEC.md §6.2's Resolved note — deliberately dropped, not an oversight).
-- [ ] `cell_files` input accepts `BUILD_DATASET`'s `metadata.parquet` directly (no separate CSV-reading path from the old `input.py`).
-- [ ] Outputs `filtered_cells.parquet` (composite join key + `meta_*` for QC-passed cells — a key list, not a copy), `barcode_counts.parquet`, `variants_per_barcode.parquet`, matching `fisseq-data-pipeline`'s existing contract.
-- [ ] Unit tests ported/adapted from `fisseq-data-pipeline/tests/unit/test_qcfilter.py`, updated for the `metadata.parquet` input path.
+- [x] `QcFilterConfig` fields match SPEC.md's list (`bc_threshold=10`, `variant_bc_threshold=4`, `edit_distance_threshold=1`) with `downsample_amounts`/`downsample_classes`/`downsample_seed` **omitted** (SPEC.md §6.2's Resolved note — deliberately dropped, not an oversight).
+- [x] `cell_files` input accepts `BUILD_DATASET`'s `metadata.parquet` directly (no separate CSV-reading path from the old `input.py`).
+- [x] Outputs `filtered_cells.parquet` (composite join key + `meta_*` for QC-passed cells — a key list, not a copy), `barcode_counts.parquet`, `variants_per_barcode.parquet`, matching `fisseq-data-pipeline`'s existing contract.
+- [x] Unit tests ported/adapted from `fisseq-data-pipeline/tests/unit/test_qcfilter.py`, updated for the `metadata.parquet` input path.
+
+**Two deviations from the vendored source, flagged during implementation (beyond the
+Resolved-note downsample drop above):**
+1. `barcode_col_name`/`aa_changes_col_name`/`edit_distance_col_name` default to
+   `"meta_barcode"`/`"meta_aa_changes"`/`"meta_edit_distance"` instead of the upstream raw-CSV
+   names (`"upBarcode"`/`"aaChanges"`/`"editDistance"`) — `metadata.parquet` (Epic 1) already
+   writes those columns under their canonical `meta_*` names, so this pipeline's only real
+   `cell_files` input is never the raw, unrenamed cell table `filter_columns`'s rename step was
+   originally written against. `filter_columns` itself is otherwise unchanged (renaming a column
+   to its own existing name is a harmless no-op in Polars).
+2. `select_variants`'s `mode="random"` seed now comes from `AppConfig.random_seed` (SPEC.md §3
+   decision 11) instead of the dropped `downsample_seed` field, since no stage config is meant
+   to add its own seed field.
+
+Also fixed in passing: `read_file`'s upstream `if`/`elif` on file suffix has no `else`, so an
+unrecognized suffix raised an opaque `UnboundLocalError` deep inside a later `.collect()` call —
+the port raises a clear `ValueError` instead.
+
+`modules/local/qc_filter.nf`'s CLI arg names (`barcode_count_threshold`/
+`variant_barcode_count_threshold` vs. the real field names `bc_threshold`/`variant_bc_threshold`)
+remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`'s own still-open
+`TODO(Epic 9)` even after Epic 1 shipped.
 
 ---
 
