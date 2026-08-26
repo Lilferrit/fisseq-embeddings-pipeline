@@ -37,7 +37,13 @@ testpaths = ["tests/unit", "tests/integration"]
 # entirely rather than relying on a version pin, so this repo's docs stay
 # untouched by lint/format tooling regardless of which ruff version
 # resolves.
-extend-exclude = ["*.md"]
+#
+# src/fisseq_embeddings_pipeline/vendor/ (Epic 3, SPEC.md §6.3) holds
+# third-party dinov2 source kept as close to byte-identical upstream as
+# possible (see vendor/dinov2/VENDORED_FROM.md) -- excluded so ruff's
+# import-sort/format rules don't drift it further from upstream than the
+# one documented, deliberate line change.
+extend-exclude = ["*.md", "src/fisseq_embeddings_pipeline/vendor"]
 
 [tool.ruff.lint]
 # Ruff's default select ("E4", "E7", "E9", "F") plus "I" (isort-equivalent

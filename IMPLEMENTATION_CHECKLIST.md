@@ -116,11 +116,11 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 *Goal: stream every cell through Cell-DINO in bag-of-channels mode. This is the epic SPEC.md flags as resting most heavily on assumptions — budget real time to read `dinov2` source before trusting any of its sketch.*
 
 ### Story 3.1 — Verify Cell-DINO's real inference API (SPEC.md §10, item 1 — do this first)
-- [ ] Read `dinov2/eval/setup.py` and `dinov2/models/vision_transformer.py` (or the channel-adaptive equivalent) against your actual checkpoint.
-- [ ] Confirm (or correct) `load_cell_dino`'s construction path — does it really go through `dinov2.eval.setup`/`build_model_from_cfg`, or something else?
-- [ ] Confirm the checkpoint's state-dict key (`"teacher"` vs. top-level) against a real `.pth`.
-- [ ] Confirm the correct pooling operator for per-channel CLS tokens (SPEC.md assumes mean/max over a channel-adaptive `in_chans=1` backbone — verify this matches how Cell-DINO was actually evaluated).
-- [ ] Record what you found in `docs/architecture.md` (replacing SPEC.md's placeholder assumptions) so this verification isn't silently lost.
+- [x] Read `dinov2/eval/setup.py` and `dinov2/models/vision_transformer.py` against the real `facebookresearch/dinov2` source (commit `7764ea0f912e53c92e82eb78a2a1631e92725fc8`, fetched from GitHub — neither the real `dinov2` repo nor a checkpoint is mounted in this sandbox, unlike the other sibling repos).
+- [x] Corrected `load_cell_dino`'s construction path: the real path goes through `build_model_from_cfg`/`dinov2.eval.setup`, but that needs a full training-style cfg this pipeline doesn't have — **decided** to call the architecture factory (`vision_transformer.vit_large(...)`) directly instead, documented as a deliberate simplification in `docs/architecture.md`.
+- [ ] Confirm the checkpoint's state-dict key (`"teacher"` vs. top-level) against a real `.pth` — **blocked**: no Cell-DINO checkpoint exists anywhere in this environment. `load_cell_dino()` (Story 3.3) implements the real `load_pretrained_weights()` logic (checkpoint-key indexing + `module.`/`backbone.` prefix stripping + non-strict load) verified against source, but this specific sub-item needs a real checkpoint to actually confirm against and stays open.
+- [x] Confirmed the correct pooling operator: `DinoVisionTransformer.forward()` returns the CLS token straight through an identity head, so SPEC.md's mean/max-over-channel-CLS-tokens sketch is correct as written; documented why `channel_adaptive`'s own `get_intermediate_layers` bag-of-channels path (used by the paper's linear-probe scripts) is deliberately not used instead.
+- [x] Recorded all of the above in `docs/architecture.md` (replacing the placeholder).
 
 ### Story 3.2 — Config & dataloader
 - [ ] `EmbedCellsConfig(AppConfig)` implemented per SPEC.md's dataclass (`shard_pattern`, `checkpoint_path`, `arch="vit_large"`, `patch_size=16`, `crop_size=224`, `channel_pool="mean"`, `mask_mode="none"`, `device="cuda"`, `batch_size=256`, `num_workers=4`).
