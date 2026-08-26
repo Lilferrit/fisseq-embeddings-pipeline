@@ -144,11 +144,11 @@ remain unreconciled — left for Epic 9 / Story 9.2, matching `build_dataset.nf`
 *Goal: the no-copy/foreign-key redesign (SPEC.md §3 decision 10) — publish a join key + fitted stats, never a second copy of the embedding matrix.*
 
 ### Story 4.1 — `filter_and_fit_normalizer()`
-- [ ] Inner-joins `embeddings_lf` to `qc_passed_lf` on the composite key (`meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index`).
-- [ ] Calls `variant_classification()` to mark `meta_is_control` (synonymous/untagged).
-- [ ] Fits `Normalizer.from_lazyframe(filtered, fit_only_on_control=True)`.
-- [ ] Returns `filtered_keys` (join key + `meta_is_control`/`meta_aa_changes`/other `meta_*` — **verified to contain zero `emb_*` columns**) and the fitted `Normalizer` — **never** a materialized normalized embedding table.
-- [ ] Unit test asserting `filtered_keys`'s column set contains no `emb_*` columns (this is the single most important regression test for decision 10 — write it before moving on).
+- [x] Inner-joins `embeddings_lf` to `qc_passed_lf` on the composite key (`meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index`).
+- [x] Calls `variant_classification()` to mark `meta_is_control` (synonymous/untagged). **Placement note**: `variant_classification()` was ported into `filter.py` itself (not `utils/variant.py`, not `aggregate.py`) since Epic 4 needs it before Epic 5's `aggregate.py` exists — Epic 5/8 will import it from `.filter` rather than duplicating it, per `utils/variant.py`'s own Epic 0 correction note.
+- [x] Fits `Normalizer.from_lazyframe(filtered, fit_only_on_control=True)`. `Normalizer` itself was vendored unchanged into a new `utils/normalizer.py` (not part of Epic 0 — it wasn't needed until now).
+- [x] Returns `filtered_keys` (join key + `meta_is_control`/`meta_aa_changes`/other `meta_*` — **verified to contain zero `emb_*` columns**) and the fitted `Normalizer` — **never** a materialized normalized embedding table.
+- [x] Unit test asserting `filtered_keys`'s column set contains no `emb_*` columns (this is the single most important regression test for decision 10 — write it before moving on). See `test_filtered_keys_has_no_embedding_columns` in `tests/unit/test_filter.py`.
 
 ### Story 4.2 — `load_filtered_embeddings()` (shared helper)
 - [ ] Joins `embeddings_lf` to `filtered_keys_lf` by composite key, then applies the normalizer.
