@@ -34,6 +34,12 @@ cell_dino_num_workers: 4
 # ── Filter Embeddings (FILTER_EMBEDDINGS, §6.4) ─────────────────────────────
 filter_label_column: "meta_aa_changes"
 
+# ── Aggregation (AGGREGATE_EMBEDDINGS, §6.5) ────────────────────────────────
+# One or more of: mean | median | KS | AUROC. The literal single-element
+# default below keeps aggregate.parquet's columns bare (emb_0000..emb_{D-1});
+# any other selection suffixes columns by method (emb_0000_mean, etc.).
+aggregate_methods: ["median"]
+
 # ── OVWT Distinguish-ability Scores (OVWT_BATCHWISE, §6.6) ──────────────────
 ovwt_n_folds: 5
 ovwt_calibrate: true

@@ -40,20 +40,26 @@ When ``aggregators`` is exactly ``("median",)`` (the default), the
 Output note byte-for-byte and keeping ``EMBEDDING_SELECTOR`` valid for any
 future consumer in the default case. Any other selection (multiple methods,
 or a single non-median method) keeps suffixed columns.
-
-TODO(Epic 5 Story 5.3): AggregateEmbeddingsConfig and the Hydra `main()`
-entry point.
 """
 
 import abc
+import dataclasses
 import logging
+import pathlib
 from collections import Counter
-from typing import ClassVar, Optional, Sequence
+from typing import ClassVar, List, Optional, Sequence
 
+import hydra
 import polars as pl
+from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING, DictConfig, OmegaConf
 
+from .config import AppConfig
+from .filter import load_filtered_embeddings
 from .utils.constants import CONTROL_COLUMN, EMBEDDING_SELECTOR
+from .utils.log import setup_logging
 from .utils.metadata import get_aggregate_meta_data
+from .utils.normalizer import Normalizer
 
 
 class BaseAggregator(abc.ABC):
@@ -467,3 +473,109 @@ def aggregate_embeddings(
     meta_lf = get_aggregate_meta_data(filtered_lf, label_column)
     result_lf = result_lf.join(meta_lf, on=label_column, how="inner")
     return result_lf.collect()
+
+
+@dataclasses.dataclass
+class AggregateEmbeddingsConfig(AppConfig):
+    """
+    Hydra structured configuration for AGGREGATE_EMBEDDINGS.
+
+    Extends AppConfig (output_dir, output_root, log_level, random_seed --
+    SPEC.md §3 decision 11); AGGREGATE_EMBEDDINGS's own logic doesn't
+    consume random_seed itself (every ported aggregator is deterministic),
+    but every stage config inherits it uniformly.
+
+    Attributes
+    ----------
+    embeddings_file : str
+        Path to EMBED_CELLS' embeddings.parquet (Epic 3). Required.
+    filtered_keys_file : str
+        Path to FILTER_EMBEDDINGS' filtered_keys.parquet (Epic 4). Required.
+    normalizer_file : str
+        Path to FILTER_EMBEDDINGS' normalizer.parquet (Epic 4). Required.
+    label_column : str
+        Name of the variant label column. Defaults to ``"meta_aa_changes"``.
+    aggregators : List[str]
+        Aggregation method(s) to run, in order. One or more of ``"mean"``,
+        ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to ``["median"]``,
+        matching SPEC.md's original single-method contract -- output
+        columns are bare ``emb_0000..emb_{D-1}`` only for this exact
+        default; any other selection produces suffixed columns (see
+        :func:`aggregate_embeddings`).
+    """
+
+    embeddings_file: str = MISSING
+    filtered_keys_file: str = MISSING
+    normalizer_file: str = MISSING
+    label_column: str = "meta_aa_changes"
+    aggregators: List[str] = dataclasses.field(default_factory=lambda: ["median"])
+
+
+_cs = ConfigStore.instance()
+_cs.store(name="aggregate_main", node=AggregateEmbeddingsConfig)
+
+
+@hydra.main(version_base=None, config_path=None, config_name="aggregate_main")
+def main(cfg: DictConfig) -> None:
+    """
+    Hydra entry point: aggregate QC-passed, synonymous-corrected embeddings per variant.
+
+    Reads ``embeddings_file``, ``filtered_keys_file``, and
+    ``normalizer_file``, reconstructs the QC-passed, synonymous-corrected
+    embedding table via :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`
+    (Epic 4), calls :func:`aggregate_embeddings`, and writes
+    ``{prefix}aggregate.parquet`` to ``output_dir``. No other file is
+    written -- never a materialized copy of the QC-filtered or normalized
+    embedding matrix itself (SPEC.md §3 decision 10).
+
+    Output file
+    ------------
+    - ``{prefix}aggregate.parquet``
+
+    where ``prefix`` is ``{output_root}.`` when ``output_root`` is set,
+    otherwise empty.
+
+    Configuration
+    -------------
+    Override any field on the command line, e.g.::
+
+        python -m fisseq_embeddings_pipeline.aggregate \\
+            output_dir=./out \\
+            embeddings_file=embeddings.parquet \\
+            filtered_keys_file=filtered_keys.parquet \\
+            normalizer_file=normalizer.parquet \\
+            'aggregators=[mean,median]'
+    """
+    agg_cfg: AggregateEmbeddingsConfig = OmegaConf.to_object(cfg)
+
+    output_dir = pathlib.Path(agg_cfg.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    agg_cfg.output_dir = str(output_dir)
+    setup_logging(agg_cfg, "aggregate")
+
+    prefix = f"{agg_cfg.output_root}." if agg_cfg.output_root is not None else ""
+
+    logging.info("Reading embeddings from %s", agg_cfg.embeddings_file)
+    embeddings_lf = pl.scan_parquet(agg_cfg.embeddings_file)
+    logging.info("Reading filtered keys from %s", agg_cfg.filtered_keys_file)
+    filtered_keys_lf = pl.scan_parquet(agg_cfg.filtered_keys_file)
+    logging.info("Loading normalizer from %s", agg_cfg.normalizer_file)
+    normalizer = Normalizer.load(agg_cfg.normalizer_file)
+
+    logging.info("Reconstructing QC-passed, synonymous-corrected embeddings")
+    filtered_lf = load_filtered_embeddings(embeddings_lf, filtered_keys_lf, normalizer)
+
+    logging.info("Aggregating via %s", agg_cfg.aggregators)
+    agg_df = aggregate_embeddings(
+        filtered_lf, agg_cfg.label_column, agg_cfg.aggregators
+    )
+
+    out_path = output_dir / f"{prefix}aggregate.parquet"
+    logging.info("Writing %s", out_path)
+    agg_df.write_parquet(out_path)
+
+    logging.info("Done")
+
+
+if __name__ == "__main__":
+    main()

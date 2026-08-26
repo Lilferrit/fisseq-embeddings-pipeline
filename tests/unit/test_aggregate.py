@@ -2,13 +2,19 @@
 
 Story 5.1 covers BaseAggregator/ReferenceBasedAggregator/MeanAggregator/
 MedianAggregator/KSAggregator/AUROCAggregator and the _AGGREGATORS registry.
-Ground-truth numerical tests are adapted from fisseq-data-pipeline's
-tests/unit/test_aggregate.py, retargeted from its CellProfiler-style `f1`/
-`f2` feature columns to this pipeline's `emb_0000`/`emb_0001` embedding
-columns (the only columns EMBEDDING_SELECTOR matches).
+Story 5.2 covers aggregate_embeddings() combination/backward-compat. Story
+5.3 covers the Hydra `main()` CLI end-to-end. Ground-truth numerical tests
+are adapted from fisseq-data-pipeline's tests/unit/test_aggregate.py,
+retargeted from its CellProfiler-style `f1`/`f2` feature columns to this
+pipeline's `emb_0000`/`emb_0001` embedding columns (the only columns
+EMBEDDING_SELECTOR matches).
 """
 
 from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -17,6 +23,7 @@ import scipy.stats
 import sklearn.metrics
 
 import fisseq_embeddings_pipeline.aggregate as m
+from fisseq_embeddings_pipeline.filter import JOIN_KEYS, filter_and_fit_normalizer
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -394,3 +401,99 @@ def test_aggregate_embeddings_duplicate_aggregator_raises(
         m.aggregate_embeddings(
             agg_embeddings_lf, "meta_aa_changes", aggregators=("median", "median")
         )
+
+
+# ---------------------------------------------------------------------------
+# main() -- CLI end-to-end (subprocess, mirroring test_filter.py's pattern)
+# ---------------------------------------------------------------------------
+
+
+def _write_cli_fixture(tmp_path: Path) -> "tuple[Path, Path, Path]":
+    """Build embeddings.parquet/filtered_keys.parquet/normalizer.parquet the
+    way FILTER_EMBEDDINGS (Epic 4) would, for a realistic end-to-end input
+    to AGGREGATE_EMBEDDINGS's CLI. A1A is synonymous+untagged (control);
+    M1K/WT are reportable variants; every cell passes QC."""
+    embeddings_df = pl.DataFrame(
+        {
+            "meta_batch": ["batch1"] * 7,
+            "meta_well": ["well1"] * 7,
+            "meta_tile": ["tile0x0y"] * 7,
+            "meta_cell_index": list(range(7)),
+            "meta_barcode": [f"bc{i}" for i in range(7)],
+            "meta_aa_changes": ["A1A", "A1A", "M1K", "M1K", "M1K", "WT", "WT"],
+            "meta_edit_distance": [0] * 7,
+            "emb_0000": [0.0, 1.0, 10.0, 11.0, 12.0, 20.0, 21.0],
+            "emb_0001": [0.0, 2.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        }
+    )
+    qc_passed_df = embeddings_df.select(JOIN_KEYS)
+
+    embeddings_path = tmp_path / "embeddings.parquet"
+    embeddings_df.write_parquet(embeddings_path)
+
+    filtered_keys_lf, normalizer = filter_and_fit_normalizer(
+        embeddings_df.lazy(), qc_passed_df.lazy(), "meta_aa_changes"
+    )
+    filtered_keys_path = tmp_path / "filtered_keys.parquet"
+    filtered_keys_lf.collect().write_parquet(filtered_keys_path)
+    normalizer_path = tmp_path / "normalizer.parquet"
+    normalizer.save(normalizer_path)
+
+    return embeddings_path, filtered_keys_path, normalizer_path
+
+
+def _run_aggregate(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "fisseq_embeddings_pipeline.aggregate", *args],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+
+
+def test_main_runs_end_to_end_via_cli_default(tmp_path: Path) -> None:
+    embeddings_path, filtered_keys_path, normalizer_path = _write_cli_fixture(tmp_path)
+    output_dir = tmp_path / "out"
+
+    result = _run_aggregate(
+        tmp_path,
+        f"output_dir={output_dir}",
+        f"embeddings_file={embeddings_path}",
+        f"filtered_keys_file={filtered_keys_path}",
+        f"normalizer_file={normalizer_path}",
+    )
+    assert result.returncode == 0, result.stderr
+
+    agg = pl.read_parquet(output_dir / "aggregate.parquet")
+    assert "emb_0000" in agg.columns
+    assert "emb_0000_median" not in agg.columns
+    assert "A1A" not in agg["meta_aa_changes"].to_list()
+    assert set(agg["meta_aa_changes"].to_list()) == {"M1K", "WT"}
+
+
+def test_main_runs_end_to_end_via_cli_multi_method(tmp_path: Path) -> None:
+    embeddings_path, filtered_keys_path, normalizer_path = _write_cli_fixture(tmp_path)
+    output_dir = tmp_path / "out"
+
+    result = _run_aggregate(
+        tmp_path,
+        f"output_dir={output_dir}",
+        f"embeddings_file={embeddings_path}",
+        f"filtered_keys_file={filtered_keys_path}",
+        f"normalizer_file={normalizer_path}",
+        "aggregators=[mean,median]",
+    )
+    assert result.returncode == 0, result.stderr
+
+    agg = pl.read_parquet(output_dir / "aggregate.parquet")
+    assert "emb_0000_mean" in agg.columns
+    assert "emb_0000_median" in agg.columns
+    assert "emb_0000" not in agg.columns
+
+
+def test_main_is_hydra_entry_point() -> None:
+    """Sanity check that `main` is importable and hydra-wrapped (the real
+    invocation path is exercised via subprocess above -- hydra.main-wrapped
+    functions parse sys.argv, so they aren't meant to be called directly
+    from a test process)."""
+    assert callable(m.main)
