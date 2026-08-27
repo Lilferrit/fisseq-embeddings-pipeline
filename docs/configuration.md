@@ -2,9 +2,60 @@
 
 Placeholder -- see SPEC.md §6 (per-stage Hydra configs) and params.yaml
 (repo root, every default parameter) until this is written for real
-post-implementation, epic by epic. This page currently only has real
-content for the piece Epic 1 resolved: `BUILD_DATASET`'s WebDataset shard
-sizing.
+post-implementation, epic by epic. This page currently has real content for
+the pieces Epic 1 and Epic 10 resolved: `BUILD_DATASET`'s WebDataset shard
+sizing, and the Docker image's versioning/publishing policy.
+
+## Docker image versioning & publishing (SPEC.md §9.2's Resolved note, Epic 10 Story 10.2)
+
+SPEC.md deliberately left this undecided ("out of scope for the design spec
+itself, revisit alongside CI setup"). Decided here, implemented in
+`.github/workflows/docker.yml`:
+
+- **Registry:** GitHub Container Registry, `ghcr.io/<owner>/<repo>` (derived
+  from the repo's own `${{ github.repository }}` at build time, not
+  hardcoded) -- matches SPEC.md §9.2's own `nextflow.config` sketch, and
+  needs no separate registry account since this is a GitHub-hosted repo.
+- **Tags, on every push to `master`:** `:latest` (moving -- convenience/dev
+  use) and `:<short-sha>` (exact, 7-char commit SHA -- what
+  `params.yaml`'s `container_image` should point at for anything that
+  needs to pin a specific build instead of floating on `:latest`, e.g. a
+  reproducibility-sensitive run).
+- **Tags, on a pushed `v*` git tag** (a real release): additionally
+  `:<version>` (the tag with its `v` prefix stripped, e.g. `v0.1.0` ->
+  `0.1.0`) -- not tied to `pyproject.toml`'s own `version` field
+  automatically; bump that field and push a matching `vX.Y.Z` tag together
+  when cutting a release.
+- **Every PR:** build-only, no push, no registry credentials needed -- a
+  smoke test against Dockerfile regressions. This exact check would have
+  caught two real bugs found (and fixed) while writing this Dockerfile
+  before any real `docker build`/`docker run` pass ever ran against it (see
+  the Epic 10 commit message: `uv sync`'s dependencies-only layer needing
+  `--no-install-project`, and the missing `.venv/bin` `PATH` entry every
+  `modules/local/*.nf` script block's bare `python -m
+  fisseq_embeddings_pipeline.<module>` call depends on).
+
+**Still open, not resolved by this decision:**
+
+- **Not build-verified in this sandbox at all** -- there is no Docker
+  daemon available here (`dockerd` fails to start even under `sudo`: no
+  `CAP_NET_ADMIN`/iptables access, unlike Epic 9's `nextflow`/`java` gap,
+  which a plain package install fixed). Everything below the
+  `apt-get`/CUDA base-image layer in the `Dockerfile` was instead verified
+  by reproducing its exact `COPY`/`RUN` ordering by hand against a scratch
+  directory with `uv` (already installed in this sandbox) -- real, but not
+  a substitute for an actual `docker build`.
+- **GPU stage unverified on a real GPU host** -- `docker run --gpus all` /
+  `nvidia-smi` inside the built image, and `EMBED_CELLS` actually running
+  against a real checkpoint inside the container, both still need a real
+  GPU host + Docker, neither available here.
+- **`.github/workflows/docker.yml` is inert until this repo has a remote**
+  (same situation as `.github/workflows/ci.yml` -- AGENTS.md's Git workflow
+  section) -- added now so the decision above is in place the moment one
+  exists, not run anywhere yet.
+- **CPU-only image split** -- explicitly deferred, not required for v1
+  (SPEC.md §9.2's own note); revisit once real image-pull cost at
+  CPU-only-stage runtime is actually measured.
 
 ## `BUILD_DATASET` shard sizing (SPEC.md §10, item 2)
 
