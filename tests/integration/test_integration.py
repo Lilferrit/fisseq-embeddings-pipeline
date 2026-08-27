@@ -5,15 +5,18 @@ pipeline end-to-end, and output-file/column assertions against the result
 -- not a mock of any individual stage.
 
 Skipped automatically whenever `nextflow` isn't on PATH (`shutil.which`)
--- see SPEC.md §9.3's sketch. This is not merely a CI convenience here:
-this sandbox has neither `nextflow`/`java` nor `docker` installed, so this
-test has never actually been run end-to-end. `-profile local`
-(nextflow.config) sidesteps the container requirement (Epic 9's own
-addition, purely for testability -- see nextflow.config), but there is no
-way to substitute for `nextflow`/`java` itself being absent. Treat this
-file as written-but-unverified until it's run somewhere with both
-installed; IMPLEMENTATION_CHECKLIST.md Epic 9 Story 9.3 records this
-caveat explicitly.
+-- see SPEC.md §9.3's sketch. Originally written blind (Epic 9): the
+sandbox available then had neither `nextflow`/`java` nor `docker`, so this
+file shipped as written-but-unverified. Epic 10's devcontainer rebuild
+(docker-outside-of-docker) turned out to bring `nextflow`/`java` along
+with it -- confirmed via a real `uv run pytest tests/integration` (Epic 11
+Story 11.2): every test in this file, including
+`test_rerunning_with_same_seed_reproduces_ovwt_scores` below (two full,
+independent, from-scratch `nextflow run` invocations), passes for real.
+`-profile local` (nextflow.config) is still what makes this possible
+without a built Docker image -- every process here runs `python -m
+fisseq_embeddings_pipeline.<module>` directly against this repo's own
+venv, not `fisseq-embeddings-pipeline:latest`.
 
 EMBED_CELLS (the one GPU-bound, real-checkpoint-dependent stage) is
 exercised here via a from-scratch, randomly-initialized vit_small
@@ -180,19 +183,15 @@ def _write_tiny_checkpoint(path: Path) -> None:
     torch.save({"teacher": reference.state_dict()}, path)
 
 
-@pytest.fixture(scope="session")
-def pipeline_outputs(tmp_path_factory):
-    if shutil.which("nextflow") is None:
-        pytest.skip("nextflow not on PATH -- see this module's docstring")
-
-    exp_dir = tmp_path_factory.mktemp("nf_experiment")
-    _write_synthetic_experiment(exp_dir)
-
-    checkpoint_path = tmp_path_factory.mktemp("weights") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
+def _run_nextflow(exp_dir: Path, checkpoint_path: Path) -> subprocess.CompletedProcess:
+    """Shared `nextflow run` invocation, factored out of `pipeline_outputs`
+    so `reproducibility_outputs` (below) can drive two independent, fully
+    from-scratch runs against two separate `pipeline_dir`s with identical
+    params (including `random_seed`) -- not two invocations sharing one
+    `pipeline_dir`, which would let the second run's `-resume` cache hit
+    reuse the first run's outputs instead of genuinely recomputing them."""
     params_yaml = _PROJECT_ROOT / "params.yaml"
-    result = subprocess.run(
+    return subprocess.run(
         [
             "nextflow",
             "run",
@@ -214,6 +213,20 @@ def pipeline_outputs(tmp_path_factory):
         text=True,
         timeout=600,
     )
+
+
+@pytest.fixture(scope="session")
+def pipeline_outputs(tmp_path_factory):
+    if shutil.which("nextflow") is None:
+        pytest.skip("nextflow not on PATH -- see this module's docstring")
+
+    exp_dir = tmp_path_factory.mktemp("nf_experiment")
+    _write_synthetic_experiment(exp_dir)
+
+    checkpoint_path = tmp_path_factory.mktemp("weights") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    result = _run_nextflow(exp_dir, checkpoint_path)
     return exp_dir, result
 
 
@@ -325,3 +338,56 @@ def test_global_stage_outputs_exist(pipeline_outputs):
     assert (
         exp_dir / "global" / "distinguishability" / "global_scores.parquet"
     ).exists()
+
+
+@pytest.fixture(scope="session")
+def reproducibility_outputs(tmp_path_factory):
+    """Two independent, fully from-scratch `nextflow run` invocations
+    against the same synthetic experiment fixture and the same
+    `random_seed` (params.yaml's default, 0, unoverridden by
+    `_EXTRA_NF_PARAMS`) -- the test this backs is what actually proves
+    SPEC.md §3 decision 11's reproducibility claim end to end, not just
+    that a `random_seed` field exists and is threaded through (that half is
+    already covered per-stage at the unit level, e.g.
+    tests/unit/test_ovwt.py's seed-plumbing tests). Each run writes into
+    its own from-scratch `pipeline_dir` (a fresh `tmp_path_factory.mktemp`,
+    each with its own freshly-written phenotyping/configs input) so the
+    second run cannot `-resume`-cache-hit the first's outputs -- comparing
+    two runs that both had to fully recompute is the only way this test
+    would fail if determinism actually broke."""
+    if shutil.which("nextflow") is None:
+        pytest.skip("nextflow not on PATH -- see this module's docstring")
+
+    checkpoint_path = tmp_path_factory.mktemp("weights_repro") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    ovwt_results = []
+    for i in range(2):
+        exp_dir = tmp_path_factory.mktemp(f"nf_repro_{i}")
+        _write_synthetic_experiment(exp_dir)
+        result = _run_nextflow(exp_dir, checkpoint_path)
+        assert result.returncode == 0, result.stderr
+        ovwt_results.append(
+            pl.read_parquet(exp_dir / "ovwt_batchwise" / "batch1" / "results.parquet")
+        )
+    return ovwt_results
+
+
+def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs):
+    """SPEC.md §3 decision 11: a fixed `random_seed` makes OVWT_BATCHWISE's
+    per-variant AUROC scores exactly reproducible across independent runs
+    -- not merely structurally identical (same columns, same row count),
+    the actual numeric scores must match, since it's the numbers
+    (auroc_pooled/auroc_median_barcode) downstream analyses actually
+    compare across pipeline versions/reruns."""
+    first, second = reproducibility_outputs
+    first = first.sort("meta_aa_changes")
+    second = second.sort("meta_aa_changes")
+
+    assert first["meta_aa_changes"].to_list() == second["meta_aa_changes"].to_list()
+    assert first["meta_n_barcodes"].to_list() == second["meta_n_barcodes"].to_list()
+    assert first["meta_n_cells"].to_list() == second["meta_n_cells"].to_list()
+    for col in ("auroc_pooled", "auroc_median_barcode"):
+        np.testing.assert_allclose(
+            first[col].to_numpy(), second[col].to_numpy(), err_msg=col
+        )
