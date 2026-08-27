@@ -54,4 +54,6 @@ ovwt_min_cells: 250
 ovwt_downsample_wt: true
 
 # ── Global Variant Embeddings (GLOBAL_VARIANT_EMBEDDINGS, §6.7) ─────────────
-global_variant_embeddings_n_components: 50
+# No n_components entry (revision, per request) -- every retained principal
+# component is always computed and written (median_aggregate.parquet,
+# pca_scores.parquet, pca_components.parquet, pca_variance_explained.parquet).

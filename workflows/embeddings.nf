@@ -39,5 +39,6 @@ workflow EmbeddingsPipeline {
     )
     GLOBAL_VARIANT_DISTINGUISHABILITY(
         ovwt_ch.map { stem, results, cell_scores, models -> results }.collect(),
+        ovwt_ch.map { stem, results, cell_scores, models -> stem }.collect(),
     )
 }

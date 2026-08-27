@@ -152,6 +152,8 @@ fisseq-embeddings-pipeline/
       batches.py                  # vendored from utils/batches.py (load_batches)
       xgbparams.py                # vendored from utils/xgbparams.py
       dimreduction.py             # vendored from utils/dimreduction.py (compute_pca), + random_state passthrough (§6.7)
+      globalfeatureselect.py      # vendored from globalfeatureselect.py (median_across_batches only, §6.7)
+      nextflow_staging.py         # shared stageAs-numbered-filename reconstruction helper (§6.7/§6.8's aggregate.parquet/results.parquet collision)
       log.py                      # vendored from utils/log.py
   docs/
     index.md
@@ -770,34 +772,40 @@ def predict_binary(df: pl.DataFrame, model: xgb.Booster, label_col: str, wt_labe
 
 ### 6.7 Global Variant Embeddings — `GLOBAL_VARIANT_EMBEDDINGS`
 
-**Purpose:** cross-experiment median pooling of each experiment's `Experiment N Aggregates`, then PCA — a direct application of `globalfeatureselect.py`'s `median_across_batches` (vendored unchanged; it already operates on `FEATURE_SELECTOR`-matched columns generically, no CellProfiler assumption baked in) followed by `utils/dimreduction.py`'s `compute_pca`.
+**Purpose:** cross-experiment median pooling of each experiment's `Experiment N Aggregates`, then PCA — a direct application of `globalfeatureselect.py`'s `median_across_batches` (vendored unchanged into `utils/globalfeatureselect.py`; it already operates on `FEATURE_SELECTOR`-matched columns generically, no CellProfiler assumption baked in) followed by `utils/dimreduction.py`'s `compute_pca`.
 
 **Seed note (§3 decision 11):** `compute_pca` gets one small change versus the vendored version — its hardcoded `PCA(n_components=n_components, random_state=0)` becomes a `random_state: int = 0` parameter, called here with `cfg.random_seed`. The original repo's own comment notes this is "defense-in-depth only" (sklearn's PCA only consults `random_state` on the randomized-SVD solver path, which these matrix sizes are unlikely to trigger) — so this doesn't change GLOBAL_VARIANT_EMBEDDINGS' practical determinism, but it does mean this stage's seed comes from the same shared field as every other stage rather than a second hardcoded constant living outside the reproducibility story.
+
+**Revision — no `n_components` knob, three PCA output files instead of two (per request, superseding the two paragraphs this replaces below).** `GlobalVariantEmbeddingsConfig` has no `n_components` field at all. `global_variant_embeddings()` always computes PCA at the full retained rank — `min(n_variants, n_retained_embedding_dims)` after `compute_pca`'s own all-null-feature-column drop — so every component the data can actually support is written, not a fixed subset chosen ahead of time. `compute_pca` itself is untouched (still called with an explicit `n_components` — just one computed at the call site, not exposed as config); the full-rank count is computed locally in `global_embeddings.py` by mirroring `compute_pca`'s own null-column-drop logic (that logic is a private implementation detail of `compute_pca`, not part of its public contract, so it's re-derived rather than imported). Separately, `compute_pca`'s combined `components_df` (loadings **and** `meta_variance_explained`/`meta_cumulative_variance_explained` in one frame) is split into two output frames here: `pca_components.parquet` (loadings only) and a new `pca_variance_explained.parquet` (both variance-explained columns, one row per component) — so the four output files are `median_aggregate.parquet`, `pca_scores.parquet`, `pca_components.parquet`, `pca_variance_explained.parquet`.
 
 ```python
 def global_variant_embeddings(
     batch_aggregate_lfs: list[pl.LazyFrame],
     batch_labels: list[str],
     label_column: str,
-    n_components: int,
     random_seed: int,
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
-    """Median-pool each experiment's per-variant aggregate embedding, then PCA.
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """Median-pool each experiment's per-variant aggregate embedding, then PCA at full retained rank.
 
     median_across_batches is vendored unchanged from
-    fisseq_data_pipeline.globalfeatureselect. compute_pca (.utils.dimreduction)
-    is vendored with one added parameter -- see the seed note above.
+    fisseq_data_pipeline.globalfeatureselect (now utils/globalfeatureselect.py).
+    compute_pca (.utils.dimreduction) is vendored with one added parameter --
+    see the seed note above. No n_components parameter -- see the Revision
+    note above.
     """
     median_df = median_across_batches(batch_aggregate_lfs, label_column, batch_labels)
-    scores_df, components_df = compute_pca(median_df, label_column, n_components, random_state=random_seed)
-    return median_df, scores_df, components_df
+    n_components = _full_rank(median_df, label_column)  # min(n_rows, n_retained_feature_cols)
+    scores_df, full_components_df = compute_pca(median_df, label_column, n_components, random_state=random_seed)
+    variance_df = full_components_df.select(COMPONENT_IDX_COL, VARIANCE_EXPLAINED_COL, CUMULATIVE_VARIANCE_EXPLAINED_COL)
+    components_df = full_components_df.drop(VARIANCE_EXPLAINED_COL, CUMULATIVE_VARIANCE_EXPLAINED_COL)
+    return median_df, scores_df, components_df, variance_df
 ```
 
-Called with `n_components=50` by default (`GlobalVariantEmbeddingsConfig.n_components: int = 50`) — see below — and `random_seed=cfg.random_seed` (inherited from `AppConfig`, §3 decision 11).
+Called with `random_seed=cfg.random_seed` (inherited from `AppConfig`, §3 decision 11). Every contributing experiment's `aggregate.parquet` shares the same filename, so (mirroring `fisseq-data-pipeline`'s own `globalfeatureselect.py` precedent for the identical collision) the Nextflow module stages them via `path(aggregate_parquets, stageAs: "agg_input_*.parquet")` and `global_embeddings.py`'s `main()` reconstructs `agg_input_1.parquet..agg_input_{n}.parquet` positionally against a paired `batch_stems: list[str]` config field, rather than taking an explicit path list.
 
-**Output:** `global/embeddings/median_aggregate.parquet` (pre-PCA, one row per variant across all experiments), `global/embeddings/pca_scores.parquet` (`meta_aa_changes`, `meta_pc_1..meta_pc_{n}`), `global/embeddings/pca_components.parquet` — this is **Global Variant Embeddings**.
+**Output:** `global/embeddings/median_aggregate.parquet` (pre-PCA, one row per variant across all experiments), `global/embeddings/pca_scores.parquet` (`meta_aa_changes`, `meta_pc_1..meta_pc_{n}`), `global/embeddings/pca_components.parquet` (`meta_component_idx` + one column per retained feature holding that component's loading — no variance-explained columns), `global/embeddings/pca_variance_explained.parquet` (`meta_component_idx`, `meta_variance_explained`, `meta_cumulative_variance_explained`) — this is **Global Variant Embeddings**.
 
-**Resolved:** `n_components` defaults to **50**. `compute_pca` requires `n_components <= min(n_variants, n_retained_embedding_dims)`; with a typical experiment set covering thousands of distinct variants against 1024-d ViT-L embeddings, 50 sits comfortably under both bounds while still being in the usual range morphological-profiling pipelines compress to before downstream clustering/UMAP — a reasonable starting point to revisit once real per-component variance-explained curves are in hand (`fisseq-data-pipeline`'s own PCA/UMAP option has no fixed default either — it's per-run there too).
+~~**Resolved:** `n_components` defaults to **50**. ...~~ Superseded by the Revision note above — no default to resolve, since the field no longer exists.
 
 ### 6.8 Global Variant Distinguish-ability Scores — `GLOBAL_VARIANT_DISTINGUISHABILITY`
 
@@ -821,9 +829,9 @@ def global_variant_distinguishability(
     """
     zscored_dfs = []
     for df in batch_score_dfs:
-        classified = variant_classification(df, label_column)  # marks meta_is_control = synonymous
-        normalizer = Normalizer.from_lazyframe(classified.lazy(), fit_only_on_control=True)
-        zscored_dfs.append(normalizer.apply(classified.lazy()).collect())
+        classified = variant_classification(df.lazy(), label_column)  # marks meta_is_control = synonymous
+        normalizer = Normalizer.from_lazyframe(classified, fit_only_on_control=True)
+        zscored_dfs.append(normalizer.apply(classified).collect())
 
     return (
         pl.concat([df.select(label_column, "auroc_pooled", "auroc_median_barcode") for df in zscored_dfs])
@@ -837,6 +845,10 @@ def global_variant_distinguishability(
 ```
 
 **Resolved:** `Normalizer.from_lazyframe` already degrades gracefully for the case an experiment has very few synonymous variants — a near-zero-variance feature (std below `EPS`) is stored as `None` rather than fit, so `.apply()` produces nulls for that column/experiment instead of dividing by ~0, and polars' `.median()` ignores nulls by default — so an experiment with too thin a synonymous population to get a stable z-score silently drops out of that column's pooled median rather than corrupting it, at the cost of no explicit warning surfaced today. Synonymous variants themselves stay in the pooled output post-z-score (centered near 0 by construction) as a sanity-check row, same as every other variant.
+
+**Correction versus this sketch:** `variant_classification` takes a `pl.LazyFrame`, not a `pl.DataFrame` (see `filter.py`, Epic 4 Story 4.1) — the sketch above calls it with `df.lazy()` (fixed inline above), not the raw eager `df`.
+
+Every contributing experiment's OVWT_BATCHWISE `results.parquet` shares the same filename, so — mirroring §6.7's identical `aggregate.parquet` collision — the Nextflow module stages them via `path(results_parquets, stageAs: "res_input_*.parquet")` and `global_distinguishability.py`'s `main()` reconstructs `res_input_1.parquet..res_input_{n}.parquet` positionally against a paired `batch_stems: list[str]` config field (used only for staged-filename reconstruction and logging — `global_variant_distinguishability()` itself needs no per-batch label).
 
 **Output:** `global/distinguishability/global_scores.parquet` (`meta_aa_changes`, `meta_median_auroc_pooled`, `meta_median_auroc_median_barcode`, `meta_num_experiments`) — this is **Global Variant Distinguish-ability Scores**.
 
@@ -1005,7 +1017,9 @@ ovwt_calibrate: true
 ovwt_min_cells: 250
 ovwt_downsample_wt: true
 
-global_variant_embeddings_n_components: 50
+
+# No global_variant_embeddings_n_components entry (§6.7's Revision note) --
+# GLOBAL_VARIANT_EMBEDDINGS always computes PCA at full retained rank.
 ```
 
 **Resolved:** one open question this raises that `fisseq-data-pipeline`'s single-file convention didn't have — a `-params-file params.yaml` invocation is mandatory (there's no `nextflow.config`-embedded fallback if a user forgets `-params-file`), so `main.nf` should fail fast with a clear message if a required param like `pipeline_dir` or `cell_dino_checkpoint` comes back `null`/unset, rather than letting Nextflow's own less-specific "no such property" error surface first.
