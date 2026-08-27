@@ -4,7 +4,8 @@
   "features": {
     "ghcr.io/devcontainers/features/node:1": {},
     "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
-    "ghcr.io/va-h/devcontainers-features/uv:1": {}
+    "ghcr.io/va-h/devcontainers-features/uv:1": {},
+    "ghcr.io/devcontainers/features/java:1": { "version": "17" }
   },
   "mounts": [
     "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
@@ -16,7 +17,7 @@
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
   },
   "containerUser": "vscode",
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && uv sync",
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && uv sync && (cd /tmp && curl -s https://get.nextflow.io | bash) && sudo mv /tmp/nextflow /usr/local/bin/nextflow && sudo chmod +x /usr/local/bin/nextflow",
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "ms-python.python", "charliermarsh.ruff"]

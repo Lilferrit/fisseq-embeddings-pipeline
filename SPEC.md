@@ -937,6 +937,8 @@ Every process above is invoked with `--random_seed` in scope (default from `para
 
 A new `local` profile (`nextflow.config`) sets `docker.enabled = false` / `process.container = null`, purely so `tests/integration/test_integration.py` (§9.3) can run the real pipeline without building `fisseq-embeddings-pipeline:latest` first — the default (no `-profile` flag) is still fully containerized.
 
+**Bug found via a real run (Epic 9)**: `utils/nextflow_staging.py`'s `reconstruct_staged_paths` (§6.7/§6.8) assumed Nextflow always 1-indexes a `path(files, stageAs: "<prefix>_*.parquet")` collection. True for 2+ files, but for exactly **one** staged file — i.e. a single-experiment pipeline run, a real and unremarkable case — Nextflow instead substitutes the pattern's `*` with an empty string (`agg_input_.parquet`, no digit), only switching to 1-indexed numbering once there are 2+ files to disambiguate. Confirmed against a real `nextflow run`; fixed, with regression tests.
+
 ### 7.3 `modules/local/embed_cells.nf` (sketch — the GPU stage)
 
 ```groovy

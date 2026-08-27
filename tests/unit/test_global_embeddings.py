@@ -338,11 +338,16 @@ def _write_staged_aggregate_files(
     tmp_path: Path, batches: list[pl.DataFrame]
 ) -> list[str]:
     """Write batches[i] to agg_input_{i+1}.parquet, mimicking Nextflow's
-    `stageAs: "agg_input_*.parquet"` 1-indexed numbering."""
-    stems = []
-    for i, batch_df in enumerate(batches, start=1):
-        batch_df.write_parquet(tmp_path / f"agg_input_{i}.parquet")
-        stems.append(f"expt{i}")
+    `stageAs: "agg_input_*.parquet"` numbering -- 1-indexed for 2+ files,
+    but a single file is staged bare (`agg_input_.parquet`, no digit --
+    confirmed against a real `nextflow run`, see
+    utils/nextflow_staging.py's docstring)."""
+    stems = [f"expt{i}" for i in range(1, len(batches) + 1)]
+    if len(batches) == 1:
+        batches[0].write_parquet(tmp_path / "agg_input_.parquet")
+    else:
+        for i, batch_df in enumerate(batches, start=1):
+            batch_df.write_parquet(tmp_path / f"agg_input_{i}.parquet")
     return stems
 
 
