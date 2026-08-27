@@ -1,39 +1,28 @@
 name: Docker image
 
-# SPEC.md §9.2's Resolved note left image versioning/publishing undecided;
-# IMPLEMENTATION_CHECKLIST.md Epic 10 Story 10.2 decides it here:
+# Image versioning/publishing policy:
 #
 #   - Registry: GitHub Container Registry, ghcr.io/<owner>/<repo> (derived
-#     from ${{ github.repository }}, not hardcoded -- matches SPEC.md
-#     §9.2's own nextflow.config sketch, natural fit for a GitHub-hosted
-#     repo, no separate registry account to provision).
-#   - Tag scheme, on every push to master: `:latest` (moving) and
+#     from ${{ github.repository }}, not hardcoded -- natural fit for a
+#     GitHub-hosted repo, no separate registry account to provision).
+#   - Tag scheme, on every push to main: `:latest` (moving) and
 #     `:<short-sha>` (exact, reproducible per-commit reference -- what
 #     params.yaml's container_image should point at for anything that
 #     needs to pin a specific build rather than float on `:latest`).
 #     On a pushed `v*` tag (a real release): additionally `:<version>`
 #     (the tag name with its `v` prefix stripped, e.g. `v0.1.0` -> `0.1.0`).
 #   - Every PR: build-only, no push, no registry credentials needed -- a
-#     smoke test against Dockerfile regressions (see this repo's Epic 10
-#     commit message for two real ones this exact kind of check would have
-#     caught before a real GPU-host build/run pass ever ran).
-#
-# Same "inert until a remote exists" situation as .github/workflows/ci.yml
-# (this repo has no remote configured yet -- AGENTS.md's Git workflow
-# section) -- added now so the decision above is already in place the
-# moment one is, not run/verified in this sandbox (no docker daemon
-# available here at all -- see the Dockerfile's own header comment).
-# `master` (not `main`) is this repo's actual default/integration branch.
+#     smoke test against Dockerfile regressions.
 
 on:
   push:
     branches:
-      - master
+      - main
     tags:
       - "v*"
   pull_request:
     branches:
-      - master
+      - main
 
 jobs:
   build:
@@ -50,7 +39,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       # PRs only ever build (catches a broken Dockerfile before merge);
-      # only a push to master or a v* tag pushes an image anywhere.
+      # only a push to main or a v* tag pushes an image anywhere.
       - name: Build (PR -- no push)
         if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v6

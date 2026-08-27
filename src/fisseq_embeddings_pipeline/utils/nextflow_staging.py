@@ -5,8 +5,8 @@ quirk (`AGENTS.md`-cited gotcha, first solved in fisseq-data-pipeline's
 Every per-batch stage in this pipeline writes its output under a fixed
 filename (``aggregate.parquet``, ``results.parquet``, ...) -- fine for one
 experiment, but ``GLOBAL_VARIANT_EMBEDDINGS``/``GLOBAL_VARIANT_DISTINGUISHABILITY``
-(Epics 7-8) each collect one such file *per experiment* into a single task,
-where they'd otherwise collide on name. The real fix lives on the Nextflow
+each collect one such file *per experiment* into a single task, where
+they'd otherwise collide on name. The real fix lives on the Nextflow
 side (`path(files, stageAs: "<prefix>_*.parquet")`, which numbers staged
 files 1-indexed in the same order as the list it received); this helper just
 reconstructs those names on the Python side, positionally paired with
@@ -42,11 +42,10 @@ def reconstruct_staged_paths(n: int, prefix: str) -> List[str]:
         file at all -- it substitutes the ``stageAs`` pattern's ``*`` with
         an empty string, staging it as ``f"{prefix}_.parquet"`` (bare, no
         digit), only switching to 1-indexed numbering once there are 2+
-        files to disambiguate. Confirmed empirically against a real
-        Nextflow run (Epic 9's integration test) -- the original 1-indexed-
-        unconditionally version of this function was wrong for the
-        single-batch pipeline case and would raise ``FileNotFoundError``
-        looking for a ``..._1.parquet`` that Nextflow never wrote.
+        files to disambiguate. Confirmed against a real Nextflow run -- a
+        1-indexed-unconditionally version of this function is wrong for the
+        single-batch pipeline case and raises ``FileNotFoundError`` looking
+        for a ``..._1.parquet`` that Nextflow never wrote.
     """
     if n == 1:
         return [f"{prefix}_.parquet"]

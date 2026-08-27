@@ -1,10 +1,9 @@
-"""Tests for GLOBAL_VARIANT_EMBEDDINGS (SPEC.md §6.7, IMPLEMENTATION_CHECKLIST.md
-Epic 7).
+"""Tests for GLOBAL_VARIANT_EMBEDDINGS.
 
-Story 7.1 covers global_variant_embeddings() -- median pooling then full-rank
-PCA, no n_components knob (revision, per request) -- plus the Hydra `main()`
-CLI end-to-end, including the `stageAs`-numbered staged-file reconstruction
-(``agg_input_1.parquet``, ...) global_embeddings.nf relies on.
+Covers global_variant_embeddings() -- median pooling then full-rank PCA, no
+n_components knob -- plus the Hydra `main()` CLI end-to-end, including the
+`stageAs`-numbered staged-file reconstruction (``agg_input_1.parquet``, ...)
+global_embeddings.nf relies on.
 """
 
 from __future__ import annotations
@@ -66,7 +65,7 @@ def two_batches() -> tuple[pl.LazyFrame, pl.LazyFrame]:
 
 
 # ---------------------------------------------------------------------------
-# global_variant_embeddings() -- Story 7.1
+# global_variant_embeddings()
 # ---------------------------------------------------------------------------
 
 
@@ -92,9 +91,8 @@ def test_global_variant_embeddings_full_rank_not_a_fixed_default(
     two_batches: tuple[pl.LazyFrame, pl.LazyFrame],
 ) -> None:
     """No n_components knob (revision, per request) -- every retained
-    component is computed: min(n_variants=5, n_retained_dims=4) == 4, not
-    SPEC.md's original fixed default of 50 (which 5 rows/4 dims couldn't
-    even support)."""
+    component is computed: min(n_variants=5, n_retained_dims=4) == 4, not a
+    fixed default of 50 (which 5 rows/4 dims couldn't even support)."""
     batch1, batch2 = two_batches
     _, scores_df, components_df, variance_df, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
@@ -125,8 +123,8 @@ def test_global_variant_embeddings_scores_df_columns(
 def test_global_variant_embeddings_components_df_has_no_variance_columns(
     two_batches: tuple[pl.LazyFrame, pl.LazyFrame],
 ) -> None:
-    """Three-file split (revision, per request): pca_components.parquet
-    carries loadings only -- variance-explained lives in its own file."""
+    """pca_components.parquet carries loadings only -- variance-explained
+    lives in its own file."""
     batch1, batch2 = two_batches
     _, _, components_df, _, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
@@ -332,7 +330,7 @@ def test_global_variant_embeddings_raises_on_invalid_cumulative_variance_explain
 
 
 # ---------------------------------------------------------------------------
-# Hydra main() -- Story 7.1's CLI end-to-end
+# Hydra main() -- CLI end-to-end
 # ---------------------------------------------------------------------------
 
 

@@ -1,9 +1,7 @@
-"""Tests for OVWT_BATCHWISE (SPEC.md §6.6, IMPLEMENTATION_CHECKLIST.md Epic 6).
+"""Tests for OVWT_BATCHWISE.
 
-Story 6.1 covers OvwtEmbeddingConfig.
-
-The vendored double-stratified split_indices_stratified() (utils/xgbparams.py,
-Epic 0) needs considerably more cells per (barcode, is_wt) stratum than the
+The vendored double-stratified split_indices_stratified() (utils/xgbparams.py)
+needs considerably more cells per (barcode, is_wt) stratum than the
 outer k-fold split alone -- an inner 80/10/10 stratified split needs ~8-13
 members per class to survive reliably, not just >= n_folds. Fixtures further
 down this test module that exercise the full k-fold + inner-split path are
@@ -35,7 +33,7 @@ from fisseq_embeddings_pipeline.ovwt import (
 from fisseq_embeddings_pipeline.utils.xgbparams import train_binary_xgboost
 
 # ---------------------------------------------------------------------------
-# OvwtEmbeddingConfig (Story 6.1)
+# OvwtEmbeddingConfig
 # ---------------------------------------------------------------------------
 
 
@@ -80,7 +78,7 @@ def test_inherits_random_seed_default():
 
 def test_no_random_state_field():
     """No stage-local random_state -- every stochastic step reads the
-    shared AppConfig.random_seed instead (SPEC.md §3 decision 11)."""
+    shared AppConfig.random_seed instead."""
     assert not hasattr(_cfg(), "random_state")
 
 
@@ -95,7 +93,7 @@ def test_min_cells_can_be_disabled():
 
 
 # ---------------------------------------------------------------------------
-# predict_binary() (Story 6.2)
+# predict_binary()
 # ---------------------------------------------------------------------------
 
 
@@ -140,7 +138,7 @@ def test_predict_binary_returns_one_score_per_row():
 
 
 # ---------------------------------------------------------------------------
-# filter_min_cells / downsample_wildtype (Story 6.3 pre-filtering)
+# filter_min_cells / downsample_wildtype (pre-filtering)
 # ---------------------------------------------------------------------------
 
 
@@ -196,7 +194,7 @@ def test_downsample_wildtype_noop_when_wt_already_smaller():
 
 
 # ---------------------------------------------------------------------------
-# ovwt_batchwise() core loop (Story 6.3)
+# ovwt_batchwise() core loop
 #
 # The vendored double-stratified split_indices_stratified() needs far more
 # cells per (barcode, is_wt) stratum than the outer k-fold alone to survive
@@ -340,7 +338,7 @@ def test_ovwt_batchwise_calibrate_true_gives_calibrators():
 
 
 # ---------------------------------------------------------------------------
-# Stratification edge cases (Story 6.4)
+# Stratification edge cases
 # ---------------------------------------------------------------------------
 
 
@@ -416,7 +414,7 @@ def test_ovwt_batchwise_all_variants_filtered_out_returns_empty_frames():
 
 def _write_cli_fixture(tmp_path: Path) -> "tuple[Path, Path, Path]":
     """Build embeddings.parquet/filtered_keys.parquet/normalizer.parquet the
-    way FILTER_EMBEDDINGS (Epic 4) would. Sized per the same rationale as
+    way FILTER_EMBEDDINGS would. Sized per the same rationale as
     _kfold_fixture_lf above: a handful of synonymous+untagged control cells
     (A1A) to fit the Normalizer, a normal-sized WT barcode, and 2 M1K
     barcodes each large enough to survive the k-fold + inner-split path at

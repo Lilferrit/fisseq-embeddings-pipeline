@@ -1,28 +1,27 @@
-"""AGGREGATE_EMBEDDINGS -- SPEC.md §6.5 (Epic 5).
+"""AGGREGATE_EMBEDDINGS.
 
-Adapted from fisseq-data-pipeline's aggregate.py, generalized beyond
-SPEC.md's original median-only sketch to support any combination of mean,
-median, KS, and AUROC aggregation -- mirroring fisseq-data-pipeline's
-BaseAggregator/ReferenceBasedAggregator class hierarchy (vendored here,
-trimmed down: no per_barcode, no block_list, no WT-null-bootstrap
-null_statistic_transform/null_comparison_statistic machinery -- SPEC.md
-§6.5's own Resolved notes already ruled out per_barcode and WT-null/
-blocklist for v1, and MAD/std/signedKS/QQ/*negLogP aren't requested here;
-add another BaseAggregator subclass + a _AGGREGATORS entry if one of those
-is ever needed later).
+Adapted from fisseq-data-pipeline's aggregate.py, generalized to support any
+combination of mean, median, KS, and AUROC aggregation -- mirroring
+fisseq-data-pipeline's BaseAggregator/ReferenceBasedAggregator class
+hierarchy (vendored here, trimmed down: no per_barcode, no block_list, no
+WT-null-bootstrap null_statistic_transform/null_comparison_statistic
+machinery -- per-dimension reproducibility filtering doesn't obviously
+translate to dense, non-interpretable embedding dimensions the way it does
+to named morphological features, and MAD/std/signedKS/QQ/*negLogP aren't
+needed here; add another BaseAggregator subclass + a _AGGREGATORS entry if
+one of those is ever needed later).
 
-Deliberate deviation from SPEC.md §6.5's literal sketch: every aggregator,
-including mean/median, excludes control (synonymous, untagged) rows before
-grouping by variant -- matching fisseq-data-pipeline's
+Every aggregator, including mean/median, excludes control (synonymous,
+untagged) rows before grouping by variant -- matching fisseq-data-pipeline's
 BaseAggregator._native_aggregate_feature_batch exactly
-(`lf.filter(~CONTROL_COLUMN).group_by(label_col)`), not SPEC.md's literal
-every-row group_by(). This is required structurally for KS/AUROC (comparing
-the reference pool to itself is meaningless) and is applied uniformly here
-as one consistent rule rather than a per-method special case. Literal "WT"
-rows are unaffected (classify_variant("WT") == "WT", never "Synonymous", so
-WT is never marked control) -- only genuinely-synonymous variant labels
-drop out of the per-variant output, since they exist only to define the
-reference baseline, not to be scored against it.
+(`lf.filter(~CONTROL_COLUMN).group_by(label_col)`). This is required
+structurally for KS/AUROC (comparing the reference pool to itself is
+meaningless) and is applied uniformly here as one consistent rule rather
+than a per-method special case. Literal "WT" rows are unaffected
+(classify_variant("WT") == "WT", never "Synonymous", so WT is never marked
+control) -- only genuinely-synonymous variant labels drop out of the
+per-variant output, since they exist only to define the reference baseline,
+not to be scored against it.
 
 `_feature_columns` keys off this pipeline's EMBEDDING_SELECTOR
 (``^emb_\\d+$``) instead of fisseq-data-pipeline's FEATURE_SELECTOR -- the
@@ -36,10 +35,9 @@ columns, so no collision across methods), then joins in
 :func:`fisseq_embeddings_pipeline.utils.metadata.get_aggregate_meta_data`.
 When ``aggregators`` is exactly ``("median",)`` (the default), the
 ``_median`` suffix is stripped before returning, producing bare
-``emb_0000..emb_{D-1}`` columns -- matching SPEC.md's original single-method
-Output note byte-for-byte and keeping ``EMBEDDING_SELECTOR`` valid for any
-future consumer in the default case. Any other selection (multiple methods,
-or a single non-median method) keeps suffixed columns.
+``emb_0000..emb_{D-1}`` columns and keeping ``EMBEDDING_SELECTOR`` valid
+for any future consumer in the default case. Any other selection (multiple
+methods, or a single non-median method) keeps suffixed columns.
 """
 
 import abc
@@ -414,15 +412,14 @@ def aggregate_embeddings(
     filtered_lf : pl.LazyFrame
         QC-passed, synonymous-corrected cell-level embeddings, as returned
         by :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`
-        (Epic 4) -- carries a boolean ``CONTROL_COLUMN`` column, ``emb_*``
+        -- carries a boolean ``CONTROL_COLUMN`` column, ``emb_*``
         embedding-dimension columns, and ``label_column``.
     label_column : str
         Name of the column identifying variant labels.
     aggregators : Sequence[str]
         Aggregation method(s) to run, in the given order. One or more of
         ``"mean"``, ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to
-        ``("median",)``, matching SPEC.md's original single-method
-        contract.
+        ``("median",)``.
 
     Returns
     -------
@@ -480,26 +477,25 @@ class AggregateEmbeddingsConfig(AppConfig):
     """
     Hydra structured configuration for AGGREGATE_EMBEDDINGS.
 
-    Extends AppConfig (output_dir, output_root, log_level, random_seed --
-    SPEC.md §3 decision 11); AGGREGATE_EMBEDDINGS's own logic doesn't
-    consume random_seed itself (every ported aggregator is deterministic),
-    but every stage config inherits it uniformly.
+    Extends AppConfig (output_dir, output_root, log_level, random_seed);
+    AGGREGATE_EMBEDDINGS's own logic doesn't consume random_seed itself
+    (every ported aggregator is deterministic), but every stage config
+    inherits it uniformly.
 
     Attributes
     ----------
     embeddings_file : str
-        Path to EMBED_CELLS' embeddings.parquet (Epic 3). Required.
+        Path to EMBED_CELLS' embeddings.parquet. Required.
     filtered_keys_file : str
-        Path to FILTER_EMBEDDINGS' filtered_keys.parquet (Epic 4). Required.
+        Path to FILTER_EMBEDDINGS' filtered_keys.parquet. Required.
     normalizer_file : str
-        Path to FILTER_EMBEDDINGS' normalizer.parquet (Epic 4). Required.
+        Path to FILTER_EMBEDDINGS' normalizer.parquet. Required.
     label_column : str
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     aggregators : List[str]
         Aggregation method(s) to run, in order. One or more of ``"mean"``,
-        ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to ``["median"]``,
-        matching SPEC.md's original single-method contract -- output
-        columns are bare ``emb_0000..emb_{D-1}`` only for this exact
+        ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to ``["median"]`` --
+        output columns are bare ``emb_0000..emb_{D-1}`` only for this exact
         default; any other selection produces suffixed columns (see
         :func:`aggregate_embeddings`).
     """
@@ -522,11 +518,11 @@ def main(cfg: DictConfig) -> None:
 
     Reads ``embeddings_file``, ``filtered_keys_file``, and
     ``normalizer_file``, reconstructs the QC-passed, synonymous-corrected
-    embedding table via :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`
-    (Epic 4), calls :func:`aggregate_embeddings`, and writes
+    embedding table via :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`,
+    calls :func:`aggregate_embeddings`, and writes
     ``{prefix}aggregate.parquet`` to ``output_dir``. No other file is
     written -- never a materialized copy of the QC-filtered or normalized
-    embedding matrix itself (SPEC.md §3 decision 10).
+    embedding matrix itself.
 
     Output file
     ------------

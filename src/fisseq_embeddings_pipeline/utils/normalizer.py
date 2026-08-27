@@ -1,20 +1,18 @@
 """Z-score normalization statistics, fitted against a control-row subset.
 
 Vendored unchanged from fisseq-data-pipeline's
-src/fisseq_data_pipeline/normalize.py's ``Normalizer`` class (SPEC.md §3
-decision 2 / terminology map row "Filter Embeddings": "normalize.py's
-Normalizer, retargeted to a synonymous control query ... (§3 decision 10)").
-Only the ``NormalizeConfig``/``add_control_indicator_column``/``main`` half
-of the source file is left behind -- this pipeline has no standalone
-NORMALIZE stage; ``Normalizer`` is fit and applied by filter.py (Epic 4)
-against ``meta_is_control`` rows produced by ``variant_classification()``
-rather than a SQL ``control_sample_query``.
+src/fisseq_data_pipeline/normalize.py's ``Normalizer`` class, retargeted to
+a synonymous control query instead of a wildtype one. Only the
+``NormalizeConfig``/``add_control_indicator_column``/``main`` half of the
+source file is left behind -- this pipeline has no standalone NORMALIZE
+stage; ``Normalizer`` is fit and applied by filter.py against
+``meta_is_control`` rows produced by ``variant_classification()`` rather
+than a SQL ``control_sample_query``.
 
 No adaptation was needed for ``FEATURE_SELECTOR`` to work against this
 pipeline's ``emb_*`` columns: it's defined as `cs.exclude("^meta_.*$")` --
 an *exclude* selector, not a CellProfiler-specific allowlist -- so it
-already matches embedding columns with zero changes (SPEC.md §6.4's note
-directly after the ``load_filtered_embeddings()`` sketch).
+already matches embedding columns with zero changes.
 """
 
 import logging

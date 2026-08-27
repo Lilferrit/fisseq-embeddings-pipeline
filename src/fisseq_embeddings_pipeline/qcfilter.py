@@ -1,4 +1,4 @@
-"""QC_FILTER -- SPEC.md §6.2 (Epic 2).
+"""QC_FILTER.
 
 Vendored close to verbatim from fisseq-data-pipeline's
 src/fisseq_data_pipeline/qcfilter.py -- same edit-distance / barcode-count /
@@ -6,14 +6,16 @@ variant-barcode-count filters, same n_variants variant-selection cap, same
 QcFilterConfig fields (bc_threshold=10, variant_bc_threshold=4,
 edit_distance_threshold=1 defaults), with the
 downsample_amounts/downsample_classes/downsample_seed pseudo-variant
-machinery dropped (SPEC.md §6.2's Resolved note). Hydra entry point
+machinery dropped: per-dimension reproducibility filtering doesn't
+obviously translate to dense, non-interpretable embedding dimensions the
+way it does to named morphological features. Hydra entry point
 (`python -m fisseq_embeddings_pipeline.qcfilter`), backing the Nextflow
 process QC_FILTER (modules/local/qc_filter.nf). Reads BUILD_DATASET's
-metadata.parquet (Epic 1) as `cell_files` instead of the raw CSV the
-upstream source expects -- see the two deviations below.
+metadata.parquet as `cell_files` instead of the raw CSV the upstream
+source expects -- see the two deviations below.
 
 Two deviations from the upstream source, beyond the dropped downsample
-machinery (see IMPLEMENTATION_CHECKLIST.md Epic 2 for the full writeup):
+machinery:
 
 1. `barcode_col_name`/`aa_changes_col_name`/`edit_distance_col_name` default
    to `"meta_barcode"`/`"meta_aa_changes"`/`"meta_edit_distance"` instead of
@@ -25,8 +27,8 @@ machinery (see IMPLEMENTATION_CHECKLIST.md Epic 2 for the full writeup):
    unaffected: renaming a column to its own existing name is a harmless
    no-op in Polars.
 2. `select_variants`'s `mode="random"` seed comes from `cfg.random_seed`
-   (inherited from AppConfig, SPEC.md §3 decision 11) rather than the
-   dropped `downsample_seed` field.
+   (inherited from AppConfig, the one seed field shared by every stage)
+   rather than the dropped `downsample_seed` field.
 
 `read_file` also gains an explicit `else: raise ValueError(...)` for an
 unrecognized file suffix -- the upstream `if`/`elif` has no `else`, so an
@@ -63,15 +65,15 @@ class QcFilterConfig(AppConfig):
     """
     Hydra structured configuration for QC_FILTER.
 
-    Extends AppConfig (output_dir, output_root, log_level, random_seed --
-    SPEC.md §3 decision 11); `select_variants`'s "random" mode is the only
-    place this stage consumes random_seed.
+    Extends AppConfig (output_dir, output_root, log_level, random_seed);
+    `select_variants`'s "random" mode is the only place this stage consumes
+    random_seed.
 
     Attributes
     ----------
     cell_files : Any
         Path or list of paths to cell data files (CSV or Parquet) -- in
-        practice, BUILD_DATASET's metadata.parquet (Epic 1).
+        practice, BUILD_DATASET's metadata.parquet.
     bc_threshold : int
         Minimum number of cells required for a barcode to pass QC.
         Defaults to ``10``.
@@ -135,7 +137,7 @@ class QcFilterConfig(AppConfig):
     variant_allow_list_file: Optional[str] = None
 
 
-# --- read_file / combine_cell_files (Story 2.1) ---
+# --- read_file / combine_cell_files ---
 
 
 def read_file(cell_file_path: pathlib.Path) -> pl.LazyFrame:
@@ -204,7 +206,7 @@ def combine_cell_files(cell_files: Iterable[PathLike]) -> pl.LazyFrame:
     return pl.concat([read_file(pathlib.Path(cell_file)) for cell_file in cell_files])
 
 
-# --- filter_columns (Story 2.1) ---
+# --- filter_columns ---
 
 
 def filter_columns(lf: pl.LazyFrame, cfg: QcFilterConfig) -> pl.LazyFrame:
@@ -251,7 +253,7 @@ def filter_columns(lf: pl.LazyFrame, cfg: QcFilterConfig) -> pl.LazyFrame:
     return lf.select(pl.col(meta_columns + cell_profiler_columns))
 
 
-# --- get_barcode_counts / get_barcodes_per_variant / add_qc_queries (Story 2.1) ---
+# --- get_barcode_counts / get_barcodes_per_variant / add_qc_queries ---
 
 
 def get_barcode_counts(lf: pl.LazyFrame, cfg: QcFilterConfig) -> pl.LazyFrame:
@@ -384,7 +386,7 @@ def add_qc_queries(
     return lf, barcode_count_lf, variants_per_barcode_lf
 
 
-# --- select_variants (Story 2.1) ---
+# --- select_variants ---
 
 
 def select_variants(

@@ -1,9 +1,9 @@
 """Tests for utils/nextflow_staging.py's reconstruct_staged_paths -- the
 positional-reconstruction half of the `stageAs: "<prefix>_*.parquet"`
-same-filename-collision workaround (Epics 7-8, SPEC.md §6.7/§6.8).
+same-filename-collision workaround.
 
 The n == 1 case is a regression guard: confirmed empirically against a
-real `nextflow run` (Epic 9's integration test) that Nextflow does *not*
+real `nextflow run` that Nextflow does *not*
 number a single staged file at all -- it substitutes the pattern's `*`
 with an empty string (`agg_input_.parquet`), only switching to 1-indexed
 numbering (`agg_input_1.parquet`, `agg_input_2.parquet`, ...) once there

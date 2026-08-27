@@ -1,16 +1,15 @@
 """Shared column-name constants and Polars selectors used across the pipeline.
 
 Vendored unchanged from fisseq-data-pipeline's
-src/fisseq_data_pipeline/utils/constants.py (SPEC.md §3 decision 2) --
-defines the ``meta_*`` column name constants and the ``FEATURE_SELECTOR`` /
-``META_SELECTOR`` Polars selectors distinguishing feature columns from
-metadata columns, plus the floating-point epsilon used for near-zero-
-variance checks.
+src/fisseq_data_pipeline/utils/constants.py -- defines the ``meta_*``
+column name constants and the ``FEATURE_SELECTOR`` / ``META_SELECTOR``
+Polars selectors distinguishing feature columns from metadata columns,
+plus the floating-point epsilon used for near-zero-variance checks.
 
 One addition versus the vendored source: ``EMBEDDING_SELECTOR``, matching
-this pipeline's zero-padded ``emb_%04d`` embedding-dimension columns
-(SPEC.md §6.3's Output note) the same way ``FEATURE_SELECTOR`` matches
-CellProfiler's upper-case-plus-underscore columns in the source repo.
+this pipeline's zero-padded ``emb_%04d`` embedding-dimension columns the
+same way ``FEATURE_SELECTOR`` matches CellProfiler's upper-case-plus-
+underscore columns in the source repo.
 """
 
 from typing import Any

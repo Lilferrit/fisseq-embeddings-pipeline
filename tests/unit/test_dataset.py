@@ -1,4 +1,4 @@
-"""Tests for BUILD_DATASET (SPEC.md §6.1, IMPLEMENTATION_CHECKLIST.md Epic 1)."""
+"""Tests for BUILD_DATASET."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from fisseq_embeddings_pipeline.utils.constants import (
 )
 
 # ---------------------------------------------------------------------------
-# discover_tiles (Story 1.1)
+# discover_tiles
 # ---------------------------------------------------------------------------
 
 
@@ -144,7 +144,7 @@ def test_discover_tiles_empty_when_phenotyping_dir_has_no_matching_tiles(
 
 
 # ---------------------------------------------------------------------------
-# _crop_cell (Story 1.4) -- the ported make_cell_images crop-window algorithm
+# _crop_cell -- the ported make_cell_images crop-window algorithm
 # ---------------------------------------------------------------------------
 
 NUM_CHANNELS = 3
@@ -220,7 +220,7 @@ def test_crop_cell_matches_independent_pad_based_oracle(cx: int, cy: int):
 
 
 # ---------------------------------------------------------------------------
-# write_dataset_shards (Story 1.2 / 1.4)
+# write_dataset_shards
 # ---------------------------------------------------------------------------
 
 

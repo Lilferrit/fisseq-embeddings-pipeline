@@ -1,11 +1,9 @@
-// SPEC.md §7.3 -- the GPU stage (Epic 9, depends on Epic 3's embed.py).
-// container "${params.container_image}" and a trailing
-// random_seed=${params.random_seed} are the two additions every module
-// picks up versus fisseq-data-pipeline's modules (§3 decisions 11 & 13).
-// The `channels=[...]`/`channel_apply_mask=[...]` list interpolation below
-// mirrors aggregate_embeddings.nf's `aggregators=[...]` precedent (Story
-// 5.3) -- unverified Groovy-interpolation half until Epic 9's real
-// Nextflow run, same caveat as that precedent.
+// EMBED_CELLS, the pipeline's only GPU-bound stage. container
+// "${params.container_image}" and a trailing random_seed=${params.random_seed}
+// are the two additions every module picks up versus fisseq-data-pipeline's
+// modules. The `channels=[...]`/`channel_apply_mask=[...]` list
+// interpolation below mirrors aggregate_embeddings.nf's `aggregators=[...]`
+// precedent.
 
 process EMBED_CELLS {
     errorStrategy 'ignore'

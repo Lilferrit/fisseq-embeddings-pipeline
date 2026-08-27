@@ -1,27 +1,18 @@
-"""Integration test for the Nextflow pipeline (SPEC.md §9.3, Epic 9 Story
-9.3). Modeled on fisseq-data-pipeline's tests/integration/test_integration.py:
-a synthetic fixture, a subprocess-driven `nextflow run` of the real
-pipeline end-to-end, and output-file/column assertions against the result
--- not a mock of any individual stage.
+"""Integration test for the Nextflow pipeline. Modeled on
+fisseq-data-pipeline's tests/integration/test_integration.py: a synthetic
+fixture, a subprocess-driven `nextflow run` of the real pipeline
+end-to-end, and output-file/column assertions against the result -- not a
+mock of any individual stage.
 
-Skipped automatically whenever `nextflow` isn't on PATH (`shutil.which`)
--- see SPEC.md §9.3's sketch. Originally written blind (Epic 9): the
-sandbox available then had neither `nextflow`/`java` nor `docker`, so this
-file shipped as written-but-unverified. Epic 10's devcontainer rebuild
-(docker-outside-of-docker) turned out to bring `nextflow`/`java` along
-with it -- confirmed via a real `uv run pytest tests/integration` (Epic 11
-Story 11.2): every test in this file, including
-`test_rerunning_with_same_seed_reproduces_ovwt_scores` below (two full,
-independent, from-scratch `nextflow run` invocations), passes for real.
-`-profile local` (nextflow.config) is still what makes this possible
-without a built Docker image -- every process here runs `python -m
+Skipped automatically whenever `nextflow` isn't on PATH (`shutil.which`).
+`-profile local` (nextflow.config) is what makes this runnable without a
+built Docker image -- every process here runs `python -m
 fisseq_embeddings_pipeline.<module>` directly against this repo's own
 venv, not `fisseq-embeddings-pipeline:latest`.
 
 EMBED_CELLS (the one GPU-bound, real-checkpoint-dependent stage) is
 exercised here via a from-scratch, randomly-initialized vit_small
-checkpoint saved to a temp file, `device=cpu` -- option (a) from SPEC.md
-§9.3's "Resolved" note on this exact problem, matching the precedent
+checkpoint saved to a temp file, `device=cpu`, matching the precedent
 already established at the unit-test level in tests/unit/test_embed.py's
 `test_main_runs_end_to_end_via_cli`. This exercises the wrapper's real
 control flow (weight loading, forward pass, shape handling), not
@@ -137,8 +128,8 @@ def _write_tile(
 
 def _write_synthetic_experiment(exp_dir: Path) -> Path:
     """Write a tiny synthetic phenotyping_dir + configs/batch1.yaml under
-    exp_dir, matching BUILD_DATASET's real input contract (SPEC.md §5.1/
-    §5.2/§6.1) closely enough to run end to end. Returns exp_dir."""
+    exp_dir, matching BUILD_DATASET's real input contract closely enough
+    to run end to end. Returns exp_dir."""
     phenotyping_dir = exp_dir / "phenotyping"
     tile_dir = phenotyping_dir / "well1_grid1" / "tile0x0y"
 
@@ -247,8 +238,8 @@ def test_dataset_and_embeddings_produced(pipeline_outputs):
 
 
 def test_filter_embeddings_has_no_embedding_columns(pipeline_outputs):
-    """SPEC.md §3 decision 10: filtered_keys.parquet must never carry
-    emb_* columns, only the join key + classification."""
+    """filtered_keys.parquet must never carry emb_* columns, only the
+    join key + classification."""
     exp_dir, _ = pipeline_outputs
     df = pl.read_parquet(
         exp_dir / "filter_embeddings" / "batch1" / "filtered_keys.parquet"
@@ -267,8 +258,8 @@ def test_aggregate_and_ovwt_outputs_exist(pipeline_outputs):
 
 
 def test_fails_fast_when_pipeline_dir_missing(tmp_path):
-    """SPEC.md §9.1's Resolved note / Epic 10 Story 10.1: a required-with-
-    no-default param left unset must fail with EmbeddingsPipeline's own
+    """A required-with-no-default param left unset must fail with
+    EmbeddingsPipeline's own
     specific message, not Nextflow's generic 'no such property' error --
     and it must fail before scheduling any process (no synthetic fixture
     needed here, unlike pipeline_outputs above)."""
@@ -345,9 +336,9 @@ def reproducibility_outputs(tmp_path_factory):
     """Two independent, fully from-scratch `nextflow run` invocations
     against the same synthetic experiment fixture and the same
     `random_seed` (params.yaml's default, 0, unoverridden by
-    `_EXTRA_NF_PARAMS`) -- the test this backs is what actually proves
-    SPEC.md §3 decision 11's reproducibility claim end to end, not just
-    that a `random_seed` field exists and is threaded through (that half is
+    `_EXTRA_NF_PARAMS`) -- the test this backs is what actually proves the
+    reproducibility claim end to end, not just that a `random_seed` field
+    exists and is threaded through (that half is
     already covered per-stage at the unit level, e.g.
     tests/unit/test_ovwt.py's seed-plumbing tests). Each run writes into
     its own from-scratch `pipeline_dir` (a fresh `tmp_path_factory.mktemp`,
@@ -374,7 +365,7 @@ def reproducibility_outputs(tmp_path_factory):
 
 
 def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs):
-    """SPEC.md §3 decision 11: a fixed `random_seed` makes OVWT_BATCHWISE's
+    """A fixed `random_seed` makes OVWT_BATCHWISE's
     per-variant AUROC scores exactly reproducible across independent runs
     -- not merely structurally identical (same columns, same row count),
     the actual numeric scores must match, since it's the numbers

@@ -1,7 +1,7 @@
 """Tests for utils/vectors.py's compute_impact_score/compute_cosine_distance --
-vendored from fisseq-data-pipeline's utils/vectors.py (SPEC.md §6.7's
-Revision note on GLOBAL_VARIANT_EMBEDDINGS' pca_reduced.parquet output).
-Only these two functions are vendored -- see this module's docstring.
+vendored from fisseq-data-pipeline's utils/vectors.py, used by
+GLOBAL_VARIANT_EMBEDDINGS' pca_reduced.parquet output. Only these two
+functions are vendored -- see this module's docstring.
 
 test_global_embeddings.py covers the reduced-PC-matrix use case end to end;
 this module covers compute_impact_score's own contract directly.

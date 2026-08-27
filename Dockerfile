@@ -1,16 +1,11 @@
-# Dockerfile -- single image every Nextflow process runs in (SPEC.md §9.2 /
-# §3 decision 13). One CUDA-capable base serves CPU-only stages too (simpler
-# to build/publish as one artifact); revisit splitting into a CPU + GPU image
-# later if the pull cost matters in practice -- see IMPLEMENTATION_CHECKLIST.md
-# Epic 10 Story 10.2.
+# Dockerfile -- single image every Nextflow process runs in. One
+# CUDA-capable base serves CPU-only stages too (simpler to build/publish as
+# one artifact); revisit splitting into a CPU + GPU image later if the pull
+# cost matters in practice.
 #
 # Build-verified for real (docker build + docker run against every stage's
-# CLI entry point) once this devcontainer got docker-outside-of-docker
-# access to the host's real Docker daemon -- see the Epic 10 commit
-# messages for the bugs a real `docker build`/`docker run` pass caught
-# (beyond the two found earlier by hand-simulating the COPY/RUN layering
-# without a daemon). Still not run with `--gpus all` on an actual GPU host
-# -- this devcontainer's host has none.
+# CLI entry point) against the host's real Docker daemon. Not run with
+# `--gpus all` on an actual GPU host.
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -56,8 +51,7 @@ RUN uv sync --frozen --no-install-project --no-dev
 
 # Now install the project itself -- the deps layer above stays cached across
 # source-only changes. dinov2 needs no separate vendoring/installation step
-# here (this comment used to carry an Epic 3/SPEC.md §6.3 TODO to that
-# effect): it's vendored as pure-torch source directly under
+# here: it's vendored as pure-torch source directly under
 # src/fisseq_embeddings_pipeline/vendor/dinov2/ (see that directory's
 # VENDORED_FROM.md for why and what), so it's part of this package and
 # installs with it -- no xformers/cuml/git-dependency wrangling needed.

@@ -1,13 +1,13 @@
 [project]
 name = "fisseq-embeddings-pipeline"
 version = "0.1.0"
-description = "Nextflow + Python pipeline for learned (Cell-DINO) cell embeddings and variant distinguish-ability scoring -- sibling to fisseq-data-pipeline, retargeted from CellProfiler features to embeddings. See SPEC.md."
+description = "Nextflow + Python pipeline for learned (Cell-DINO) cell embeddings and variant distinguish-ability scoring -- sibling to fisseq-data-pipeline, retargeted from CellProfiler features to embeddings."
 readme = "README.md"
 authors = [
     { email = "gwynneth.idk@gmail.com" }
 ]
-# Upper bound is deliberate, not just a floor (Epic 10 Story 10.2 finding):
-# hydra-core 1.3.x's get_args_parser() crashes outright on Python 3.14's
+# Upper bound is deliberate, not just a floor: hydra-core 1.3.x's
+# get_args_parser() crashes outright on Python 3.14's
 # stricter argparse _check_help (TypeError: argument of type
 # 'LazyCompletionHelp' is not a container or iterable) -- confirmed via a
 # real `docker build` resolving 3.14 in the absence of a copied
@@ -27,11 +27,11 @@ dependencies = [
     "tqdm>=4.67.3",
     "webdataset>=0.2.111",
     "xgboost>=2.0.0",
-    # torch + dinov2 (EMBED_CELLS / Cell-DINO, §6.3): torch is pip-installable
+    # torch + dinov2 (EMBED_CELLS / Cell-DINO): torch is pip-installable
     # (pinned to match your CUDA toolkit -- see README's GPU install note);
-    # dinov2 itself is not on PyPI and must be vendored/installed from
-    # https://github.com/facebookresearch/dinov2 directly -- see
-    # IMPLEMENTATION_CHECKLIST.md Epic 3.
+    # dinov2 itself is not on PyPI and is vendored directly under
+    # src/fisseq_embeddings_pipeline/vendor/dinov2/ -- see that directory's
+    # VENDORED_FROM.md.
     "torch>=2.4.0",
 ]
 
@@ -40,18 +40,17 @@ testpaths = ["tests/unit", "tests/integration"]
 
 [tool.ruff]
 # ruff>=0.16 formats Python code fences embedded in Markdown by default,
-# which would otherwise rewrite SPEC.md's/docs/*.md's illustrative code
-# sketches every time `ruff format .` runs (fisseq-data-pipeline doesn't
-# hit this since it happens to be locked to ruff 0.15.12). Excluded
-# entirely rather than relying on a version pin, so this repo's docs stay
-# untouched by lint/format tooling regardless of which ruff version
-# resolves.
+# which would otherwise rewrite docs/*.md's illustrative code examples
+# every time `ruff format .` runs (fisseq-data-pipeline doesn't hit this
+# since it happens to be locked to ruff 0.15.12). Excluded entirely rather
+# than relying on a version pin, so this repo's docs stay untouched by
+# lint/format tooling regardless of which ruff version resolves.
 #
-# src/fisseq_embeddings_pipeline/vendor/ (Epic 3, SPEC.md §6.3) holds
-# third-party dinov2 source kept as close to byte-identical upstream as
-# possible (see vendor/dinov2/VENDORED_FROM.md) -- excluded so ruff's
-# import-sort/format rules don't drift it further from upstream than the
-# one documented, deliberate line change.
+# src/fisseq_embeddings_pipeline/vendor/ holds third-party dinov2 source
+# kept as close to byte-identical upstream as possible (see
+# vendor/dinov2/VENDORED_FROM.md) -- excluded so ruff's import-sort/format
+# rules don't drift it further from upstream than the one documented,
+# deliberate line change.
 extend-exclude = ["*.md", "src/fisseq_embeddings_pipeline/vendor"]
 
 [tool.ruff.lint]

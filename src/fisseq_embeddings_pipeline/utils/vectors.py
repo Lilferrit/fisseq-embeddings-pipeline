@@ -1,12 +1,12 @@
 """Cosine-distance-based impact score for per-variant feature vectors.
 
-Vendored from fisseq-data-pipeline's src/fisseq_data_pipeline/utils/vectors.py
-(SPEC.md §6.7's Revision note on GLOBAL_VARIANT_EMBEDDINGS' new
-``pca_reduced.parquet`` output). Only :func:`compute_cosine_distance` (a
-dependency of :func:`compute_impact_score`) and :func:`compute_impact_score`
-itself are vendored -- :func:`compute_norm`/:func:`compute_query_dot`
-(nearest-neighbor-search helpers in the source file) aren't used anywhere in
-this pipeline and aren't vendored.
+Vendored from fisseq-data-pipeline's src/fisseq_data_pipeline/utils/vectors.py,
+used by GLOBAL_VARIANT_EMBEDDINGS' ``pca_reduced.parquet`` output. Only
+:func:`compute_cosine_distance` (a dependency of :func:`compute_impact_score`)
+and :func:`compute_impact_score` itself are vendored --
+:func:`compute_norm`/:func:`compute_query_dot` (nearest-neighbor-search
+helpers in the source file) aren't used anywhere in this pipeline and
+aren't vendored.
 """
 
 import polars as pl

@@ -1,11 +1,9 @@
 """Per-variant metadata aggregation helpers.
 
 Vendored unchanged from fisseq-data-pipeline's
-src/fisseq_data_pipeline/utils/metadata.py (SPEC.md §3 decision 2 /
-terminology map row "Aggregation (Synonymous STD Corrected)": "aggregate.py's
-MedianAggregator + get_aggregate_meta_data"). Defines
-:func:`get_aggregate_meta_data`, used by AGGREGATE_EMBEDDINGS (Epic 5) to
-attach per-variant cell counts and barcode/batch frequency summaries to its
+src/fisseq_data_pipeline/utils/metadata.py. Defines
+:func:`get_aggregate_meta_data`, used by AGGREGATE_EMBEDDINGS to attach
+per-variant cell counts and barcode/batch frequency summaries to its
 output.
 """
 

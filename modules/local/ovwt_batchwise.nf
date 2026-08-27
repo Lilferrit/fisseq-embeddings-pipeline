@@ -1,17 +1,9 @@
-// SPEC.md §6.6 -- OVWT_BATCHWISE (Epic 6). Same three-input shape as
-// aggregate_embeddings.nf (§3 decision 10); k-fold CV controlled by
-// ovwt_n_folds/ovwt_calibrate, all randomness from random_seed (§3 decision 11).
-// Wired into workflows/embeddings.nf (Epic 9); confirmed against a real
-// `nextflow -profile local` run (Epic 9 Story 9.3).
-//
-// Epic 10 fix: `label_column`/`wt_label` were previously left off this
-// script block entirely, so OVWT_BATCHWISE silently used OvwtEmbeddingConfig's
-// own Hydra defaults ("meta_aa_changes"/"WT") no matter what params.yaml
-// said -- harmless while every default happened to agree, but a latent trap
-// the moment `filter_label_column` was ever overridden (every other stage
-// -- FILTER_EMBEDDINGS/AGGREGATE_EMBEDDINGS/the two global stages -- already
-// keyed off it). `label_column` now reuses that same param;
-// `wt_label` gets its own `ovwt_wt_label` (default "WT", SPEC.md §6.6).
+// OVWT_BATCHWISE. Same three-input shape as aggregate_embeddings.nf;
+// k-fold CV controlled by ovwt_n_folds/ovwt_calibrate, all randomness from
+// random_seed. `label_column` reuses the same `filter_label_column` param
+// every other stage (FILTER_EMBEDDINGS/AGGREGATE_EMBEDDINGS/the two global
+// stages) keys off, so overriding it changes every stage's label column
+// together; `wt_label` gets its own `ovwt_wt_label` (default "WT").
 
 process OVWT_BATCHWISE {
     errorStrategy 'ignore'

@@ -1,4 +1,4 @@
-"""Tests for utils/metadata.py's get_aggregate_meta_data (SPEC.md §6.5, Epic 5).
+"""Tests for utils/metadata.py's get_aggregate_meta_data.
 
 Ported unchanged (only the import path retargeted) from fisseq-data-pipeline's
 tests/unit/utils/test_metadata.py.

@@ -1,4 +1,4 @@
-"""Tests for utils/normalizer.py's Normalizer (SPEC.md §6.4, Epic 4 Story 4.1).
+"""Tests for utils/normalizer.py's Normalizer.
 
 Ported from fisseq-data-pipeline's tests/unit/test_normalize.py -- only the
 Normalizer-specific tests (from_lazyframe/apply/save/load); that source

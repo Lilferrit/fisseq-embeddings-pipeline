@@ -1,7 +1,6 @@
-// SPEC.md §6.1 / §7 -- BUILD_DATASET (Epic 1). Reads a per-experiment
-// config (phenotyping_dir, wells, grid_size, segmentation_type,
-// use_corrected, window, shard_maxcount, barcode_col_name,
-// aa_changes_col_name, edit_distance_col_name) from
+// BUILD_DATASET. Reads a per-experiment config (phenotyping_dir, wells,
+// grid_size, segmentation_type, use_corrected, window, shard_maxcount,
+// barcode_col_name, aa_changes_col_name, edit_distance_col_name) from
 // <pipeline_dir>/configs/<batch>.yaml.
 //
 // dataset.py's `hydra.main` is registered with a fixed

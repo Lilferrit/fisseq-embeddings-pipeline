@@ -1,19 +1,17 @@
-"""OVWT_BATCHWISE -- SPEC.md §6.6 (Epic 6).
+"""OVWT_BATCHWISE.
 
 Adapted from fisseq-data-pipeline's ovwt.py + utils/xgbparams.py, but with
 ovwt.py's single 80/10/10 train/val/test split replaced by k-fold
 cross-validation stratified jointly on (meta_barcode, is_wt), producing an
 out-of-fold score for every cell plus two distinguish-ability numbers per
-variant (auroc_pooled, auroc_median_barcode) -- see SPEC.md §6.6 for the
-full ovwt_batchwise()/predict_binary() sketch, including the one vendored
-line that must change (train_binary_xgboost's `cfg.random_state` ->
-`cfg.random_seed`, SPEC.md §3 decision 11) -- already applied inside
-utils/xgbparams.py (Epic 0).
+variant (auroc_pooled, auroc_median_barcode). The one vendored line that
+had to change from the upstream source is train_binary_xgboost's
+`cfg.random_state` -> `cfg.random_seed` (this pipeline's single shared seed
+field on AppConfig) -- already applied inside utils/xgbparams.py.
 
 `ovwt_batchwise()`'s per-variant results use ``cfg.label_column`` as the
-output column name (not a hardcoded ``"meta_aa_changes"`` literal, unlike
-SPEC.md §6.6's sketch) -- consistent with Epic 5's `aggregate_embeddings()`,
-which does the same.
+output column name (not a hardcoded ``"meta_aa_changes"`` literal) --
+consistent with `aggregate_embeddings()`, which does the same.
 """
 
 import dataclasses
@@ -48,9 +46,9 @@ from .utils.xgbparams import (
 # Minimum members a (barcode, is_wt) stratum needs before StratifiedKFold's
 # outer split (below) is guaranteed not to raise. This does NOT guarantee
 # split_indices_stratified's *inner* 80/10/10 nested split (run per fold)
-# survives on a very small bucket -- that failure mode is caught by
-# ovwt_batchwise()'s per-variant try/except instead (SPEC.md §6.6's open
-# risk note: safe stratum sizes are data-dependent, not hard-coded here).
+# survives on a very small bucket -- safe stratum sizes are data-dependent,
+# not hard-coded here, so that failure mode is caught by
+# ovwt_batchwise()'s per-variant try/except instead.
 _MIN_STRATUM_SIZE = 10
 
 
@@ -59,9 +57,9 @@ class OvwtEmbeddingConfig(AppConfig):
     """
     Hydra structured configuration for OVWT_BATCHWISE.
 
-    Extends AppConfig (output_dir, output_root, log_level, random_seed --
-    SPEC.md §3 decision 11); every stochastic step below (StratifiedKFold's
-    shuffle, split_indices_stratified's inner fit/calibration split, and
+    Extends AppConfig (output_dir, output_root, log_level, random_seed);
+    every stochastic step below (StratifiedKFold's shuffle,
+    split_indices_stratified's inner fit/calibration split, and
     train_binary_xgboost's own `params["seed"]`) consumes this single
     shared seed field -- there is deliberately no stage-local
     `random_state` field (unlike fisseq-data-pipeline's `OvwtConfig`).
@@ -69,11 +67,11 @@ class OvwtEmbeddingConfig(AppConfig):
     Attributes
     ----------
     embeddings_file : str
-        Path to EMBED_CELLS' embeddings.parquet (Epic 3). Required.
+        Path to EMBED_CELLS' embeddings.parquet. Required.
     filtered_keys_file : str
-        Path to FILTER_EMBEDDINGS' filtered_keys.parquet (Epic 4). Required.
+        Path to FILTER_EMBEDDINGS' filtered_keys.parquet. Required.
     normalizer_file : str
-        Path to FILTER_EMBEDDINGS' normalizer.parquet (Epic 4). Required.
+        Path to FILTER_EMBEDDINGS' normalizer.parquet. Required.
     label_column : str
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     wt_label : str
@@ -89,8 +87,8 @@ class OvwtEmbeddingConfig(AppConfig):
         below this are dropped before the per-variant loop (wildtype is
         always kept regardless of count). ``None`` disables this filter.
         Defaults to ``250`` -- carried over from fisseq-data-pipeline's
-        ``ovwt.py`` as a starting point (SPEC.md §6.6's Resolved note),
-        still unverified against real embedding-space cell counts.
+        ``ovwt.py`` as a starting point, still unverified against real
+        embedding-space cell counts.
     downsample_wt : bool
         If ``True``, downsample wildtype cells (barcode-proportionally) to
         the size of the largest remaining variant group before the
@@ -157,8 +155,7 @@ def predict_binary(
     return model.predict(get_dmatrix(df, label_col, wt_label))
 
 
-# --- Pre-filtering (Story 6.3), ported/simplified from fisseq-data-pipeline's
-# ovwt.py ---
+# --- Pre-filtering, ported/simplified from fisseq-data-pipeline's ovwt.py ---
 
 
 def filter_min_cells(
@@ -339,8 +336,7 @@ def ovwt_batchwise(
     ----------
     filtered_lf : pl.LazyFrame
         QC-passed, synonymous-corrected cell-level embeddings, as returned
-        by :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`
-        (Epic 4).
+        by :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`.
     cfg : OvwtEmbeddingConfig
         Supplies ``label_column``, ``wt_label``, ``n_folds``, ``calibrate``,
         ``min_cells``, ``downsample_wt``, ``xgboost``, and ``random_seed``
@@ -457,7 +453,7 @@ def ovwt_batchwise(
                     sklearn.metrics.roc_auc_score(is_wt[mask], oof_scores[mask])
                 )
             # None (not float("nan")) so Polars aggregations downstream
-            # (Epic 8's cross-experiment median) exclude this cleanly
+            # (the cross-experiment median) exclude this cleanly
             # instead of NaN silently poisoning the pooled result -- this
             # branch is defensive only, since a variant only ever enters
             # this loop with >=1 barcode of its own.
@@ -520,8 +516,8 @@ def main(cfg: DictConfig) -> None:
 
     Reads ``embeddings_file``, ``filtered_keys_file``, and
     ``normalizer_file``, reconstructs the QC-passed, synonymous-corrected
-    embedding table via :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`
-    (Epic 4), calls :func:`ovwt_batchwise`, and writes
+    embedding table via :func:`fisseq_embeddings_pipeline.filter.load_filtered_embeddings`,
+    calls :func:`ovwt_batchwise`, and writes
     ``{prefix}results.parquet``, ``{prefix}cell_scores.parquet``, and
     ``{prefix}models.pkl`` to ``output_dir``.
 

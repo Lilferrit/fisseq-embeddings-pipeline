@@ -76,7 +76,7 @@ def test_compute_pca_all_null_raises_value_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# compute_pca -- random_state parameter (SPEC.md §6.7's Seed note, the one
+# compute_pca -- random_state parameter (the one
 # deviation versus the vendored source: this is a *new* parameter, not
 # present in fisseq-data-pipeline's compute_pca).
 # ---------------------------------------------------------------------------

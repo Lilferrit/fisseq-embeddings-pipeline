@@ -1,12 +1,11 @@
 """Shared XGBoost configuration, DMatrix construction, and split helpers.
 
 Vendored from fisseq-data-pipeline's
-src/fisseq_data_pipeline/utils/xgbparams.py (SPEC.md §3 decision 2), with
-exactly ONE line changed (SPEC.md §6.6's Seed note):
+src/fisseq_data_pipeline/utils/xgbparams.py, with exactly one line changed:
 :func:`train_binary_xgboost` read ``cfg.random_state`` internally
 (``params["seed"] = cfg.random_state``) in the source repo -- retargeted to
-``cfg.random_seed`` to match this pipeline's single shared seed field (§3
-decision 11) instead of adding a second, redundant ``random_state`` field.
+``cfg.random_seed`` to match this pipeline's single shared seed field
+instead of adding a second, redundant ``random_state`` field.
 
 Everything else (:class:`XGBoostParams`, :class:`XGBoostConfig`,
 :func:`get_dmatrix`, :func:`get_dmatrix_multiclass`,
@@ -278,9 +277,9 @@ def train_binary_xgboost(
     positive_label : Any
         Value of ``label_col`` treated as the positive class.
     cfg : DictConfig
-        Hydra config supplying ``random_seed`` (SPEC.md §3 decision 11 --
-        the shared ``AppConfig`` seed field, not a stage-local
-        ``random_state``) and the ``xgboost`` sub-config.
+        Hydra config supplying ``random_seed`` (the shared ``AppConfig``
+        seed field, not a stage-local ``random_state``) and the ``xgboost``
+        sub-config.
 
     Returns
     -------

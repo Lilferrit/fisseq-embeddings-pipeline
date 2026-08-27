@@ -1,5 +1,5 @@
-# params.yaml -- every default pipeline parameter, nothing else (SPEC.md §9.1 /
-# §3 decision 12). Load explicitly:
+# params.yaml -- every default pipeline parameter, nothing else. Load
+# explicitly:
 #
 #   nextflow run . --pipeline_dir /path/to/experiment -params-file params.yaml
 #
@@ -8,54 +8,54 @@
 # nextflow.config carries executor/profile/container settings only -- never
 # default parameter values.
 
-# ── Required, no default (fail fast if unset -- see §9.1's Resolved note) ──
+# ── Required, no default (fail fast if unset) ──────────────────────────────
 pipeline_dir: null
 container_image: "fisseq-embeddings-pipeline:latest"
 cell_dino_checkpoint: null
 
-# ── Reproducibility (§3 decision 11) ────────────────────────────────────────
+# ── Reproducibility ──────────────────────────────────────────────────────────
 random_seed: 0
 
-# No BUILD_DATASET (§6.1) entries here, deliberately (Epic 10 Story 10.1
-# audit): every BuildDatasetConfig field (phenotyping_dir, wells, grid_size,
-# window, shard_maxcount, batch_stem, barcode_col_name/aa_changes_col_name/
-# edit_distance_col_name, ...) is per-experiment, not a pipeline-wide
-# default -- it comes from <pipeline_dir>/configs/<batch_stem>.yaml instead
-# (see build_dataset.nf / workflows/embeddings.nf's config_ch), since a
-# single global value could never be right across every experiment's own
-# wells/grid/raw-CSV-column-name layout.
+# No BUILD_DATASET entries here, deliberately: every BuildDatasetConfig
+# field (phenotyping_dir, wells, grid_size, window, shard_maxcount,
+# batch_stem, barcode_col_name/aa_changes_col_name/edit_distance_col_name,
+# ...) is per-experiment, not a pipeline-wide default -- it comes from
+# <pipeline_dir>/configs/<batch_stem>.yaml instead (see build_dataset.nf /
+# workflows/embeddings.nf's config_ch), since a single global value could
+# never be right across every experiment's own wells/grid/raw-CSV-column-
+# name layout.
 
-# ── QC filtering (QC_FILTER, §6.2) ──────────────────────────────────────────
+# ── QC filtering (QC_FILTER) ─────────────────────────────────────────────────
 barcode_count_threshold: 10
 variant_barcode_count_threshold: 4
 edit_distance_threshold: 1
-# QcFilterConfig's own label_column is wired to filter_label_column below
-# (Epic 10) so overriding one label column changes it pipeline-wide.
+# QcFilterConfig's own label_column is wired to filter_label_column below,
+# so overriding one label column changes it pipeline-wide.
 #
-# Deliberately NOT exposed here (Epic 10 Story 10.1 audit):
+# Deliberately NOT exposed here:
 #   - barcode_col_name / aa_changes_col_name / edit_distance_col_name:
 #     these name BUILD_DATASET's fixed "meta_barcode"/"meta_aa_changes"/
-#     "meta_edit_distance" output columns (Epic 1's meta_* convention) --
-#     structural, not something a per-run override should ever change.
+#     "meta_edit_distance" output columns -- structural, not something a
+#     per-run override should ever change.
 #   - n_variants / variant_downsample_classes / variant_downsample_mode /
 #     variant_allow_list_file: the optional per-class variant-downsampling
 #     cap (distinct from the dropped downsample_amounts/downsample_classes/
-#     downsample_seed pseudo-variant machinery, SPEC.md §6.2's Resolved
-#     note -- this one is real, just off by default). n_variants defaults
-#     to null (disabled); enable via a direct Hydra override on QC_FILTER
-#     if ever needed. Not promoted to a global param for v1 because
-#     variant_downsample_classes' default ("Single Missense") contains a
-#     space, which this repo's List -> 'key=[a,b]' Groovy-interpolation
-#     convention (used by aggregate_methods/cell_dino_channels/etc.) can't
-#     round-trip safely without per-element quoting.
+#     downsample_seed pseudo-variant machinery -- this one is real, just
+#     off by default). n_variants defaults to null (disabled); enable via a
+#     direct Hydra override on QC_FILTER if ever needed. Not promoted to a
+#     global param because variant_downsample_classes' default ("Single
+#     Missense") contains a space, which this repo's List ->
+#     'key=[a,b]' Groovy-interpolation convention (used by
+#     aggregate_methods/cell_dino_channels/etc.) can't round-trip safely
+#     without per-element quoting.
 
-# ── Cell Embeddings / Cell-DINO (EMBED_CELLS, §6.3) ─────────────────────────
+# ── Cell Embeddings / Cell-DINO (EMBED_CELLS) ────────────────────────────────
 # Defaults here match weights/channel_adaptive_dino_vitl16_pretrain_cells-
 # ef7c17ff.pth's real, verified architecture (bag-of-channels vit_large/
 # patch16/224 -- see docs/architecture.md's "Real checkpoint" section).
 # cell_dino_checkpoint itself is deliberately left unset above (required,
-# no default -- SPEC.md §9.1) since a checkpoint path is deployment-
-# specific and weights/ is gitignored.
+# no default) since a checkpoint path is deployment-specific and weights/
+# is gitignored.
 cell_dino_arch: "vit_large"
 cell_dino_patch_size: 16
 cell_dino_crop_size: 224        # must match BUILD_DATASET's per-experiment `window`
@@ -67,30 +67,28 @@ cell_dino_batch_size: 256
 cell_dino_num_workers: 4
 
 # ── Label column, shared pipeline-wide ──────────────────────────────────────
-# Read by QC_FILTER, FILTER_EMBEDDINGS (§6.4), AGGREGATE_EMBEDDINGS (§6.5),
-# OVWT_BATCHWISE (§6.6), and both global stages (§6.7/§6.8) -- one override
-# changes the variant label column everywhere at once, rather than each
-# stage needing its own (Epic 10 fix: OVWT_BATCHWISE previously left this
-# off its script block entirely and silently kept its own Hydra default).
+# Read by QC_FILTER, FILTER_EMBEDDINGS, AGGREGATE_EMBEDDINGS, OVWT_BATCHWISE,
+# and both global stages -- one override changes the variant label column
+# everywhere at once, rather than each stage needing its own.
 filter_label_column: "meta_aa_changes"
 
-# ── Aggregation (AGGREGATE_EMBEDDINGS, §6.5) ────────────────────────────────
+# ── Aggregation (AGGREGATE_EMBEDDINGS) ───────────────────────────────────────
 # One or more of: mean | median | KS | AUROC. The literal single-element
 # default below keeps aggregate.parquet's columns bare (emb_0000..emb_{D-1});
 # any other selection suffixes columns by method (emb_0000_mean, etc.).
 aggregate_methods: ["median"]
 
-# ── OVWT Distinguish-ability Scores (OVWT_BATCHWISE, §6.6) ──────────────────
+# ── OVWT Distinguish-ability Scores (OVWT_BATCHWISE) ─────────────────────────
 ovwt_wt_label: "WT"
 ovwt_n_folds: 5
 ovwt_calibrate: true
 ovwt_min_cells: 250
 ovwt_downsample_wt: true
 
-# ── Global Variant Embeddings (GLOBAL_VARIANT_EMBEDDINGS, §6.7) ─────────────
-# No n_components entry (revision, per request) -- every retained principal
-# component is always computed and written (median_aggregate.parquet,
-# pca_scores.parquet, pca_components.parquet, pca_variance_explained.parquet).
+# ── Global Variant Embeddings (GLOBAL_VARIANT_EMBEDDINGS) ────────────────────
+# No n_components entry -- every retained principal component is always
+# computed and written (median_aggregate.parquet, pca_scores.parquet,
+# pca_components.parquet, pca_variance_explained.parquet).
 # cumulative_variance_explained instead controls only the additional
 # pca_reduced.parquet output (PC-truncated scores + propagated meta_is_control
 # + meta_impact_score computed on that reduced matrix).

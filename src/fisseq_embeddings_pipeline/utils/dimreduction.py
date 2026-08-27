@@ -2,14 +2,13 @@
 feature matrix.
 
 Vendored from fisseq-data-pipeline's
-src/fisseq_data_pipeline/utils/dimreduction.py (SPEC.md §3 decision 2),
-with ONE added parameter (SPEC.md §6.7's Seed note): :func:`compute_pca`'s
-hardcoded ``PCA(n_components=n_components, random_state=0)`` becomes a
-``random_state: int = 0`` parameter on :func:`compute_pca`'s own signature,
-threaded into the ``PCA(...)`` call instead of the hardcoded ``0`` --
-called from ``global_embeddings.py`` (Epic 7) with ``cfg.random_seed`` so
-this stage's seed comes from the same shared field as every other stage
-(SPEC.md §3 decision 11) rather than a second hardcoded constant living
+src/fisseq_data_pipeline/utils/dimreduction.py, with one added parameter:
+:func:`compute_pca`'s hardcoded ``PCA(n_components=n_components,
+random_state=0)`` becomes a ``random_state: int = 0`` parameter on
+:func:`compute_pca`'s own signature, threaded into the ``PCA(...)`` call
+instead of the hardcoded ``0`` -- called from ``global_embeddings.py`` with
+``cfg.random_seed`` so this stage's seed comes from the same shared field
+as every other stage rather than a second hardcoded constant living
 outside the reproducibility story. :func:`compute_umap` is untouched.
 
 ``umap-learn`` is imported lazily, inside :func:`compute_umap`, rather than
@@ -120,8 +119,8 @@ def compute_pca(
         solver path, which this pipeline's matrix sizes are unlikely to
         trigger (the "auto"/"full" solver is otherwise deterministic) --
         threaded through so this stage's seed still comes from the shared
-        ``AppConfig.random_seed`` field (SPEC.md §3 decision 11) rather than
-        a second, hardcoded constant. Defaults to ``0``.
+        ``AppConfig.random_seed`` field rather than a second, hardcoded
+        constant. Defaults to ``0``.
 
     Returns
     -------

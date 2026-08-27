@@ -5,7 +5,7 @@ import polars as pl
 from fisseq_embeddings_pipeline.utils.constants import EMBEDDING_SELECTOR
 
 # ---------------------------------------------------------------------------
-# EMBEDDING_SELECTOR (SPEC.md §6.3's Output note -- the one addition versus
+# EMBEDDING_SELECTOR (the one addition versus
 # the vendored fisseq-data-pipeline constants.py)
 # ---------------------------------------------------------------------------
 

@@ -1,80 +1,49 @@
-"""EMBED_CELLS -- SPEC.md §6.3 (Epic 3).
+"""EMBED_CELLS.
 
 Hydra entry point (`python -m fisseq_embeddings_pipeline.embed`), backing
 the Nextflow process EMBED_CELLS (modules/local/embed_cells.nf, the
 pipeline's only GPU-bound stage). Streams every cell in a BUILD_DATASET
-WebDataset through a pretrained Cell-DINO checkpoint (Meta's dinov2,
-bag-of-channels mode) and writes one row per cell to embeddings.parquet.
-Not gated by QC_FILTER -- matches the diagram, and the whole point of
-building the WebDataset up front (SPEC.md §6.1): this GPU pass runs once
-per experiment regardless of how many times QC thresholds get retuned.
+WebDataset through a pretrained Cell-DINO checkpoint (Meta's dinov2) and
+writes one row per cell to embeddings.parquet. Not gated by QC_FILTER: this
+GPU pass runs once per experiment regardless of how many times QC
+thresholds get retuned afterward.
 
-SPEC.md §6.3's `load_cell_dino()`/`embed_batch()` sketch was an admitted
-best guess pending real `dinov2` source review (§10 item 1). Story 3.1
-(IMPLEMENTATION_CHECKLIST.md, see docs/architecture.md for the full
-writeup) verified/corrected it against the real `facebookresearch/dinov2`
-source:
-
-1. Model construction goes through the architecture factory function
-   directly (`vision_transformer.vit_large(...)`, dict-dispatched by
-   `cfg.arch`) rather than `dinov2.eval.setup`/`build_model_from_cfg`,
-   which needs a full training-style cfg this pipeline doesn't have.
-2. Checkpoint loading ports the real `dinov2.utils.utils.
-   load_pretrained_weights()` logic: index by checkpoint key ("teacher")
-   if present, strip `module.`/`backbone.` prefixes, load non-strict --
-   not SPEC.md's stricter strict-load placeholder.
-3. Pooling: `DinoVisionTransformer.forward()` returns the CLS token
-   straight through an identity head, so SPEC.md's mean/max-pool-over-
-   per-channel-CLS-tokens sketch is correct as written.
-
+`load_cell_dino()` builds the backbone via dinov2's architecture factory
+functions directly (`vision_transformer.vit_large(...)`, dict-dispatched by
+`cfg.arch`) and ports `dinov2.utils.utils.load_pretrained_weights()`'s real
+checkpoint-loading logic: index by checkpoint key ("teacher") if present,
+strip `module.`/`backbone.` prefixes, then a non-strict `load_state_dict`.
 The vendored model (`.vendor.dinov2`) is not installed as the `dinov2`
 package -- see `vendor/dinov2/VENDORED_FROM.md`.
 
-**Correction found once a real checkpoint became available** (`weights/
-cell_dino_vits8_pretrain_cp-37d20e9c.pth` -- see docs/architecture.md's
-"Real checkpoint" section): that checkpoint is *not* a bag-of-channels
-(`in_chans=1`) model at all -- its `patch_embed.proj.weight` is
-`(384, 5, 8, 8)`, i.e. a plain ViT-Small/patch8 that ingests 5 stacked
-channels jointly, plus chunked transformer blocks (`block_chunks=4`) and
-LayerScale (`ls1.gamma`/`ls2.gamma`), none of which the original
-in_chans=1-only `load_cell_dino()` accounted for. `load_cell_dino()` now
-inspects the checkpoint's own state dict to recover `in_chans`,
-`img_size` (from `pos_embed`'s patch count -- decoupled from
-`cfg.crop_size`, since `interpolate_pos_encoding` reconciles any
-difference at inference time), `block_chunks` (from the `blocks.<chunk>.
-<pos>.` vs. flat `blocks.<pos>.` key shape), and whether LayerScale is
-present, rather than assuming bag-of-channels unconditionally.
-`embed_batch()` correspondingly branches on the loaded model's actual
-`patch_embed.in_chans`: `1` still gets the original per-channel
-split-and-pool treatment, anything else is fed to the model jointly in
-one forward pass (no split, no `channel_pool`), requiring the crop's
-channel count to match exactly.
+Real Cell-DINO checkpoints are not all shaped the same way, so
+`load_cell_dino()` doesn't hardcode a single architecture: it inspects the
+checkpoint's own state dict to recover `in_chans` (bag-of-channels,
+`in_chans=1`, vs. a fixed-channel-count backbone that ingests several
+stacked channels jointly), `img_size` (from `pos_embed`'s patch count --
+decoupled from `cfg.crop_size`, since `interpolate_pos_encoding`
+reconciles any difference at inference time), `block_chunks` (chunked vs.
+flat transformer-block keys), and whether LayerScale is present, rather
+than assuming one fixed shape. `embed_batch()` branches on the loaded
+model's actual `patch_embed.in_chans`: `1` gets the per-channel
+split-and-pool treatment (`cfg.channel_pool`), anything else is fed to the
+model jointly in one forward pass, requiring the crop's channel count to
+match exactly. See docs/architecture.md for a comparison of the two real
+checkpoints this was verified against.
 
-A second real checkpoint, `weights/channel_adaptive_dino_vitl16_pretrain_
-cells-ef7c17ff.pth`, was later added -- and turned out to be exactly the
-bag-of-channels `vit_large`/patch-16/224-img_size shape SPEC.md §6.3
-originally assumed (`in_chans=1`, `pos_embed` 14x14+1 patches,
-`block_chunks=4`, LayerScale present): `load_cell_dino()` loads it with
-zero missing/zero unexpected keys using this module's existing defaults
-(`arch="vit_large"`, `patch_size=16`, `crop_size=224`) unchanged -- no code
-correction was needed for *this* file, only for the first one.
+`EmbedCellsConfig.channels` selects and orders which of the crop's channel
+indices actually get fed to the model (a crop may carry more channels than
+the model should see, e.g. multiple imaging cycles); `channel_apply_mask`
+independently controls, per selected channel, whether the shared per-cell
+segmentation mask gets applied before embedding. Both are consulted inside
+`embed_batch()`, before the bag-of-channels-vs-joint branch above.
 
-Also added alongside that checkpoint: `EmbedCellsConfig.channels` (which
-of the crop's channel indices to actually feed the model, in what order --
-defaults to `[0, 1, 2, 3]`) and `channel_apply_mask` (one bool per
-`channels` entry: whether that channel gets the shared per-cell mask
-applied). Both are consulted inside `embed_batch()`, before the
-bag-of-channels-vs-joint branch above -- see its docstring.
-
-One further correction, found while implementing `load_embedding_
-dataloader()`: SPEC.md's dataclass docstring for `shard_pattern` claims
-`webdataset.WebDataset` accepts a bare glob (`"dataset-*.tar"`) or a brace
-pattern (`"dataset-{000000..000042}.tar"`) interchangeably. Verified
-against the installed `webdataset==1.0.2`: only brace patterns are
-expanded internally (`webdataset.shardlists.expand_urls`); a bare `*` glob
-is passed through as a literal, unmatched filename. `load_embedding_
-dataloader()` expands a non-brace `shard_pattern` via `glob.glob()` itself
-before handing shard paths to `wds.WebDataset`.
+`load_embedding_dataloader()` expands a non-brace `shard_pattern` (no
+`"dataset-{000000..000042}.tar"`-style brace expression) via `glob.glob()`
+itself before handing shard paths to `wds.WebDataset` -- the installed
+`webdataset` only expands brace patterns internally
+(`webdataset.shardlists.expand_urls`); a bare `*` glob would otherwise pass
+through as a literal, unmatched filename.
 """
 
 import dataclasses
@@ -111,8 +80,7 @@ _ARCHS: Dict[str, Callable[..., torch.nn.Module]] = {
 }
 
 # The checkpoint key real Cell-DINO/dinov2 teacher checkpoints are stored
-# under (SPEC.md §6.3, verified against dinov2.utils.utils.
-# load_pretrained_weights -- see the module docstring's Story 3.1 note).
+# under (verified against dinov2.utils.utils.load_pretrained_weights).
 _CHECKPOINT_KEY = "teacher"
 
 
@@ -121,10 +89,10 @@ class EmbedCellsConfig(AppConfig):
     """
     Hydra structured configuration for EMBED_CELLS.
 
-    Extends AppConfig (output_dir, output_root, log_level, random_seed --
-    SPEC.md §3 decision 11); EMBED_CELLS's own logic doesn't consume
-    random_seed itself (inference is deterministic given a fixed
-    checkpoint), but every stage config inherits it uniformly.
+    Extends AppConfig (output_dir, output_root, log_level, random_seed);
+    EMBED_CELLS's own logic doesn't consume random_seed itself (inference
+    is deterministic given a fixed checkpoint), but every stage config
+    inherits it uniformly.
 
     Attributes
     ----------
@@ -140,10 +108,9 @@ class EmbedCellsConfig(AppConfig):
         -- a bag-of-channels ``vit_large``/patch-16 checkpoint matching
         this config's own defaults exactly (see docs/architecture.md's
         "Real checkpoint" section). Not defaulted here, or in
-        ``params.yaml`` (SPEC.md §9.1's Resolved note: a checkpoint path is
-        inherently deployment-specific and ``weights/`` is gitignored, so a
-        hardcoded default would silently be wrong -- or simply absent --
-        in any other checkout).
+        ``params.yaml``: a checkpoint path is inherently deployment-specific
+        and ``weights/`` is gitignored, so a hardcoded default would
+        silently be wrong -- or simply absent -- in any other checkout.
     arch : str
         Backbone architecture, one of ``vit_small``/``vit_base``/
         ``vit_large``/``vit_giant2``. Defaults to ``"vit_large"``
@@ -169,9 +136,9 @@ class EmbedCellsConfig(AppConfig):
         that selected channel gets ``mask.npy``-based background zeroing
         before embedding. Every cell in this pipeline's data model has
         exactly one shared segmentation mask (BUILD_DATASET writes a
-        single ``mask.npy`` per cell, not one per channel -- SPEC.md
-        §6.1), so this is "apply the shared mask to this channel or not,"
-        not a claim that different channels have their own distinct masks.
+        single ``mask.npy`` per cell, not one per channel), so this is
+        "apply the shared mask to this channel or not," not a claim that
+        different channels have their own distinct masks.
         Defaults to ``[True, True, True, True]``.
     channel_pool : str
         How per-channel CLS embeddings are pooled into one per-cell
@@ -206,13 +173,13 @@ def load_embedding_dataloader(cfg: EmbedCellsConfig) -> "torch.utils.data.DataLo
     """Stream ``(key, crop, mask, meta)`` batches from BUILD_DATASET's shards.
 
     ``webdataset.WebDataset(...).decode().to_tuple(...)`` is the standard
-    reader side of the shards ``write_dataset_shards()`` (dataset.py, Epic
-    1) writes; batching via ``.batched()``/``DataLoader(batch_size=None)``
+    reader side of the shards ``write_dataset_shards()`` (dataset.py)
+    writes; batching via ``.batched()``/``DataLoader(batch_size=None)``
     keeps shard-order batches (webdataset's usual pattern) rather than a
     random-access ``Dataset``, which a tar-shard format doesn't support
     efficiently. ``mask.npy`` is always fetched -- whether/where it's
-    applied is decided in :func:`embed_batch` (Story 3.3) via
-    ``cfg.channel_apply_mask``, not here.
+    applied is decided in :func:`embed_batch` via ``cfg.channel_apply_mask``,
+    not here.
 
     A non-brace ``shard_pattern`` (no ``{``) is expanded via ``glob.glob``
     first -- see the module docstring for why: ``webdataset``'s own URL
@@ -343,21 +310,17 @@ def load_cell_dino(cfg: EmbedCellsConfig) -> torch.nn.Module:
     Construction goes through the named architecture factory
     (``vits.__dict__[cfg.arch]``-equivalent dict dispatch, see ``_ARCHS``)
     rather than ``dinov2.eval.setup``/``build_model_from_cfg``, which needs
-    a full training-style cfg this pipeline doesn't have (see the module
-    docstring's Story 3.1 note / docs/architecture.md).
+    a full training-style cfg this pipeline doesn't have.
 
     Everything ``_ARCHS[cfg.arch]`` can't fix (``embed_dim``/``depth``/
     ``num_heads``/``mlp_ratio``) is inferred from the checkpoint's own
     state dict instead of assumed -- ``in_chans`` (bag-of-channels
     ``in_chans=1`` vs. a fixed-channel-count backbone), ``img_size`` (from
     ``pos_embed``'s patch count), ``block_chunks`` (chunked vs. flat block
-    keys), and whether LayerScale is present -- rather than hardcoding the
-    SPEC.md-documented ``vitl16_channel_adaptive_pretrain`` config's shape
-    (``in_chans=1, channel_adaptive=True``) as the only supported one. See
-    the module docstring's "Correction found once a real checkpoint became
-    available" note: the first real checkpoint this was tested against
-    (``weights/cell_dino_vits8_pretrain_cp-37d20e9c.pth``) turned out to be
-    exactly the case this hardcoding got wrong.
+    keys), and whether LayerScale is present -- rather than hardcoding one
+    fixed shape as the only supported case. See docs/architecture.md for a
+    comparison of the two real checkpoints this was verified against, one
+    of which is *not* bag-of-channels at all.
 
     Checkpoint loading otherwise still ports ``dinov2.utils.utils.
     load_pretrained_weights``'s real logic: index into the checkpoint dict
@@ -468,11 +431,9 @@ def embed_batch(
     *actual* ``patch_embed.in_chans`` (not a config flag) --
     ``load_cell_dino()`` sets this from whatever the checkpoint's own
     ``patch_embed.proj.weight`` says, since not every real Cell-DINO
-    checkpoint is bag-of-channels (see the module docstring's "Correction
-    found once a real checkpoint became available" note):
+    checkpoint is bag-of-channels:
 
-    - ``in_chans == 1`` (bag-of-channels/channel-adaptive, SPEC.md §6.3's
-      originally-assumed mode -- and the mode
+    - ``in_chans == 1`` (bag-of-channels/channel-adaptive -- the mode
       ``weights/channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth``
       actually is): the (now channel-selected) crop is split into ``C``
       single-channel images, each run through the *same* shared-weight
@@ -497,9 +458,9 @@ def embed_batch(
         Shape ``(B, crop_size, crop_size)``, ``uint8`` label mask --
         nonzero where a pixel belongs to the target cell. This pipeline's
         data model has exactly one shared mask per cell (not one per
-        channel -- SPEC.md §6.1), so this same tensor is what
-        ``cfg.channel_apply_mask`` selectively applies to each selected
-        channel. Only read at all when at least one entry of
+        channel), so this same tensor is what ``cfg.channel_apply_mask``
+        selectively applies to each selected channel. Only read at all
+        when at least one entry of
         ``cfg.channel_apply_mask`` is ``True``.
     cfg : EmbedCellsConfig
         Supplies ``channels``, ``channel_apply_mask``, and (bag-of-channels

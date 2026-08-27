@@ -1,7 +1,7 @@
 """Shared logging setup for every Hydra entry point.
 
 Vendored unchanged from fisseq-data-pipeline's
-src/fisseq_data_pipeline/utils/log.py (SPEC.md §3 decision 2). Defines
+src/fisseq_data_pipeline/utils/log.py. Defines
 :func:`setup_logging`, which configures a console handler plus a per-run
 log file under ``output_dir`` (optionally prefixed by ``output_root``),
 called at the start of every entry point's ``main()``.
