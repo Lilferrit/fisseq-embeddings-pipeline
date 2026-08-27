@@ -330,9 +330,7 @@ def _infer_block_chunks(state: dict) -> int:
     ``1`` (matching that class's own default) if no block keys are found
     at all, since that's the shape a from-scratch construction would take.
     """
-    chunk_ids = {
-        int(m.group(1)) for k in state if (m := _CHUNKED_BLOCK_KEY.match(k))
-    }
+    chunk_ids = {int(m.group(1)) for k in state if (m := _CHUNKED_BLOCK_KEY.match(k))}
     if chunk_ids:
         return max(chunk_ids) + 1
     flat_ids = {int(m.group(1)) for k in state if (m := _FLAT_BLOCK_KEY.match(k))}

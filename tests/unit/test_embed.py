@@ -193,7 +193,9 @@ def test_load_cell_dino_infers_chunked_blocks_and_layerscale(tmp_path: Path):
     with torch.no_grad():
         for p in reference.parameters():
             if p.ndim == 1 and p.numel() == reference.embed_dim:
-                p.uniform_(0.1, 0.2)  # give ls*.gamma (among others) a distinctive value
+                p.uniform_(
+                    0.1, 0.2
+                )  # give ls*.gamma (among others) a distinctive value
     checkpoint_path = tmp_path / "checkpoint.pth"
     torch.save(reference.state_dict(), checkpoint_path)
 
@@ -242,7 +244,9 @@ def test_load_cell_dino_infers_joint_multichannel_in_chans(tmp_path: Path):
 
 
 def test_load_cell_dino_raises_on_patch_size_mismatch(tmp_path: Path):
-    reference = vit_small(patch_size=16, in_chans=1, channel_adaptive=True, img_size=CROP)
+    reference = vit_small(
+        patch_size=16, in_chans=1, channel_adaptive=True, img_size=CROP
+    )
     checkpoint_path = tmp_path / "checkpoint.pth"
     torch.save(reference.state_dict(), checkpoint_path)
 
@@ -265,8 +269,14 @@ def test_load_cell_dino_raises_on_incompatible_checkpoint(tmp_path: Path):
     found once a real checkpoint became available" module-docstring note on
     why missing_keys is escalated to a raise instead of just logged."""
     tiny = DinoVisionTransformer(
-        img_size=CROP, patch_size=16, in_chans=1, embed_dim=384,
-        depth=2, num_heads=6, channel_adaptive=True, block_chunks=0,
+        img_size=CROP,
+        patch_size=16,
+        in_chans=1,
+        embed_dim=384,
+        depth=2,
+        num_heads=6,
+        channel_adaptive=True,
+        block_chunks=0,
     )
     checkpoint_path = tmp_path / "checkpoint.pth"
     torch.save(tiny.state_dict(), checkpoint_path)
@@ -349,7 +359,9 @@ def test_load_cell_dino_and_embed_batch_against_real_vitl16_checkpoint(tmp_path:
 
     crops = torch.randint(0, 4096, (2, 6, CROP, CROP), dtype=torch.uint16)
     masks = (torch.rand(2, CROP, CROP) > 0.5).to(torch.uint8)
-    out = embed_batch(model, crops, masks, cfg)  # cfg.channels=[0,1,2,3] selects 4 of the 6
+    out = embed_batch(
+        model, crops, masks, cfg
+    )  # cfg.channels=[0,1,2,3] selects 4 of the 6
 
     assert out.shape == (2, 1024)
     assert torch.isfinite(out).all()
@@ -384,7 +396,10 @@ class _MeanPixelStub(nn.Module):
 def test_embed_batch_output_shape():
     model = _MeanPixelStub(embed_dim=4)
     cfg = _base_cfg(
-        Path("."), channel_pool="mean", channels=[0, 1, 2], channel_apply_mask=[False] * 3
+        Path("."),
+        channel_pool="mean",
+        channels=[0, 1, 2],
+        channel_apply_mask=[False] * 3,
     )
     crops = torch.arange(2 * 3 * 4 * 4, dtype=torch.float32).reshape(2, 3, 4, 4)
     masks = torch.ones(2, 4, 4, dtype=torch.uint8)
@@ -408,7 +423,10 @@ def test_embed_batch_zero_background_zeroes_masked_out_pixels():
     assert torch.allclose(masked_out, torch.full((1, 1), 5.0))
 
     none_cfg = _base_cfg(
-        Path("."), channel_pool="mean", channels=[0, 1], channel_apply_mask=[False, False]
+        Path("."),
+        channel_pool="mean",
+        channels=[0, 1],
+        channel_apply_mask=[False, False],
     )
     none_out = embed_batch(model, crops, mask, none_cfg)
     assert torch.allclose(none_out, torch.full((1, 1), 10.0))
@@ -424,7 +442,10 @@ def test_embed_batch_channel_apply_mask_is_per_channel():
     mask[:, :2, :] = 1  # 8 of 16 pixels "belong to" the cell
 
     cfg = _base_cfg(
-        Path("."), channel_pool="mean", channels=[0, 1], channel_apply_mask=[True, False]
+        Path("."),
+        channel_pool="mean",
+        channels=[0, 1],
+        channel_apply_mask=[True, False],
     )
     out = embed_batch(model, crops, mask, cfg)
 
@@ -447,7 +468,10 @@ def test_embed_batch_selects_and_reorders_configured_channels():
     mask = torch.ones(1, 4, 4, dtype=torch.uint8)
 
     cfg = _base_cfg(
-        Path("."), channel_pool="mean", channels=[3, 0], channel_apply_mask=[False, False]
+        Path("."),
+        channel_pool="mean",
+        channels=[3, 0],
+        channel_apply_mask=[False, False],
     )
     out = embed_batch(model, crops, mask, cfg)
 
