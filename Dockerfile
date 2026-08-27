@@ -4,15 +4,13 @@
 # later if the pull cost matters in practice -- see IMPLEMENTATION_CHECKLIST.md
 # Epic 10 Story 10.2.
 #
-# NOT build-verified in this sandbox (no docker daemon available here --
-# `dockerd` fails to start at all: no CAP_NET_ADMIN/iptables access even
-# under sudo, so there's no way around it, unlike Epic 9's nextflow/java gap
-# which a plain package install fixed). Everything below the base-image
-# `apt-get`/CUDA layer was instead verified by literally reproducing this
-# file's COPY/RUN ordering by hand against a scratch directory with `uv`
-# (installed in this sandbox already) -- see the Epic 10 commit message for
-# exactly what that caught. Still needs a real `docker build` +
-# `docker run --gpus all` pass on a GPU host before this is trusted blind.
+# Build-verified for real (docker build + docker run against every stage's
+# CLI entry point) once this devcontainer got docker-outside-of-docker
+# access to the host's real Docker daemon -- see the Epic 10 commit
+# messages for the bugs a real `docker build`/`docker run` pass caught
+# (beyond the two found earlier by hand-simulating the COPY/RUN layering
+# without a daemon). Still not run with `--gpus all` on an actual GPU host
+# -- this devcontainer's host has none.
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,18 +19,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # uv as a standalone static binary (Astral's own published image), not via
 # `pip install uv` -- this needs no system Python/pip pre-installed at all,
-# since uv provisions its own Python interpreter satisfying pyproject.toml's
-# `requires-python = ">=3.13"` itself (confirmed empirically: `uv sync` pulls
-# a managed CPython even with only an incompatible system Python on PATH).
-# ubuntu22.04 (jammy)'s own apt archives only carry Python 3.10 by default
-# (3.11 needs a backport/PPA, and neither satisfies >=3.13 regardless) --
-# rather than fight that, let uv manage the interpreter version explicitly,
-# which is what actually determines what runs at container run time anyway
-# (see the ENV PATH line below).
+# since uv provisions its own Python interpreter itself (confirmed
+# empirically: `uv sync` pulls a managed CPython even with only an
+# incompatible system Python on PATH). ubuntu22.04 (jammy)'s own apt
+# archives only carry Python 3.10 by default (3.11 needs a backport/PPA,
+# and neither satisfies pyproject.toml's `requires-python = ">=3.13"`
+# regardless) -- rather than fight that, let uv manage the interpreter
+# version explicitly, which is what actually determines what runs at
+# container run time anyway (see the ENV PATH line below).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /opt/fisseq-embeddings-pipeline
 
+# .python-version (pins 3.13, not just pyproject.toml's open-ended
+# `>=3.13`) has to be copied in before the first `uv sync` -- caught by a
+# real `docker build`: without it, uv has nothing here to prefer 3.13 over
+# any other >=3.13 interpreter, so it silently resolved the newest one it
+# could fetch instead (3.14 as of this build) -- which turned out to be
+# genuinely incompatible: Hydra 1.3.x's `get_args_parser()` crashes on
+# Python 3.14's stricter argparse `_check_help` (`TypeError: argument of
+# type 'LazyCompletionHelp' is not a container or iterable`), breaking
+# every single stage's `python -m fisseq_embeddings_pipeline.<module>`
+# invocation outright, not just `--help`. Confirmed fixed by copying
+# .python-version in before either `uv sync` call below, restoring 3.13.
+#
 # Dependencies-only layer, cached independently of source changes. `uv sync`
 # always also builds/installs the local project itself by default, which
 # fails here (no src/ or README.md yet -- hatchling's own metadata
@@ -41,7 +51,7 @@ WORKDIR /opt/fisseq-embeddings-pipeline
 # pre-commit dev-group tooling (AGENTS.md's `uv sync --group dev`) from the
 # runtime image; every process below runs `python -m
 # fisseq_embeddings_pipeline.<module>` directly, never `pytest`/`ruff`.
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-install-project --no-dev
 
 # Now install the project itself -- the deps layer above stays cached across

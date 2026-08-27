@@ -35,20 +35,45 @@ itself, revisit alongside CI setup"). Decided here, implemented in
   `modules/local/*.nf` script block's bare `python -m
   fisseq_embeddings_pipeline.<module>` call depends on).
 
-**Still open, not resolved by this decision:**
+**Build-verified for real** once the devcontainer gained
+`docker-outside-of-docker` access to the host's Docker Desktop daemon (see
+the Epic 10 follow-up commits to `.devcontainer/devcontainer.json`): a real
+`docker build -t fisseq-embeddings-pipeline:latest .` succeeds, and
+`python -m fisseq_embeddings_pipeline.<module> --help` was run inside the
+built image (`docker run`) for all 8 stages, all exiting 0. This caught a
+third real bug beyond the two found by hand-simulating the `Dockerfile`'s
+layering without a daemon (see above): the `Dockerfile` never copied
+`.python-version` (which pins `3.13`), so a real build resolved
+`pyproject.toml`'s then-open-ended `requires-python = ">=3.13"` to the
+newest available interpreter, Python **3.14** -- and Hydra 1.3.x's
+`get_args_parser()` crashes outright on 3.14's stricter argparse
+`_check_help`, breaking every stage's CLI entry point, not just `--help`.
+Fixed by copying `.python-version` in before `uv sync`, and by tightening
+`requires-python` itself to `>=3.13,<3.14` so the same floor-only mistake
+can't recur even somewhere `.python-version` isn't copied/respected.
 
-- **Not build-verified in this sandbox at all** -- there is no Docker
-  daemon available here (`dockerd` fails to start even under `sudo`: no
-  `CAP_NET_ADMIN`/iptables access, unlike Epic 9's `nextflow`/`java` gap,
-  which a plain package install fixed). Everything below the
-  `apt-get`/CUDA base-image layer in the `Dockerfile` was instead verified
-  by reproducing its exact `COPY`/`RUN` ordering by hand against a scratch
-  directory with `uv` (already installed in this sandbox) -- real, but not
-  a substitute for an actual `docker build`.
+**Still open, not resolved:**
+
+- **No full containerized `nextflow run` (`docker.enabled=true`, the
+  production default) verified yet** -- attempted, and hit a structural
+  docker-outside-of-docker limitation rather than a pipeline bug:
+  `/workspaces/fisseq-embeddings-pipeline` inside this devcontainer is
+  bind-mounted from a different path on the actual host
+  (`docker inspect` confirms it), and Nextflow's docker executor (running
+  *inside* the devcontainer) issues bind-mount requests using the
+  devcontainer-side path directly to the host's daemon, which doesn't
+  recognize it ("mounts denied ... is not shared from the host"). Real
+  container execution itself is confirmed working (`--help` above, and
+  `-profile local`'s own full pipeline run, Epic 9); it's specifically
+  Nextflow-orchestrated sibling-container bind-mounting inside this
+  devcontainer topology that remains unverified. Would need either a
+  host-side path-translation setup or a genuinely non-devcontainer host
+  (e.g. a Linux CI runner, where the container path and host path are the
+  same thing) to close this gap.
 - **GPU stage unverified on a real GPU host** -- `docker run --gpus all` /
   `nvidia-smi` inside the built image, and `EMBED_CELLS` actually running
   against a real checkpoint inside the container, both still need a real
-  GPU host + Docker, neither available here.
+  GPU host; this devcontainer's host has none.
 - **`.github/workflows/docker.yml` is inert until this repo has a remote**
   (same situation as `.github/workflows/ci.yml` -- AGENTS.md's Git workflow
   section) -- added now so the decision above is in place the moment one
