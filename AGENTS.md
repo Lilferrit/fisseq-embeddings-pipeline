@@ -179,8 +179,18 @@ uv run pre-commit run --all-files
 pipeline stage). `tests/integration/test_integration.py` is modeled directly
 on that repo's own integration suite — a synthetic fixture, a
 `subprocess`-driven end-to-end `nextflow run`, and output-file/column
-assertions. See `SPEC.md` §9.3 for the sketch and the one open design
-problem it flags (stubbing `EMBED_CELLS`' GPU/checkpoint dependency for CI).
+assertions. See `SPEC.md` §9.3 for the sketch.
+
+**Decided** (Epic 11 Story 11.2): `EMBED_CELLS`' GPU/checkpoint problem —
+`SPEC.md` §9.3 flagged this as open, with two options — is resolved as
+option (a): the integration fixture builds a tiny, from-scratch,
+randomly-initialized `vit_small` checkpoint (`_write_tiny_checkpoint`) and
+runs `EMBED_CELLS` against it with `device=cpu`, rather than stubbing
+`load_cell_dino` out entirely. This exercises the wrapper's real control
+flow (weight loading, forward pass, shape handling) — not Cell-DINO's
+actual pretrained-checkpoint output quality — at the cost of a few seconds
+of real (CPU) compute per run. No GPU or real checkpoint is needed to run
+`tests/integration` anywhere, including CI.
 
 ## Docker / devcontainer
 

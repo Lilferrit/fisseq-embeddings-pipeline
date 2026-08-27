@@ -497,3 +497,50 @@ def test_main_is_hydra_entry_point() -> None:
     functions parse sys.argv, so they aren't meant to be called directly
     from a test process)."""
     assert callable(m.main)
+
+
+# ---------------------------------------------------------------------------
+# AggregateEmbeddingsConfig -- dropped-fields regression (SPEC.md §6.5's two
+# Resolved notes: no per_barcode pooling option, no WT-null-bootstrap/
+# block_list reproducibility-gate machinery -- Epic 11 Story 11.1)
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_config_omits_per_barcode_and_wt_null_fields():
+    cfg = m.AggregateEmbeddingsConfig(
+        embeddings_file="x", filtered_keys_file="y", normalizer_file="z"
+    )
+    for dropped in (
+        "per_barcode",
+        "block_list",
+        "barcode_column",
+        "wt_null_aggregate",
+        "wt_null_blocklist",
+    ):
+        assert not hasattr(cfg, dropped)
+
+
+def test_aggregators_pool_all_cells_directly_not_per_barcode(
+    simple_df: pl.DataFrame,
+) -> None:
+    """There is no barcode column anywhere in an aggregator's input schema
+    or output computation -- mean/median are taken directly across every
+    cell sharing a variant label, never grouped by barcode first. Adding a
+    `meta_barcode` column with an uneven per-barcode cell count and
+    asserting the result still matches a straight pool-all-cells median
+    (not a median-of-per-barcode-medians, which this lopsided split would
+    make numerically different) demonstrates that directly."""
+    df = simple_df.with_columns(
+        pl.Series("meta_barcode", ["bc1", "bc1", "bc1", "bc2", "bc2", "bc3"])
+    )
+    # Group A: three cells, all on one barcode -- median-of-per-barcode-
+    # medians and pool-all-cells median coincide trivially here, so the
+    # real check is group B below.
+    # Group B: two cells on bc2 (10, 20) and one lone cell on bc3 (30).
+    # Per-barcode-then-across-barcode would take median(median([10,20]),
+    # median([30])) == median(15, 30) == 22.5. Pooling all cells directly
+    # (the actual, documented behavior) takes median([10, 20, 30]) == 20.
+    result = m.MedianAggregator().aggregate(df.lazy()).collect()
+    row_b = _get_row(result, "B")
+    assert row_b["emb_0000_median"] == pytest.approx(20.0)
+    assert row_b["emb_0000_median"] != pytest.approx(22.5)
