@@ -180,19 +180,80 @@ with **zero** missing keys and zero unexpected keys once `arch="vit_small"`/
 crop batch returns finite, non-degenerate `(B, 384)` embeddings (mean/std
 per dimension well within a normal transformer's output range -- not NaN,
 not exploding). See `tests/unit/test_embed.py::
-test_load_cell_dino_and_embed_batch_against_real_checkpoint` (skipped
+test_load_cell_dino_and_embed_batch_against_real_vits8_checkpoint` (skipped
 automatically when the checkpoint file isn't present, e.g. in CI) and the
 synthetic-shape regression tests alongside it that lock in each inferred
 property (`test_load_cell_dino_infers_chunked_blocks_and_layerscale`,
 `test_load_cell_dino_infers_joint_multichannel_in_chans`) independent of
 the real file's availability.
 
-**Not resolved by this fix:** whether this `vit_small`/patch-8/5-channel
-checkpoint or the SPEC.md-documented `vit_large`/patch-16/bag-of-channels
-config is the pipeline's actual intended production checkpoint is a
-product decision, not a code question -- `EmbedCellsConfig`'s defaults
-(`arch="vit_large"`, `patch_size=16`, `crop_size=224`) and `params.yaml`'s
-`cell_dino_checkpoint: null` are deliberately left as SPEC.md originally
-specified them; `load_cell_dino()` now works correctly with *either* real
-checkpoint shape, but picking which one a real run should point at is
-left to whoever configures that run.
+### 6. Second real checkpoint: `weights/channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth`
+
+A second real checkpoint was added later. Unlike the one above, **this one
+matches SPEC.md §6.3's originally-assumed shape exactly** -- inspecting its
+state dict directly confirms:
+
+| Property | SPEC.md's assumption | This checkpoint |
+|---|---|---|
+| Checkpoint key | `"teacher"` | top-level (no wrapper key) |
+| Architecture | `vit_large` (embed_dim 1024), patch 16 | matches |
+| `in_chans` / `channel_adaptive` | `1` / `True` (bag of channels) | matches (`patch_embed.proj.weight` is `(1024, 1, 16, 16)`) |
+| `pos_embed` / native `img_size` | 224 | matches (197 = 196+1 → 14×14 patches × patch 16 = 224) |
+| `block_chunks` | not specified | 4 (24 blocks / 4 chunks = 6 each) |
+| LayerScale | not specified | present |
+
+`load_cell_dino()` loads this file with zero missing/zero unexpected keys
+using `EmbedCellsConfig`'s existing defaults (`arch="vit_large",
+patch_size=16, crop_size=224`) completely unchanged -- no code correction
+was needed for this file the way the first one needed one; the
+already-generalized checkpoint-introspection logic (§5 above) simply
+handles it, since a from-scratch construction path built specifically for
+*this* checkpoint's shape would have looked identical to what already
+existed. See `tests/unit/test_embed.py::
+test_load_cell_dino_and_embed_batch_against_real_vitl16_checkpoint`.
+
+### 7. Configurable input channels and per-channel masking
+
+Added alongside the second checkpoint: `EmbedCellsConfig.channels` (a
+`list[int]`, default `[0, 1, 2, 3]`) selects and orders which of the
+crop's channel indices actually get embedded -- a crop may legitimately
+carry more channels than the model should see (e.g. multiple imaging
+cycles, per `dataset.py`'s cycle-major flattening), and different
+checkpoints/experiments may want a different subset or order.
+`EmbedCellsConfig.channel_apply_mask` (a `list[bool]`, same length as
+`channels`, same default-length default `[True, True, True, True]`)
+independently controls, per selected channel, whether that channel gets
+the shared per-cell segmentation mask applied before embedding. "Shared"
+matters here: `BUILD_DATASET` (§6.1) writes exactly one `mask.npy` per
+cell, not one per channel, so this is "apply the one mask to this channel
+or not," not a claim that different channels carry their own distinct
+masks -- the pipeline's data model has no such thing today.
+
+This replaces the earlier single `mask_mode: "none" | "zero_background"`
+enum (SPEC.md §6.3's original sketch) -- a plain boolean split whether
+*any* masking happened at all, uniformly across every channel.
+`channel_apply_mask` subsumes both of its states (all-`False` ≡ `"none"`,
+all-`True` ≡ `"zero_background"`) while additionally allowing a per-channel
+mix, so keeping both knobs around would have meant two overlapping,
+occasionally-contradictory ways to say the same thing.
+
+`embed_batch()` applies channel selection and per-channel masking *before*
+the bag-of-channels-vs-joint-multichannel branch (§3 above) -- so, for a
+bag-of-channels model, `channel_pool` only ever pools over the selected
+channels, and for a fixed-channel-count model, `len(cfg.channels)` must
+equal that model's `in_chans` exactly (channel selection happens here in
+Python, not upstream in `dataset.py`, so a crop with more raw channels
+than the model needs is completely normal, not an error).
+
+**Not resolved by this work:** whether the `vit_small`/patch-8/5-channel
+checkpoint (§5 above) or this `vit_large`/patch-16/bag-of-channels one is
+the pipeline's actual intended production checkpoint is a product
+decision, not a code question -- `EmbedCellsConfig.checkpoint_path` and
+`params.yaml`'s `cell_dino_checkpoint` are deliberately left required-with-
+no-default (SPEC.md §9.1's Resolved note): a checkpoint path is inherently
+deployment-specific, and `weights/` is gitignored, so hardcoding either
+local path as *the* default would silently be wrong (or simply absent) in
+any other checkout. `load_cell_dino()`/`embed_batch()` now work correctly
+with either real checkpoint shape; picking which one a real run should
+point at, and what `channels`/`channel_apply_mask` that run should use, is
+left to whoever configures it.

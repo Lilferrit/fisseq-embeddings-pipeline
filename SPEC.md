@@ -448,6 +448,8 @@ class EmbedCellsConfig(AppConfig):
 
 **Masking (resolved as configurable):** `mask.npy` (§6.1) is always written into the shards, but whether it's *used* is an `EMBED_CELLS`-time decision, not a `BUILD_DATASET`-time one — `mask_mode="zero_background"` zeroes out every pixel not belonging to the target cell (per-crop, using that cell's own label in the mask) before running Cell-DINO; `mask_mode="none"` (default) passes the crop through untouched. Left as a knob rather than a fixed choice since Cell-DINO's own pretraining likely didn't use masked crops, so masking may hurt as easily as help — worth an empirical comparison rather than assuming either default is right.
 
+**Revision — configurable channels, per-channel masking:** the implementation generalizes both knobs above once real multi-channel crops and a second real checkpoint (`weights/channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth` — see the correction note above and `docs/architecture.md`) were in hand. `EmbedCellsConfig` gains `channels: list[int] = [0, 1, 2, 3]` (which of the crop's channel indices to actually embed, in order — a crop may carry more channels than the model should see, e.g. multiple imaging cycles) and replaces the single `mask_mode` enum with `channel_apply_mask: list[bool] = [True, True, True, True]` (same length as `channels`; per selected channel, whether the one shared per-cell mask gets applied to it). `channel_apply_mask` subsumes both of `mask_mode`'s states (all-`False` ≡ `"none"`, all-`True` ≡ `"zero_background"`) while also allowing a per-channel mix, so the two knobs were never kept side by side. `embed_batch()` selects/reorders `cfg.channels` and applies `cfg.channel_apply_mask` before the bag-of-channels-vs-joint-multichannel branch. See `docs/architecture.md`'s "Configurable input channels and per-channel masking" section and `IMPLEMENTATION_CHECKLIST.md` Epic 3.
+
 ```python
 def load_embedding_dataloader(cfg: EmbedCellsConfig) -> "torch.utils.data.DataLoader":
     """Stream (key, crop, mask, meta) batches from BUILD_DATASET's WebDataset shards.
@@ -992,8 +994,9 @@ edit_distance_threshold: 1
 
 cell_dino_checkpoint: null     # required, no default -- points at a real .pth
 cell_dino_crop_size: 224
+cell_dino_channels: [0, 1, 2, 3]
+cell_dino_channel_apply_mask: [true, true, true, true]
 cell_dino_channel_pool: "mean"
-cell_dino_mask_mode: "none"
 cell_dino_device: "cuda"
 cell_dino_batch_size: 256
 
