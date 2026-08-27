@@ -22,11 +22,18 @@ variant_barcode_count_threshold: 4
 edit_distance_threshold: 1
 
 # ── Cell Embeddings / Cell-DINO (EMBED_CELLS, §6.3) ─────────────────────────
+# Defaults here match weights/channel_adaptive_dino_vitl16_pretrain_cells-
+# ef7c17ff.pth's real, verified architecture (bag-of-channels vit_large/
+# patch16/224 -- see docs/architecture.md's "Real checkpoint" section).
+# cell_dino_checkpoint itself is deliberately left unset above (required,
+# no default -- SPEC.md §9.1) since a checkpoint path is deployment-
+# specific and weights/ is gitignored.
 cell_dino_arch: "vit_large"
 cell_dino_patch_size: 16
 cell_dino_crop_size: 224        # must match BUILD_DATASET's per-experiment `window`
+cell_dino_channels: [0, 1, 2, 3]                          # which crop channel indices to embed, in order
+cell_dino_channel_apply_mask: [true, true, true, true]    # one bool per cell_dino_channels entry
 cell_dino_channel_pool: "mean"  # mean | max | cls_concat
-cell_dino_mask_mode: "none"     # none | zero_background
 cell_dino_device: "cuda"
 cell_dino_batch_size: 256
 cell_dino_num_workers: 4
@@ -47,4 +54,10 @@ ovwt_min_cells: 250
 ovwt_downsample_wt: true
 
 # ── Global Variant Embeddings (GLOBAL_VARIANT_EMBEDDINGS, §6.7) ─────────────
-global_variant_embeddings_n_components: 50
+# No n_components entry (revision, per request) -- every retained principal
+# component is always computed and written (median_aggregate.parquet,
+# pca_scores.parquet, pca_components.parquet, pca_variance_explained.parquet).
+# cumulative_variance_explained instead controls only the additional
+# pca_reduced.parquet output (PC-truncated scores + propagated meta_is_control
+# + meta_impact_score computed on that reduced matrix).
+global_variant_embeddings_cumulative_variance_explained: 0.9

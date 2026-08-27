@@ -1,7 +1,10 @@
 // SPEC.md §6.8 -- GLOBAL_VARIANT_DISTINGUISHABILITY (Epic 8). Per-experiment
 // synonymous z-score, then cross-experiment median (§3 decision 9) -- not a
 // direct median of raw AUROC.
-// TODO(Epic 9): implement per IMPLEMENTATION_CHECKLIST.md Epic 9.
+//
+// `stageAs: "res_input_*.parquet"` avoids every experiment's identically-
+// named results.parquet colliding when collected into this one task, same
+// pattern/caveat as global_variant_embeddings.nf.
 
 process GLOBAL_VARIANT_DISTINGUISHABILITY {
     errorStrategy 'ignore'
@@ -9,7 +12,8 @@ process GLOBAL_VARIANT_DISTINGUISHABILITY {
     publishDir { "${params.pipeline_dir}/global/distinguishability" }, mode: 'copy'
 
     input:
-    path(results_parquets)
+    path(results_parquets, stageAs: "res_input_*.parquet")
+    val(batch_stems)
 
     output:
     path("global_scores.parquet")
@@ -18,6 +22,8 @@ process GLOBAL_VARIANT_DISTINGUISHABILITY {
     """
     python -m fisseq_embeddings_pipeline.global_distinguishability \\
         output_dir=. \\
+        'batch_stems=[${batch_stems.join(",")}]' \\
+        label_column=${params.filter_label_column} \\
         random_seed=${params.random_seed}
     """
 }

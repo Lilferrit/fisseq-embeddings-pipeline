@@ -1,8 +1,8 @@
 // SPEC.md §6.4 -- FILTER_EMBEDDINGS (Epic 4). Publishes only the QC-passed
-// join key + fitted Normalizer -- no emb_* columns (§3 decision 10).
-// TODO(Epic 9): wire into workflows/embeddings.nf and verify against a real
-// (small) Nextflow run per IMPLEMENTATION_CHECKLIST.md Epic 9 / Epic 4
-// Story 4.3's third bullet.
+// join key + fitted Normalizer -- no emb_* columns (§3 decision 10). Wired
+// into workflows/embeddings.nf (Epic 9); unverified against a real
+// `nextflow run` (no nextflow/docker available in this sandbox -- see
+// IMPLEMENTATION_CHECKLIST.md Epic 9 Story 9.3's note).
 
 process FILTER_EMBEDDINGS {
     errorStrategy 'ignore'
