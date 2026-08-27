@@ -57,3 +57,7 @@ ovwt_downsample_wt: true
 # No n_components entry (revision, per request) -- every retained principal
 # component is always computed and written (median_aggregate.parquet,
 # pca_scores.parquet, pca_components.parquet, pca_variance_explained.parquet).
+# cumulative_variance_explained instead controls only the additional
+# pca_reduced.parquet output (PC-truncated scores + propagated meta_is_control
+# + meta_impact_score computed on that reduced matrix).
+global_variant_embeddings_cumulative_variance_explained: 0.9

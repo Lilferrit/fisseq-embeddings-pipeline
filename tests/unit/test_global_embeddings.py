@@ -21,11 +21,14 @@ import pytest
 import fisseq_embeddings_pipeline.global_embeddings as m
 from fisseq_embeddings_pipeline.global_embeddings import (
     GlobalVariantEmbeddingsConfig,
+    _n_components_for_variance,
     global_variant_embeddings,
 )
 from fisseq_embeddings_pipeline.utils.constants import (
     COMPONENT_IDX_COL,
+    CONTROL_COLUMN_NAME,
     CUMULATIVE_VARIANCE_EXPLAINED_COL,
+    IMPACT_SCORE_COL,
     VARIANCE_EXPLAINED_COL,
 )
 
@@ -73,7 +76,7 @@ def test_global_variant_embeddings_median_df_has_one_row_per_distinct_variant(
     two_batches: tuple[pl.LazyFrame, pl.LazyFrame],
 ) -> None:
     batch1, batch2 = two_batches
-    median_df, _, _, _ = global_variant_embeddings(
+    median_df, _, _, _, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
     )
     # M1K appears in both batches and collapses to one row; the rest appear
@@ -95,7 +98,7 @@ def test_global_variant_embeddings_full_rank_not_a_fixed_default(
     SPEC.md's original fixed default of 50 (which 5 rows/4 dims couldn't
     even support)."""
     batch1, batch2 = two_batches
-    _, scores_df, components_df, variance_df = global_variant_embeddings(
+    _, scores_df, components_df, variance_df, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
     )
     pc_cols = [c for c in scores_df.columns if c.startswith("meta_pc_")]
@@ -108,7 +111,7 @@ def test_global_variant_embeddings_scores_df_columns(
     two_batches: tuple[pl.LazyFrame, pl.LazyFrame],
 ) -> None:
     batch1, batch2 = two_batches
-    _, scores_df, _, _ = global_variant_embeddings(
+    _, scores_df, _, _, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
     )
     assert scores_df.columns == [LABEL_COLUMN, "meta_pc_1", "meta_pc_2", "meta_pc_3", "meta_pc_4"]
@@ -121,7 +124,7 @@ def test_global_variant_embeddings_components_df_has_no_variance_columns(
     """Three-file split (revision, per request): pca_components.parquet
     carries loadings only -- variance-explained lives in its own file."""
     batch1, batch2 = two_batches
-    _, _, components_df, _ = global_variant_embeddings(
+    _, _, components_df, _, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
     )
     assert components_df.columns[0] == COMPONENT_IDX_COL
@@ -134,7 +137,7 @@ def test_global_variant_embeddings_variance_df_has_only_variance_columns(
     two_batches: tuple[pl.LazyFrame, pl.LazyFrame],
 ) -> None:
     batch1, batch2 = two_batches
-    _, _, _, variance_df = global_variant_embeddings(
+    _, _, _, variance_df, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
     )
     assert variance_df.columns == [
@@ -153,10 +156,10 @@ def test_global_variant_embeddings_random_seed_is_threaded_through(
     two_batches: tuple[pl.LazyFrame, pl.LazyFrame],
 ) -> None:
     batch1, batch2 = two_batches
-    _, scores_a, _, _ = global_variant_embeddings(
+    _, scores_a, _, _, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
     )
-    _, scores_b, _, _ = global_variant_embeddings(
+    _, scores_b, _, _, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
     )
     # Deterministic solver path at these matrix sizes -- same seed (or any
@@ -174,6 +177,156 @@ def test_global_variant_embeddings_random_seed_is_threaded_through(
         b_sorted.select(pc_cols).to_numpy(),
         atol=1e-8,
     )
+
+
+# ---------------------------------------------------------------------------
+# _n_components_for_variance() -- cumulative_variance_explained threshold
+# ---------------------------------------------------------------------------
+
+
+def _variance_df(cumulative: list[float]) -> pl.DataFrame:
+    n = len(cumulative)
+    ratios = [cumulative[0]] + [
+        cumulative[i] - cumulative[i - 1] for i in range(1, n)
+    ]
+    return pl.DataFrame(
+        {
+            COMPONENT_IDX_COL: list(range(1, n + 1)),
+            VARIANCE_EXPLAINED_COL: ratios,
+            CUMULATIVE_VARIANCE_EXPLAINED_COL: cumulative,
+        }
+    )
+
+
+def test_n_components_for_variance_picks_smallest_prefix_reaching_threshold() -> None:
+    variance_df = _variance_df([0.5, 0.8, 0.95, 1.0])
+    assert _n_components_for_variance(variance_df, 0.9) == 3
+
+
+def test_n_components_for_variance_exact_match_at_first_component() -> None:
+    variance_df = _variance_df([0.9, 0.95, 1.0])
+    assert _n_components_for_variance(variance_df, 0.9) == 1
+
+
+def test_n_components_for_variance_never_reached_keeps_every_component() -> None:
+    """A threshold above the achievable cumulative total (e.g. it never
+    quite reaches exactly 1.0 due to floating error) falls back to the
+    full retained rank, same as pca_components.parquet itself."""
+    variance_df = _variance_df([0.5, 0.8, 0.9999999])
+    assert _n_components_for_variance(variance_df, 1.0) == 3
+
+
+# ---------------------------------------------------------------------------
+# reduced_df -- pca_reduced.parquet (per request)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_batches_with_control() -> tuple[pl.LazyFrame, pl.LazyFrame]:
+    """Like two_batches, but with a real synonymous ("A1A") row in each
+    batch so meta_is_control/meta_impact_score have a non-trivial control
+    population to fit against."""
+    batch1 = _batch_aggregate(
+        ["A1A", "M2K", "M3K"],
+        [[0.0, 1.0, 2.0, 3.0], [1.0, 0.0, 3.0, 2.0], [2.0, 3.0, 0.0, 1.0]],
+    )
+    batch2 = _batch_aggregate(
+        ["A1A", "M4K", "M5K"],
+        [[2.0, 3.0, 0.0, 1.0], [3.0, 2.0, 1.0, 0.0], [0.0, 2.0, 3.0, 1.0]],
+    )
+    return batch1, batch2
+
+
+def test_global_variant_embeddings_reduced_df_is_truncated_to_threshold(
+    two_batches_with_control: tuple[pl.LazyFrame, pl.LazyFrame],
+) -> None:
+    batch1, batch2 = two_batches_with_control
+    _, scores_df, _, variance_df, reduced_df = global_variant_embeddings(
+        [batch1, batch2],
+        ["expt1", "expt2"],
+        LABEL_COLUMN,
+        random_seed=0,
+        cumulative_variance_explained=0.5,
+    )
+    full_pc_cols = [c for c in scores_df.columns if c.startswith("meta_pc_")]
+    reduced_pc_cols = [c for c in reduced_df.columns if c.startswith("meta_pc_")]
+    expected_n = _n_components_for_variance(variance_df, 0.5)
+    assert 0 < len(reduced_pc_cols) < len(full_pc_cols)
+    assert len(reduced_pc_cols) == expected_n
+    # The reduced matrix's leading components are byte-identical to the
+    # full matrix's leading components -- a true truncation, not a
+    # re-fit.
+    a = scores_df.sort(LABEL_COLUMN).select(reduced_pc_cols).to_numpy()
+    b = reduced_df.sort(LABEL_COLUMN).select(reduced_pc_cols).to_numpy()
+    np.testing.assert_allclose(a, b, atol=1e-8)
+
+
+def test_global_variant_embeddings_reduced_df_full_rank_when_threshold_is_one(
+    two_batches_with_control: tuple[pl.LazyFrame, pl.LazyFrame],
+) -> None:
+    batch1, batch2 = two_batches_with_control
+    _, scores_df, _, _, reduced_df = global_variant_embeddings(
+        [batch1, batch2],
+        ["expt1", "expt2"],
+        LABEL_COLUMN,
+        random_seed=0,
+        cumulative_variance_explained=1.0,
+    )
+    full_pc_cols = [c for c in scores_df.columns if c.startswith("meta_pc_")]
+    reduced_pc_cols = [c for c in reduced_df.columns if c.startswith("meta_pc_")]
+    # threshold=1.0 should keep essentially every component -- allow an
+    # off-by-one for the theoretical last (near-zero-eigenvalue) component,
+    # whose cumulative value can round to >= 1.0 one step early due to
+    # floating-point summation noise in np.cumsum.
+    assert len(reduced_pc_cols) >= len(full_pc_cols) - 1
+
+
+def test_global_variant_embeddings_reduced_df_has_propagated_metadata_and_impact_score(
+    two_batches_with_control: tuple[pl.LazyFrame, pl.LazyFrame],
+) -> None:
+    batch1, batch2 = two_batches_with_control
+    _, _, _, _, reduced_df = global_variant_embeddings(
+        [batch1, batch2],
+        ["expt1", "expt2"],
+        LABEL_COLUMN,
+        random_seed=0,
+        cumulative_variance_explained=0.9,
+    )
+    assert CONTROL_COLUMN_NAME in reduced_df.columns
+    assert IMPACT_SCORE_COL in reduced_df.columns
+    # A1A is the only synonymous label -- the sole control row.
+    control_rows = reduced_df.filter(pl.col(CONTROL_COLUMN_NAME))
+    assert control_rows[LABEL_COLUMN].to_list() == ["A1A"]
+    # meta_impact_score in [0, 1] for every row (up to floating noise), per
+    # compute_impact_score's own contract (cosine distance / 2).
+    for val in reduced_df[IMPACT_SCORE_COL].to_list():
+        assert -1e-6 <= val <= 1.0 + 1e-6
+    # The control row's own impact score should be ~0 (it's the reference
+    # point itself).
+    control_score = control_rows[IMPACT_SCORE_COL].to_list()[0]
+    assert control_score == pytest.approx(0.0, abs=1e-6)
+
+
+def test_global_variant_embeddings_raises_on_invalid_cumulative_variance_explained(
+    two_batches_with_control: tuple[pl.LazyFrame, pl.LazyFrame],
+) -> None:
+    batch1, batch2 = two_batches_with_control
+    with pytest.raises(ValueError, match="cumulative_variance_explained"):
+        global_variant_embeddings(
+            [batch1, batch2],
+            ["expt1", "expt2"],
+            LABEL_COLUMN,
+            random_seed=0,
+            cumulative_variance_explained=0.0,
+        )
+    with pytest.raises(ValueError, match="cumulative_variance_explained"):
+        global_variant_embeddings(
+            [batch1, batch2],
+            ["expt1", "expt2"],
+            LABEL_COLUMN,
+            random_seed=0,
+            cumulative_variance_explained=1.5,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -231,12 +384,65 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path) -> None:
     scores_df = pl.read_parquet(output_dir / "pca_scores.parquet")
     components_df = pl.read_parquet(output_dir / "pca_components.parquet")
     variance_df = pl.read_parquet(output_dir / "pca_variance_explained.parquet")
+    reduced_df = pl.read_parquet(output_dir / "pca_reduced.parquet")
 
     assert sorted(median_df[LABEL_COLUMN].to_list()) == ["M1K", "M2K", "M3K"]
     assert scores_df.height == 3
     assert components_df.height == variance_df.height
     assert VARIANCE_EXPLAINED_COL not in components_df.columns
     assert VARIANCE_EXPLAINED_COL in variance_df.columns
+    assert reduced_df.height == 3
+    assert CONTROL_COLUMN_NAME in reduced_df.columns
+    assert IMPACT_SCORE_COL in reduced_df.columns
+    full_pc_cols = [c for c in scores_df.columns if c.startswith("meta_pc_")]
+    reduced_pc_cols = [c for c in reduced_df.columns if c.startswith("meta_pc_")]
+    assert len(reduced_pc_cols) <= len(full_pc_cols)
+
+
+def test_main_cumulative_variance_explained_is_configurable(tmp_path: Path) -> None:
+    batch1 = pl.DataFrame(
+        {
+            LABEL_COLUMN: ["A1A", "M2K", "M3K"],
+            "emb_0000": [0.0, 1.0, 2.0],
+            "emb_0001": [1.0, 0.0, 3.0],
+            "emb_0002": [0.5, 2.0, 1.0],
+        }
+    )
+    batch_stems = _write_staged_aggregate_files(tmp_path, [batch1])
+    output_dir = tmp_path / "out"
+
+    result = _run_global_embeddings(
+        tmp_path,
+        f"output_dir={output_dir}",
+        f"batch_stems=[{','.join(batch_stems)}]",
+        "cumulative_variance_explained=1.0",
+    )
+    assert result.returncode == 0, result.stderr
+
+    scores_df = pl.read_parquet(output_dir / "pca_scores.parquet")
+    reduced_df = pl.read_parquet(output_dir / "pca_reduced.parquet")
+    full_pc_cols = [c for c in scores_df.columns if c.startswith("meta_pc_")]
+    reduced_pc_cols = [c for c in reduced_df.columns if c.startswith("meta_pc_")]
+    # threshold=1.0 keeps essentially every component -- see the
+    # off-by-one note in test_global_variant_embeddings_reduced_df_full_rank_when_threshold_is_one.
+    assert len(reduced_pc_cols) >= len(full_pc_cols) - 1
+
+
+def test_main_raises_on_invalid_cumulative_variance_explained(tmp_path: Path) -> None:
+    batch1 = pl.DataFrame(
+        {LABEL_COLUMN: ["A1A", "M2K"], "emb_0000": [0.0, 1.0]}
+    )
+    batch_stems = _write_staged_aggregate_files(tmp_path, [batch1])
+    output_dir = tmp_path / "out"
+
+    result = _run_global_embeddings(
+        tmp_path,
+        f"output_dir={output_dir}",
+        f"batch_stems=[{','.join(batch_stems)}]",
+        "cumulative_variance_explained=0",
+    )
+    assert result.returncode != 0
+    assert "cumulative_variance_explained" in result.stderr
 
 
 def test_main_raises_on_empty_batch_stems(tmp_path: Path) -> None:

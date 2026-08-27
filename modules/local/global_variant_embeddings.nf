@@ -13,6 +13,10 @@
 //
 // No n_components param (revision, per request) -- global_embeddings.py
 // always computes the full retained PCA rank itself.
+//
+// cumulative_variance_explained (default 0.9) controls only the extra
+// pca_reduced.parquet output -- the full-rank pca_scores.parquet/
+// pca_components.parquet/pca_variance_explained.parquet are unaffected.
 
 process GLOBAL_VARIANT_EMBEDDINGS {
     errorStrategy 'ignore'
@@ -24,7 +28,7 @@ process GLOBAL_VARIANT_EMBEDDINGS {
     val(batch_stems)
 
     output:
-    tuple path("median_aggregate.parquet"), path("pca_scores.parquet"), path("pca_components.parquet"), path("pca_variance_explained.parquet")
+    tuple path("median_aggregate.parquet"), path("pca_scores.parquet"), path("pca_components.parquet"), path("pca_variance_explained.parquet"), path("pca_reduced.parquet")
 
     script:
     """
@@ -32,6 +36,7 @@ process GLOBAL_VARIANT_EMBEDDINGS {
         output_dir=. \\
         'batch_stems=[${batch_stems.join(",")}]' \\
         label_column=${params.filter_label_column} \\
+        cumulative_variance_explained=${params.global_variant_embeddings_cumulative_variance_explained} \\
         random_seed=${params.random_seed}
     """
 }

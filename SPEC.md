@@ -153,6 +153,7 @@ fisseq-embeddings-pipeline/
       xgbparams.py                # vendored from utils/xgbparams.py
       dimreduction.py             # vendored from utils/dimreduction.py (compute_pca), + random_state passthrough (§6.7)
       globalfeatureselect.py      # vendored from globalfeatureselect.py (median_across_batches only, §6.7)
+      vectors.py                  # vendored from utils/vectors.py (compute_impact_score/compute_cosine_distance only, §6.7)
       nextflow_staging.py         # shared stageAs-numbered-filename reconstruction helper (§6.7/§6.8's aggregate.parquet/results.parquet collision)
       log.py                      # vendored from utils/log.py
   docs/
@@ -803,9 +804,23 @@ def global_variant_embeddings(
 
 Called with `random_seed=cfg.random_seed` (inherited from `AppConfig`, §3 decision 11). Every contributing experiment's `aggregate.parquet` shares the same filename, so (mirroring `fisseq-data-pipeline`'s own `globalfeatureselect.py` precedent for the identical collision) the Nextflow module stages them via `path(aggregate_parquets, stageAs: "agg_input_*.parquet")` and `global_embeddings.py`'s `main()` reconstructs `agg_input_1.parquet..agg_input_{n}.parquet` positionally against a paired `batch_stems: list[str]` config field, rather than taking an explicit path list.
 
-**Output:** `global/embeddings/median_aggregate.parquet` (pre-PCA, one row per variant across all experiments), `global/embeddings/pca_scores.parquet` (`meta_aa_changes`, `meta_pc_1..meta_pc_{n}`), `global/embeddings/pca_components.parquet` (`meta_component_idx` + one column per retained feature holding that component's loading — no variance-explained columns), `global/embeddings/pca_variance_explained.parquet` (`meta_component_idx`, `meta_variance_explained`, `meta_cumulative_variance_explained`) — this is **Global Variant Embeddings**.
+**Output:** `global/embeddings/median_aggregate.parquet` (pre-PCA, one row per variant across all experiments), `global/embeddings/pca_scores.parquet` (`meta_aa_changes`, `meta_pc_1..meta_pc_{n}`), `global/embeddings/pca_components.parquet` (`meta_component_idx` + one column per retained feature holding that component's loading — no variance-explained columns), `global/embeddings/pca_variance_explained.parquet` (`meta_component_idx`, `meta_variance_explained`, `meta_cumulative_variance_explained`), `global/embeddings/pca_reduced.parquet` (see the next Revision note) — this is **Global Variant Embeddings**.
 
 ~~**Resolved:** `n_components` defaults to **50**. ...~~ Superseded by the Revision note above — no default to resolve, since the field no longer exists.
+
+**Further revision — a variance-thresholded reduced view, `pca_reduced.parquet` (per request).** `GlobalVariantEmbeddingsConfig` gains `cumulative_variance_explained: float = 0.9`, which does **not** change `pca_scores.parquet`/`pca_components.parquet`/`pca_variance_explained.parquet` (those three are always full rank) — it only controls this fifth output. `pca_reduced.parquet` truncates `pca_scores.parquet` to its leading `k` components, where `k` is the smallest prefix whose `meta_cumulative_variance_explained` reaches the threshold (falling back to every component if the threshold is never reached), then attaches two more columns computed on that truncated matrix:
+
+- `meta_is_control`, re-derived via `variant_classification()` — `median_across_batches` (this section's own vendored function) drops every metadata column but `label_column` when it collapses each experiment's rows into one cross-experiment table, so this is that same control/synonymous classification "propagated" back onto the final per-variant table (mirrors `globalfeatureselect.py`'s own real `main()`, which does the identical re-derivation for the same reason — see its docstring's step 6: "re-derive `meta_is_control` ... lost in step 3's metadata collapse").
+- `meta_impact_score`, via `utils/vectors.py`'s `compute_impact_score` (vendored unchanged from `fisseq-data-pipeline`'s `utils/vectors.py` — cosine distance from the control/synonymous median, scaled to `[0, 1]`), computed **on the reduced PC matrix itself**, per request — unlike `globalfeatureselect.py`'s own `main()`, which computes impact score pre-PCA on the original feature matrix and only appends PCA scores afterward as extra columns. Since `compute_impact_score` selects its feature columns via `FEATURE_SELECTOR` (exclude `meta_*`), and the PC columns are themselves named `meta_pc_*`, `global_embeddings.py` temporarily strips their `meta_` prefix for this one call, then restores it.
+
+```python
+def _n_components_for_variance(variance_df, cumulative_variance_explained: float) -> int:
+    cumulative = variance_df[CUMULATIVE_VARIANCE_EXPLAINED_COL].to_list()
+    for n, value in enumerate(cumulative, start=1):
+        if value >= cumulative_variance_explained:
+            return n
+    return len(cumulative)  # threshold never reached -- keep every component
+```
 
 ### 6.8 Global Variant Distinguish-ability Scores — `GLOBAL_VARIANT_DISTINGUISHABILITY`
 
@@ -1020,6 +1035,8 @@ ovwt_downsample_wt: true
 
 # No global_variant_embeddings_n_components entry (§6.7's Revision note) --
 # GLOBAL_VARIANT_EMBEDDINGS always computes PCA at full retained rank.
+# cumulative_variance_explained controls only the extra pca_reduced.parquet.
+global_variant_embeddings_cumulative_variance_explained: 0.9
 ```
 
 **Resolved:** one open question this raises that `fisseq-data-pipeline`'s single-file convention didn't have — a `-params-file params.yaml` invocation is mandatory (there's no `nextflow.config`-embedded fallback if a user forgets `-params-file`), so `main.nf` should fail fast with a clear message if a required param like `pipeline_dir` or `cell_dino_checkpoint` comes back `null`/unset, rather than letting Nextflow's own less-specific "no such property" error surface first.

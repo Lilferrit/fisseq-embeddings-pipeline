@@ -28,7 +28,36 @@ frame. Here, :func:`global_variant_embeddings` splits
 ``pca_components.parquet`` (loadings only) and
 ``pca_variance_explained.parquet`` (both variance-explained columns, one
 row per component) -- plus ``pca_scores.parquet`` and the pre-PCA
-``median_aggregate.parquet``, for four output files total.
+``median_aggregate.parquet``.
+
+**Further revision (per request): a fifth output, ``pca_reduced.parquet``.**
+The full ``meta_pc_1..meta_pc_{n}`` matrix (``pca_scores.parquet``) is still
+written in full, unchanged -- this adds a *reduced* view on top of it,
+truncated to the smallest number of leading components whose cumulative
+variance explained reaches a new ``cumulative_variance_explained: float =
+0.9`` config threshold (:func:`_n_components_for_variance`), plus two
+pieces of per-variant metadata computed on that reduced matrix, mirroring
+fisseq-data-pipeline's own ``globalfeatureselect.py`` step 6 (see that
+module's docstring: "re-derive meta_is_control ... lost in [the
+cross-batch median's] metadata collapse, and compute each variant's
+cosine-distance impact score against the control median"):
+
+- ``meta_is_control``, re-derived via :func:`~fisseq_embeddings_pipeline.filter.variant_classification`
+  (``median_across_batches`` drops every metadata column but
+  ``label_column`` when it collapses each batch to one cross-experiment
+  row -- this is that same metadata, "propagated" back onto the final
+  per-variant table).
+- ``meta_impact_score``, via :func:`~fisseq_embeddings_pipeline.utils.vectors.compute_impact_score`
+  (cosine distance from the control/synonymous median, scaled to
+  ``[0, 1]``) -- **computed on the reduced PC matrix itself** (per
+  request), not on the original ``emb_*`` feature matrix the way
+  ``globalfeatureselect.py``'s own ``main()`` orders it (there, impact
+  score is computed pre-PCA and PCA scores are appended afterward as
+  extra columns). ``compute_impact_score`` determines its feature columns
+  via ``FEATURE_SELECTOR`` (exclude ``meta_*``), which would otherwise
+  exclude the ``meta_pc_*`` columns themselves -- :func:`_impact_score_on_reduced_pcs`
+  works around this by temporarily stripping their ``meta_`` prefix for
+  the duration of that one call, then restoring it.
 """
 
 import dataclasses
@@ -42,16 +71,19 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
+from .filter import variant_classification
 from .utils.constants import (
     COMPONENT_IDX_COL,
     CUMULATIVE_VARIANCE_EXPLAINED_COL,
     FEATURE_SELECTOR,
+    PC_COL_PREFIX,
     VARIANCE_EXPLAINED_COL,
 )
 from .utils.dimreduction import compute_pca
 from .utils.globalfeatureselect import median_across_batches
 from .utils.log import setup_logging
 from .utils.nextflow_staging import reconstruct_staged_paths
+from .utils.vectors import compute_impact_score
 
 
 def _full_rank(df: pl.DataFrame, label_column: str) -> int:
@@ -69,15 +101,92 @@ def _full_rank(df: pl.DataFrame, label_column: str) -> int:
     return min(df.height, n_retained)
 
 
+def _n_components_for_variance(
+    variance_df: pl.DataFrame, cumulative_variance_explained: float
+) -> int:
+    """
+    Smallest number of leading components whose
+    ``meta_cumulative_variance_explained`` reaches ``cumulative_variance_explained``.
+
+    ``variance_df`` (see :func:`global_variant_embeddings`) is already
+    ordered by ``meta_component_idx`` ascending (``compute_pca``'s own
+    construction order), so this is a first-match scan, not a sort. If the
+    threshold is never reached (e.g. it exceeds every component's own
+    cumulative total, which tops out just under/at ``1.0``), every
+    component is kept -- the full retained rank, same as
+    ``pca_components.parquet``/``pca_scores.parquet`` themselves.
+
+    Parameters
+    ----------
+    variance_df : pl.DataFrame
+        As returned by :func:`global_variant_embeddings` -- one row per
+        component, ascending ``meta_component_idx``, with
+        ``meta_cumulative_variance_explained``.
+    cumulative_variance_explained : float
+        Threshold in ``(0, 1]``.
+
+    Returns
+    -------
+    int
+        Number of leading components to retain, at least 1.
+    """
+    cumulative = variance_df[CUMULATIVE_VARIANCE_EXPLAINED_COL].to_list()
+    for n, value in enumerate(cumulative, start=1):
+        if value >= cumulative_variance_explained:
+            return n
+    return len(cumulative)
+
+
+def _impact_score_on_reduced_pcs(
+    scores_df: pl.DataFrame, label_column: str, n_selected: int
+) -> pl.DataFrame:
+    """
+    Truncate ``scores_df`` to its leading ``n_selected`` components, re-derive
+    ``meta_is_control``, and compute a cosine-distance impact score against
+    the control/synonymous median -- all on that reduced PC matrix (see this
+    module's docstring for why, and why the ``meta_pc_*`` columns need a
+    temporary rename first).
+
+    Parameters
+    ----------
+    scores_df : pl.DataFrame
+        Full-rank PCA scores (``label_column`` plus every
+        ``meta_pc_1..meta_pc_{n}``), as returned by :func:`global_variant_embeddings`.
+    label_column : str
+        Name of the column identifying variant labels.
+    n_selected : int
+        Number of leading components to retain (see
+        :func:`_n_components_for_variance`).
+
+    Returns
+    -------
+    pl.DataFrame
+        ``label_column``, ``meta_pc_1..meta_pc_{n_selected}``,
+        ``meta_is_control``, ``meta_impact_score``.
+    """
+    pc_cols = [f"{PC_COL_PREFIX}{i}" for i in range(1, n_selected + 1)]
+    reduced_lf = scores_df.select([label_column, *pc_cols]).lazy()
+    classified = variant_classification(reduced_lf, label_column)
+
+    # compute_impact_score selects its feature columns via FEATURE_SELECTOR
+    # (exclude meta_*) -- meta_pc_* columns would otherwise be invisible to
+    # it. Strip the prefix for this one call only, then restore it.
+    strip_prefix = {c: c.removeprefix("meta_") for c in pc_cols}
+    restore_prefix = {v: k for k, v in strip_prefix.items()}
+    with_impact = compute_impact_score(classified.rename(strip_prefix))
+    return with_impact.rename(restore_prefix).collect()
+
+
 def global_variant_embeddings(
     batch_aggregate_lfs: List[pl.LazyFrame],
     batch_labels: List[str],
     label_column: str,
     random_seed: int,
-) -> Tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    cumulative_variance_explained: float = 0.9,
+) -> Tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """
     Median-pool each experiment's per-variant aggregate embedding, then PCA
-    at full retained rank.
+    at full retained rank, plus a variance-thresholded reduced view.
 
     Parameters
     ----------
@@ -94,23 +203,45 @@ def global_variant_embeddings(
     random_seed : int
         Seed threaded into ``compute_pca``'s ``random_state`` (SPEC.md §3
         decision 11).
+    cumulative_variance_explained : float
+        Threshold in ``(0, 1]`` used to select the leading components kept
+        in ``reduced_df`` (see :func:`_n_components_for_variance`). Defaults
+        to ``0.9``.
 
     Returns
     -------
-    tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]
-        ``(median_df, scores_df, components_df, variance_df)``:
+    tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]
+        ``(median_df, scores_df, components_df, variance_df, reduced_df)``:
 
         - ``median_df``: pre-PCA cross-experiment median aggregate, one row
           per variant.
         - ``scores_df``: one row per variant, ``label_column`` plus every
-          retained ``meta_pc_1..meta_pc_{n}`` projection.
+          retained ``meta_pc_1..meta_pc_{n}`` projection (full rank, not
+          truncated -- see ``reduced_df`` for the truncated view).
         - ``components_df``: one row per component (``meta_component_idx``),
           one column per retained feature holding that component's loading
           -- variance-explained columns are *not* included here (see
           ``variance_df``).
         - ``variance_df``: one row per component (``meta_component_idx``),
           ``meta_variance_explained`` and ``meta_cumulative_variance_explained``.
+        - ``reduced_df``: one row per variant, ``label_column`` plus
+          ``meta_pc_1..meta_pc_{k}`` (``k <= n``, the smallest prefix whose
+          cumulative variance explained reaches
+          ``cumulative_variance_explained``), plus ``meta_is_control`` and
+          ``meta_impact_score`` computed on that reduced matrix -- see this
+          module's docstring.
+
+    Raises
+    ------
+    ValueError
+        If ``cumulative_variance_explained`` is not in ``(0, 1]``.
     """
+    if not (0.0 < cumulative_variance_explained <= 1.0):
+        raise ValueError(
+            "cumulative_variance_explained must be in (0, 1], got "
+            f"{cumulative_variance_explained}"
+        )
+
     median_df = median_across_batches(batch_aggregate_lfs, label_column, batch_labels)
 
     n_components = _full_rank(median_df, label_column)
@@ -128,7 +259,16 @@ def global_variant_embeddings(
         VARIANCE_EXPLAINED_COL, CUMULATIVE_VARIANCE_EXPLAINED_COL
     )
 
-    return median_df, scores_df, components_df, variance_df
+    n_selected = _n_components_for_variance(variance_df, cumulative_variance_explained)
+    logging.info(
+        "Reducing to %d/%d component(s) (cumulative_variance_explained=%.4f)",
+        n_selected,
+        n_components,
+        cumulative_variance_explained,
+    )
+    reduced_df = _impact_score_on_reduced_pcs(scores_df, label_column, n_selected)
+
+    return median_df, scores_df, components_df, variance_df, reduced_df
 
 
 @dataclasses.dataclass
@@ -152,13 +292,22 @@ class GlobalVariantEmbeddingsConfig(AppConfig):
         ``aggregate.parquet``-per-experiment collision).
     label_column : str
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
+    cumulative_variance_explained : float
+        Threshold in ``(0, 1]`` selecting the leading components kept in
+        ``pca_reduced.parquet`` (see this module's docstring). Defaults to
+        ``0.9``.
 
     No ``n_components`` field -- see this module's docstring: every
-    retained principal component is always computed and written.
+    retained principal component is always computed and written (to
+    ``pca_scores.parquet``/``pca_components.parquet``/
+    ``pca_variance_explained.parquet``) regardless of
+    ``cumulative_variance_explained``, which only affects the separate,
+    additional ``pca_reduced.parquet``.
     """
 
     batch_stems: List[str] = MISSING
     label_column: str = "meta_aa_changes"
+    cumulative_variance_explained: float = 0.9
 
 
 _cs = ConfigStore.instance()
@@ -174,7 +323,7 @@ def main(cfg: DictConfig) -> None:
     the calling Nextflow process as ``agg_input_1.parquet``,
     ``agg_input_2.parquet``, ... in the same order (see
     ``modules/local/global_variant_embeddings.nf``), calls
-    :func:`global_variant_embeddings`, and writes four output files to
+    :func:`global_variant_embeddings`, and writes five output files to
     ``output_dir``.
 
     Output files
@@ -183,6 +332,7 @@ def main(cfg: DictConfig) -> None:
     - ``{prefix}pca_scores.parquet``
     - ``{prefix}pca_components.parquet``
     - ``{prefix}pca_variance_explained.parquet``
+    - ``{prefix}pca_reduced.parquet``
 
     where ``prefix`` is ``{output_root}.`` when ``output_root`` is set,
     otherwise empty.
@@ -216,8 +366,14 @@ def main(cfg: DictConfig) -> None:
     )
     batch_aggregate_lfs = [pl.scan_parquet(p) for p in agg_paths]
 
-    median_df, scores_df, components_df, variance_df = global_variant_embeddings(
-        batch_aggregate_lfs, ge_cfg.batch_stems, ge_cfg.label_column, ge_cfg.random_seed
+    median_df, scores_df, components_df, variance_df, reduced_df = (
+        global_variant_embeddings(
+            batch_aggregate_lfs,
+            ge_cfg.batch_stems,
+            ge_cfg.label_column,
+            ge_cfg.random_seed,
+            ge_cfg.cumulative_variance_explained,
+        )
     )
 
     median_path = output_dir / f"{prefix}median_aggregate.parquet"
@@ -235,6 +391,10 @@ def main(cfg: DictConfig) -> None:
     variance_path = output_dir / f"{prefix}pca_variance_explained.parquet"
     logging.info("Writing %s", variance_path)
     variance_df.write_parquet(variance_path)
+
+    reduced_path = output_dir / f"{prefix}pca_reduced.parquet"
+    logging.info("Writing %s", reduced_path)
+    reduced_df.write_parquet(reduced_path)
 
     logging.info("Done")
 
