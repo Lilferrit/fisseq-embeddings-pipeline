@@ -46,9 +46,7 @@ def _batch_aggregate(labels: list[str], values: list[list[float]]) -> pl.LazyFra
     return pl.DataFrame(
         {
             LABEL_COLUMN: labels,
-            **{
-                f"emb_{i:04d}": [row[i] for row in values] for i in range(n_dims)
-            },
+            **{f"emb_{i:04d}": [row[i] for row in values] for i in range(n_dims)},
         }
     ).lazy()
 
@@ -114,7 +112,13 @@ def test_global_variant_embeddings_scores_df_columns(
     _, scores_df, _, _, _ = global_variant_embeddings(
         [batch1, batch2], ["expt1", "expt2"], LABEL_COLUMN, random_seed=0
     )
-    assert scores_df.columns == [LABEL_COLUMN, "meta_pc_1", "meta_pc_2", "meta_pc_3", "meta_pc_4"]
+    assert scores_df.columns == [
+        LABEL_COLUMN,
+        "meta_pc_1",
+        "meta_pc_2",
+        "meta_pc_3",
+        "meta_pc_4",
+    ]
     assert scores_df.height == 5
 
 
@@ -186,9 +190,7 @@ def test_global_variant_embeddings_random_seed_is_threaded_through(
 
 def _variance_df(cumulative: list[float]) -> pl.DataFrame:
     n = len(cumulative)
-    ratios = [cumulative[0]] + [
-        cumulative[i] - cumulative[i - 1] for i in range(1, n)
-    ]
+    ratios = [cumulative[0]] + [cumulative[i] - cumulative[i - 1] for i in range(1, n)]
     return pl.DataFrame(
         {
             COMPONENT_IDX_COL: list(range(1, n + 1)),
@@ -434,9 +436,7 @@ def test_main_cumulative_variance_explained_is_configurable(tmp_path: Path) -> N
 
 
 def test_main_raises_on_invalid_cumulative_variance_explained(tmp_path: Path) -> None:
-    batch1 = pl.DataFrame(
-        {LABEL_COLUMN: ["A1A", "M2K"], "emb_0000": [0.0, 1.0]}
-    )
+    batch1 = pl.DataFrame({LABEL_COLUMN: ["A1A", "M2K"], "emb_0000": [0.0, 1.0]})
     batch_stems = _write_staged_aggregate_files(tmp_path, [batch1])
     output_dir = tmp_path / "out"
 

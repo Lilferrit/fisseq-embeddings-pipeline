@@ -143,9 +143,7 @@ def _write_synthetic_experiment(exp_dir: Path) -> Path:
     centers = []
     barcodes = []
     aa_changes = []
-    grid_positions = [
-        (20 + 15 * i, 20 + 15 * j) for i in range(5) for j in range(5)
-    ]
+    grid_positions = [(20 + 15 * i, 20 + 15 * j) for i in range(5) for j in range(5)]
     pos_iter = iter(grid_positions)
     for label, (barcode_pattern, n_barcodes, n_cells_per_barcode) in _VARIANTS.items():
         for b in range(n_barcodes):
@@ -228,7 +226,9 @@ def test_dataset_and_embeddings_produced(pipeline_outputs):
     exp_dir, _ = pipeline_outputs
     metadata = pl.read_parquet(exp_dir / "dataset" / "batch1" / "metadata.parquet")
     assert metadata.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
-    embeddings = pl.read_parquet(exp_dir / "embeddings" / "batch1" / "embeddings.parquet")
+    embeddings = pl.read_parquet(
+        exp_dir / "embeddings" / "batch1" / "embeddings.parquet"
+    )
     assert embeddings.height == metadata.height
     assert any(c.startswith("emb_") for c in embeddings.columns)
 
@@ -237,16 +237,78 @@ def test_filter_embeddings_has_no_embedding_columns(pipeline_outputs):
     """SPEC.md §3 decision 10: filtered_keys.parquet must never carry
     emb_* columns, only the join key + classification."""
     exp_dir, _ = pipeline_outputs
-    df = pl.read_parquet(exp_dir / "filter_embeddings" / "batch1" / "filtered_keys.parquet")
+    df = pl.read_parquet(
+        exp_dir / "filter_embeddings" / "batch1" / "filtered_keys.parquet"
+    )
     assert not any(c.startswith("emb_") for c in df.columns)
 
 
 def test_aggregate_and_ovwt_outputs_exist(pipeline_outputs):
     exp_dir, _ = pipeline_outputs
-    agg = pl.read_parquet(exp_dir / "feature_select_batchwise" / "batch1" / "aggregate.parquet")
+    agg = pl.read_parquet(
+        exp_dir / "feature_select_batchwise" / "batch1" / "aggregate.parquet"
+    )
     assert agg.height >= 1
     results = pl.read_parquet(exp_dir / "ovwt_batchwise" / "batch1" / "results.parquet")
     assert {"auroc_pooled", "auroc_median_barcode"}.issubset(results.columns)
+
+
+def test_fails_fast_when_pipeline_dir_missing(tmp_path):
+    """SPEC.md §9.1's Resolved note / Epic 10 Story 10.1: a required-with-
+    no-default param left unset must fail with EmbeddingsPipeline's own
+    specific message, not Nextflow's generic 'no such property' error --
+    and it must fail before scheduling any process (no synthetic fixture
+    needed here, unlike pipeline_outputs above)."""
+    if shutil.which("nextflow") is None:
+        pytest.skip("nextflow not on PATH -- see this module's docstring")
+
+    result = subprocess.run(
+        [
+            "nextflow",
+            "run",
+            str(_PROJECT_ROOT),
+            "-ansi-log",
+            "false",
+            "-profile",
+            "local",
+            "-params-file",
+            str(_PROJECT_ROOT / "params.yaml"),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode != 0
+    assert "ERROR: --pipeline_dir is required." in result.stderr + result.stdout
+
+
+def test_fails_fast_when_cell_dino_checkpoint_missing(tmp_path):
+    """Same as above, for the other required-with-no-default param."""
+    if shutil.which("nextflow") is None:
+        pytest.skip("nextflow not on PATH -- see this module's docstring")
+
+    result = subprocess.run(
+        [
+            "nextflow",
+            "run",
+            str(_PROJECT_ROOT),
+            "-ansi-log",
+            "false",
+            "-profile",
+            "local",
+            "-params-file",
+            str(_PROJECT_ROOT / "params.yaml"),
+            "--pipeline_dir",
+            str(tmp_path),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode != 0
+    assert "ERROR: --cell_dino_checkpoint is required" in result.stderr + result.stdout
 
 
 def test_global_stage_outputs_exist(pipeline_outputs):
@@ -260,4 +322,6 @@ def test_global_stage_outputs_exist(pipeline_outputs):
         "pca_reduced.parquet",
     ):
         assert (global_embeddings_dir / name).exists(), name
-    assert (exp_dir / "global" / "distinguishability" / "global_scores.parquet").exists()
+    assert (
+        exp_dir / "global" / "distinguishability" / "global_scores.parquet"
+    ).exists()

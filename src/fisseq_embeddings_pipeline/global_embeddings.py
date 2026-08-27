@@ -245,9 +245,7 @@ def global_variant_embeddings(
     median_df = median_across_batches(batch_aggregate_lfs, label_column, batch_labels)
 
     n_components = _full_rank(median_df, label_column)
-    logging.info(
-        "Computing PCA at full retained rank (n_components=%d)", n_components
-    )
+    logging.info("Computing PCA at full retained rank (n_components=%d)", n_components)
     scores_df, full_components_df = compute_pca(
         median_df, label_column, n_components, random_state=random_seed
     )

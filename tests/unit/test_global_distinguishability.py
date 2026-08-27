@@ -60,9 +60,7 @@ def test_global_variant_distinguishability_raises_on_empty_input() -> None:
 
 
 def test_global_variant_distinguishability_output_columns() -> None:
-    df = _results_df(
-        ["A1A", "A2A", "M1K"], [0.5, 0.6, 0.9], [0.5, 0.55, 0.85]
-    )
+    df = _results_df(["A1A", "A2A", "M1K"], [0.5, 0.6, 0.9], [0.5, 0.55, 0.85])
     result = global_variant_distinguishability([df], LABEL_COLUMN)
     assert set(result.columns) == {
         LABEL_COLUMN,
@@ -147,7 +145,9 @@ def test_global_variant_distinguishability_graceful_degradation_zero_variance() 
 # ---------------------------------------------------------------------------
 
 
-def _write_staged_results_files(tmp_path: Path, batches: list[pl.DataFrame]) -> list[str]:
+def _write_staged_results_files(
+    tmp_path: Path, batches: list[pl.DataFrame]
+) -> list[str]:
     """Write batches[i] to res_input_{i+1}.parquet, mimicking Nextflow's
     `stageAs: "res_input_*.parquet"` 1-indexed numbering."""
     stems = []
