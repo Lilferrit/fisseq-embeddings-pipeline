@@ -1,0 +1,72 @@
+site_name: Fisseq Embeddings Pipeline
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Architecture: architecture.md
+  - Nextflow Workflow: nextflow.md
+  - Configuration: configuration.md
+  - Stage Reference:
+      - Cell Dataset (BUILD_DATASET): cli/dataset.md
+      - QC Filtering (QC_FILTER): cli/qcfilter.md
+      - Cell Embeddings (EMBED_CELLS): cli/embed.md
+      - Filter Embeddings (FILTER_EMBEDDINGS): cli/filter.md
+      - Aggregation (AGGREGATE_EMBEDDINGS): cli/aggregate.md
+      - OVWT Distinguish-ability (OVWT_BATCHWISE): cli/ovwt.md
+      - Global Variant Embeddings: cli/global_embeddings.md
+      - Global Variant Distinguish-ability: cli/global_distinguishability.md
+  - API Reference:
+      - dataset: api/dataset.md
+      - qcfilter: api/qcfilter.md
+      - embed: api/embed.md
+      - filter: api/filter.md
+      - aggregate: api/aggregate.md
+      - ovwt: api/ovwt.md
+      - global_embeddings: api/global_embeddings.md
+      - global_distinguishability: api/global_distinguishability.md
+      - config: api/config.md
+      - utils: api/utils.md
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - content.code.copy
+markdown_extensions:
+  - toc:
+      permalink: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            docstring_section_style: table
+            show_root_heading: true
+            show_signature: true
+            separate_signature: true
+            show_signature_annotations: true
+            show_source: true
+            heading_level: 3

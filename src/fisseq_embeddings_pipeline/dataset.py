@@ -74,8 +74,8 @@ class BuildDatasetConfig(AppConfig):
         {segmentation_type}_mask.tif). Defaults to "cells".
     use_corrected : bool
         Whether to read corrected_pt.tif or raw_pt.tif (mirrors
-        starcall-workflow's config['phenotyping']['use_corrected'], whose
-        own default is False). Defaults to False.
+        starcall-workflow's ``config["phenotyping"]["use_corrected"]``,
+        whose own default is False). Defaults to False.
     window : int
         Crop size BUILD_DATASET itself produces around each cell's
         bbox-derived center, matching the loaded Cell-DINO checkpoint's
