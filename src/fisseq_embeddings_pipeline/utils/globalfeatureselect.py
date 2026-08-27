@@ -2,15 +2,13 @@
 
 Vendored unchanged from fisseq-data-pipeline's
 src/fisseq_data_pipeline/globalfeatureselect.py's ``median_across_batches``
-(SPEC.md §6.7's Purpose note: "a direct application of
-globalfeatureselect.py's median_across_batches ... it already operates on
-FEATURE_SELECTOR-matched columns generically, no CellProfiler assumption
-baked in"). Only this one function is vendored -- the rest of that source
-file (per-batch blocklist combination, per-feature-type output files,
-pycytominer feature selection, impact-score computation) is explicitly out
-of scope for GLOBAL_VARIANT_EMBEDDINGS (SPEC.md §6.7's sketch calls only
-this plus ``compute_pca``); add more of it later if a future story actually
-needs it.
+-- it already operates on FEATURE_SELECTOR-matched columns generically, no
+CellProfiler assumption baked in, so it applies directly here. Only this
+one function is vendored -- the rest of that source file (per-batch
+blocklist combination, per-feature-type output files, pycytominer feature
+selection, impact-score computation) is out of scope for
+GLOBAL_VARIANT_EMBEDDINGS, which only needs this plus ``compute_pca``; add
+more of it later if a future need actually arises.
 """
 
 import logging
@@ -46,8 +44,8 @@ def median_across_batches(
     Parameters
     ----------
     batch_lfs : list[pl.LazyFrame]
-        Each member batch's aggregate table (AGGREGATE_EMBEDDINGS' Epic 5
-        output, in this pipeline). Must be non-empty.
+        Each member batch's aggregate table (AGGREGATE_EMBEDDINGS' output,
+        in this pipeline). Must be non-empty.
     label_column : str
         Name of the column identifying variant labels, used as the group key.
     batch_labels : list[str] or None

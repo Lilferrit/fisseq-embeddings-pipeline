@@ -1,8 +1,8 @@
 """Hydra structured config layers adding an input file and a variant label column.
 
 Vendored unchanged from fisseq-data-pipeline's
-src/fisseq_data_pipeline/config/input.py (SPEC.md §3 decision 2), with only
-the import path retargeted to this package's own ``.app``. Defines
+src/fisseq_data_pipeline/config/input.py, with only the import path
+retargeted to this package's own ``.app``. Defines
 :class:`InputConfig` (adds ``input_file``) and :class:`LabeledInputConfig`
 (adds ``label_column``), both extending :class:`.app.AppConfig`.
 """

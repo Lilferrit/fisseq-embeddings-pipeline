@@ -7,7 +7,7 @@
 #   https://github.com/facebookresearch/dino/blob/main/vision_transformer.py
 #   https://github.com/rwightman/pytorch-image-models/tree/master/timm/models/vision_transformer.py
 
-# Vendored from facebookresearch/dinov2 (SPEC.md §6.3/§10 item 1) -- see
+# Vendored from facebookresearch/dinov2 -- see
 # vendor/dinov2/VENDORED_FROM.md for the exact commit and file list. ONE
 # line changed versus upstream: the `dinov2.layers` absolute import below
 # is retargeted to this vendored subtree's relative path, since this repo

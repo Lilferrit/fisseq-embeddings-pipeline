@@ -1,20 +1,16 @@
 """Variant label string classification into biological categories.
 
 Vendored unchanged from fisseq-data-pipeline's
-src/fisseq_data_pipeline/utils/variant.py (SPEC.md §3 decision 2). Defines
+src/fisseq_data_pipeline/utils/variant.py. Defines
 :func:`classify_variant`, which parses a variant label (e.g. ``"A123G"``)
 into one of ``Frameshift``, ``3nt Deletion``, ``Nonsense``, ``WT``,
 ``Synonymous``, ``Single Missense``, or ``Other``. An optional ``:<tag>``
 metadata suffix (e.g. the ``:downsampled-half`` pseudo-variant tag produced
 by ``qcfilter.py``) is stripped before classification.
 
-Checklist correction (IMPLEMENTATION_CHECKLIST.md Epic 0 Story 0.1): the
-checklist bullet for this file also names ``variant_classification`` as
-something to vendor here. In the real source repo, ``variant_classification``
-is actually defined in ``aggregate.py``, not ``utils/variant.py`` -- this
-file only ever defines ``classify_variant``. ``variant_classification``
-itself will be ported alongside the rest of ``aggregate.py`` in Epic 4/5,
-not here.
+``variant_classification`` (which groups rows by that classification) is a
+separate function, defined in ``filter.py`` rather than here -- it lives in
+``aggregate.py`` in the upstream source repo, not ``utils/variant.py``.
 """
 
 import re

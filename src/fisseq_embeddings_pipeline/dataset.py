@@ -1,22 +1,21 @@
-"""BUILD_DATASET -- SPEC.md §6.1 (Epic 1).
+"""BUILD_DATASET.
 
 Hydra entry point (`python -m fisseq_embeddings_pipeline.dataset`), backing
 the Nextflow process BUILD_DATASET (modules/local/build_dataset.nf).
 Gathers one experiment's cells into a sharded WebDataset (dataset-*.tar)
 plus a companion metadata.parquet, with no hand-authored tile manifest --
-see SPEC.md §6.1's discover_tiles()/write_dataset_shards() sketch, and
-IMPLEMENTATION_CHECKLIST.md Epic 1 for acceptance criteria.
+the tile layout is discovered directly (see `discover_tiles`).
 
 Reads directly from starcall-workflow's (origin/devel branch) per-tile
 outputs -- `rule stitch_tile_pt` (stitching.smk)'s stitched phenotype image,
 `rule stitch_tile_from_well_segmentation` (segmentation.smk)'s segmentation
 mask, and `rule tabulate_cells` (segmentation.smk)'s cell table -- and does
 its own per-cell cropping, rather than depending on `rule make_cell_images`
-(phenotyping.smk)'s pre-cropped output. `make_cell_images` isn't reliably
-run for every experiment (and, per SPEC.md §5.1, reads `xpos`/`ypos`
-columns that don't exist in the real cell table schema -- almost certainly
-why), so its crop-window *algorithm* is ported here directly rather than
-its output being consumed -- see SPEC.md §5.2/§6.1.
+(phenotyping.smk)'s pre-cropped output, which isn't reliably run for every
+experiment and reads `xpos`/`ypos` columns that don't exist in the real
+cell table schema (only `bbox_x1/y1/x2/y2`). Its crop-window *algorithm* is
+ported here directly (see `_crop_cell`), computing each cell's crop center
+as the bbox midpoint instead.
 """
 
 import dataclasses
@@ -55,9 +54,9 @@ class BuildDatasetConfig(AppConfig):
     """
     Hydra structured configuration for BUILD_DATASET.
 
-    Extends AppConfig (output_dir, output_root, log_level, random_seed --
-    SPEC.md §3 decision 11); BUILD_DATASET's own logic doesn't consume
-    random_seed itself, but every stage config inherits it uniformly.
+    Extends AppConfig (output_dir, output_root, log_level, random_seed);
+    BUILD_DATASET's own logic doesn't consume random_seed itself, but every
+    stage config inherits it uniformly.
 
     Attributes
     ----------
@@ -83,8 +82,7 @@ class BuildDatasetConfig(AppConfig):
         expected input.
     shard_maxcount : int
         Max samples per WebDataset shard, passed to webdataset.ShardWriter.
-        Defaults to 2000 -- see docs/configuration.md's sizing note
-        (IMPLEMENTATION_CHECKLIST.md Epic 1 Story 1.3).
+        Defaults to 2000 -- see docs/configuration.md's sizing note.
     batch_stem : str
         This experiment's identifier, written into every sample's meta.json
         as meta_batch (matching fisseq-data-pipeline's META_BATCH_COL
@@ -129,11 +127,10 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
     ``'{well}_grid{grid_size}/tile{x}x{y}y/{segmentation_type}_mask.tif'``
     into the same tile directory), for every well in ``cfg.wells``.
 
-    Rows are sorted by ``(well, tile_x, tile_y)`` as integers, not by the
-    lexical order ``sorted(glob.glob(...))`` would give -- SPEC.md's own
-    sketch sorts lexically, which misorders double-digit tile indices
-    (e.g. ``tile10x0y`` would sort before ``tile2x0y``); sorting on the
-    parsed integers instead makes tile order deterministic regardless of
+    Rows are sorted by ``(well, tile_x, tile_y)`` as integers, not by
+    lexical order (which would misorder double-digit tile indices, e.g.
+    ``tile10x0y`` sorting before ``tile2x0y``) -- sorting on the parsed
+    integers instead makes tile order deterministic regardless of
     tile-count magnitude.
 
     Parameters
@@ -202,9 +199,8 @@ def _crop_cell(
 
     Ports starcall-workflow's ``rule make_cell_images`` (phenotyping.smk,
     ``origin/devel``) crop-window algorithm verbatim, except the caller
-    supplies ``(cx, cy)`` derived from ``bbox_x1/y1/x2/y2`` (SPEC.md §5.1)
-    rather than the nonexistent ``xpos``/``ypos`` columns
-    ``make_cell_images`` itself reads.
+    supplies ``(cx, cy)`` derived from ``bbox_x1/y1/x2/y2`` rather than the
+    nonexistent ``xpos``/``ypos`` columns ``make_cell_images`` itself reads.
 
     The crop is centered at ``(cx, cy)``, zero-padded wherever the window
     extends past ``image``/``mask``'s bounds.
@@ -223,8 +219,7 @@ def _crop_cell(
         The mask's integer label for this cell. starcall-workflow's own
         ``make_cell_images`` uses ``i + 1`` (the cell's 1-based position in
         the cell table's row order), not the cell table's index value --
-        preserved here as-is; see IMPLEMENTATION_CHECKLIST.md Epic 1 Story
-        1.4 for the open risk this ported convention carries.
+        preserved here as-is.
     window : int
         Output crop size (both dimensions).
 
@@ -261,17 +256,16 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
     Writes ``{output_dir}/dataset-%06d.tar`` shards (via
     ``webdataset.ShardWriter(maxcount=cfg.shard_maxcount)``) and a
     companion ``{output_dir}/metadata.parquet`` holding the same per-cell
-    ``meta_*`` fields with no image data, so ``QC_FILTER`` (Epic 2) and the
-    join key ``FILTER_EMBEDDINGS`` (Epic 4) uses never need to decode the
-    shards just for metadata.
+    ``meta_*`` fields with no image data, so ``QC_FILTER`` and the join key
+    ``FILTER_EMBEDDINGS`` uses never need to decode the shards just for
+    metadata.
 
     Tiles come from :func:`discover_tiles`, not a hand-authored manifest.
     Per tile, this reads the stitched phenotype image (``pt_tif``) and
     segmentation mask (``mask_tif``) directly and crops around each cell's
     bbox-derived center via :func:`_crop_cell` -- porting
     ``make_cell_images``'s crop algorithm rather than depending on its
-    (unreliably-produced) pre-cropped output. See the module docstring and
-    SPEC.md §5.2/§6.1.
+    (unreliably-produced) pre-cropped output. See the module docstring.
 
     A tile whose cell table has zero rows is skipped without erroring.
     Unlike ``make_cell_images`` (which ``touch``-empties its own crop

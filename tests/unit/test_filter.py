@@ -1,9 +1,8 @@
-"""Tests for FILTER_EMBEDDINGS (SPEC.md §6.4, IMPLEMENTATION_CHECKLIST.md Epic 4).
+"""Tests for FILTER_EMBEDDINGS.
 
-Story 4.1 covers filter_and_fit_normalizer()/variant_classification(), Story
-4.2 covers load_filtered_embeddings() (including the output-equivalence
-test the checklist calls for), Story 4.3 covers the Hydra `main()` CLI
-end-to-end.
+Covers filter_and_fit_normalizer()/variant_classification(),
+load_filtered_embeddings() (including an output-equivalence test), and the
+Hydra `main()` CLI end-to-end.
 """
 
 from __future__ import annotations
@@ -101,7 +100,7 @@ def test_variant_classification_marks_control_correctly(label, expected_control)
 
 
 # ---------------------------------------------------------------------------
-# filter_and_fit_normalizer (Story 4.1)
+# filter_and_fit_normalizer
 # ---------------------------------------------------------------------------
 
 
@@ -124,7 +123,7 @@ def _fixture_lfs():
 
 
 def test_filtered_keys_has_no_embedding_columns():
-    """The single most important regression test for SPEC.md §3 decision 10."""
+    """The single most important regression test for the no-copy / foreign-key design: filtered_keys must never carry emb_* columns."""
     embeddings_lf, qc_passed_lf = _fixture_lfs()
     filtered_keys, _ = filter_and_fit_normalizer(
         embeddings_lf, qc_passed_lf, LABEL_COLUMN
@@ -181,7 +180,7 @@ def test_normalizer_returned_is_a_normalizer_instance():
 
 
 # ---------------------------------------------------------------------------
-# load_filtered_embeddings (Story 4.2)
+# load_filtered_embeddings
 # ---------------------------------------------------------------------------
 
 
@@ -218,8 +217,8 @@ def test_load_filtered_embeddings_carries_control_column():
 
 
 def test_load_filtered_embeddings_no_duplicate_columns():
-    """Regression test for this module's documented fix to SPEC.md's naive
-    join sketch: joining against the whole filtered_keys frame (rather than
+    """Regression test for joining against the whole filtered_keys frame
+    (rather than
     just JOIN_KEYS + CONTROL_COLUMN_NAME) would produce Polars `_right`
     duplicate columns for every meta_* column shared by both sides."""
     embeddings_lf, qc_passed_lf = _fixture_lfs()
@@ -236,12 +235,11 @@ def test_load_filtered_embeddings_no_duplicate_columns():
 
 
 def test_load_filtered_embeddings_output_equivalent_to_old_single_step_approach():
-    """SPEC.md's superseded single-step filter_and_normalize() would have
+    """A superseded single-step filter_and_normalize() would have
     joined+classified+fit+applied in one shot, materializing the normalized
     embedding table directly. The redesign (filter_and_fit_normalizer() +
     load_filtered_embeddings(), composed) must be output-equivalent, not
-    merely differently shaped (IMPLEMENTATION_CHECKLIST.md Epic 4 Story
-    4.2)."""
+    merely differently shaped."""
     embeddings_lf, qc_passed_lf = _fixture_lfs()
 
     # -- "old" superseded single-step approach --

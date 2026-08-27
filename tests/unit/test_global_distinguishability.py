@@ -1,10 +1,9 @@
-"""Tests for GLOBAL_VARIANT_DISTINGUISHABILITY (SPEC.md §6.8,
-IMPLEMENTATION_CHECKLIST.md Epic 8).
+"""Tests for GLOBAL_VARIANT_DISTINGUISHABILITY.
 
-Story 8.1 covers global_variant_distinguishability() -- per-experiment
-synonymous z-score, then cross-experiment median (§3 decision 9) -- plus the
-graceful-degradation and synonymous-near-zero sanity checks the checklist
-calls for, plus the Hydra `main()` CLI end-to-end.
+Covers global_variant_distinguishability() -- per-experiment synonymous
+z-score, then cross-experiment median -- plus graceful-degradation and
+synonymous-near-zero sanity checks, plus the Hydra `main()` CLI
+end-to-end.
 """
 
 from __future__ import annotations
@@ -35,8 +34,8 @@ def _results_df(
     auroc_median_barcode: list[float],
 ) -> pl.DataFrame:
     """One experiment's OVWT_BATCHWISE results.parquet -- includes
-    synonymous-labeled rows (SPEC.md §6.8: OVWT scores every non-WT variant,
-    synonymous ones included, against WT)."""
+    synonymous-labeled rows (OVWT scores every non-WT variant, synonymous
+    ones included, against WT)."""
     n = len(labels)
     return pl.DataFrame(
         {
@@ -50,7 +49,7 @@ def _results_df(
 
 
 # ---------------------------------------------------------------------------
-# global_variant_distinguishability() -- Story 8.1
+# global_variant_distinguishability()
 # ---------------------------------------------------------------------------
 
 
@@ -71,7 +70,7 @@ def test_global_variant_distinguishability_output_columns() -> None:
 
 
 def test_global_variant_distinguishability_synonymous_lands_near_zero() -> None:
-    """Built-in sanity check SPEC.md calls out: synonymous variants are the
+    """Built-in sanity check: synonymous variants are the
     Normalizer's own fit population, so their z-scored value should land
     near 0 (not exactly -- a small synonymous population's own mean isn't
     each individual row's value)."""
@@ -94,7 +93,7 @@ def test_global_variant_distinguishability_synonymous_lands_near_zero() -> None:
 
 
 def test_global_variant_distinguishability_medians_zscored_not_raw_auroc() -> None:
-    """SPEC.md §3 decision 9: median of the *z-scored* values across
+    """Median of the *z-scored* values across
     experiments, not a direct median of raw AUROC -- two experiments with
     very different synonymous baselines should not simply average their raw
     AUROC for the shared variant."""
@@ -141,7 +140,7 @@ def test_global_variant_distinguishability_graceful_degradation_zero_variance() 
 
 
 # ---------------------------------------------------------------------------
-# Hydra main() -- Story 8.1's CLI end-to-end
+# Hydra main() -- CLI end-to-end
 # ---------------------------------------------------------------------------
 
 

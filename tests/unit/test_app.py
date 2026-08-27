@@ -1,10 +1,8 @@
-"""Tests for AppConfig (SPEC.md §3, IMPLEMENTATION_CHECKLIST.md Epic 0 Story 0.2).
+"""Tests for AppConfig.
 
-AppConfig itself needed no code change from the scaffold -- it already
-matches SPEC.md's dataclass exactly. This module covers the story's
-acceptance criterion: a ConfigStore-registered stage config's default
-random_seed is 0 and is overridable via Hydra CLI override syntax (SPEC.md
-§3 decision 11 -- one shared seed field, reused by every stage).
+Covers a ConfigStore-registered stage config's default random_seed (0) and
+that it's overridable via Hydra CLI override syntax -- the one shared seed
+field, reused by every stage.
 """
 
 from __future__ import annotations
@@ -20,7 +18,7 @@ from fisseq_embeddings_pipeline.config import AppConfig
 
 @dataclasses.dataclass
 class _DummyStageConfig(AppConfig):
-    """A minimal stage config, standing in for a real Epic 1+ stage config,
+    """A minimal stage config, standing in for a real pipeline stage config,
     to confirm AppConfig's random_seed default/override behavior end to end
     through Hydra's own config-composition machinery rather than just
     dataclass defaults."""

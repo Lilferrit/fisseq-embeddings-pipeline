@@ -1,8 +1,8 @@
 """Tests for utils/globalfeatureselect.py's median_across_batches -- vendored
-unchanged from fisseq-data-pipeline's globalfeatureselect.py (SPEC.md §6.7),
-used by GLOBAL_VARIANT_EMBEDDINGS (Epic 7). See test_global_embeddings.py for
-coverage of the full multi-batch-median-then-PCA pipeline; this module
-covers median_across_batches' own edge cases directly.
+unchanged from fisseq-data-pipeline's globalfeatureselect.py, used by
+GLOBAL_VARIANT_EMBEDDINGS. See test_global_embeddings.py for coverage of
+the full multi-batch-median-then-PCA pipeline; this module covers
+median_across_batches' own edge cases directly.
 """
 
 from __future__ import annotations

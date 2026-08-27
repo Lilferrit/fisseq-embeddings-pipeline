@@ -1,12 +1,12 @@
-"""Tests for AGGREGATE_EMBEDDINGS's aggregator classes (SPEC.md §6.5, Epic 5).
+"""Tests for AGGREGATE_EMBEDDINGS's aggregator classes.
 
-Story 5.1 covers BaseAggregator/ReferenceBasedAggregator/MeanAggregator/
-MedianAggregator/KSAggregator/AUROCAggregator and the _AGGREGATORS registry.
-Story 5.2 covers aggregate_embeddings() combination/backward-compat. Story
-5.3 covers the Hydra `main()` CLI end-to-end. Ground-truth numerical tests
-are adapted from fisseq-data-pipeline's tests/unit/test_aggregate.py,
-retargeted from its CellProfiler-style `f1`/`f2` feature columns to this
-pipeline's `emb_0000`/`emb_0001` embedding columns (the only columns
+Covers BaseAggregator/ReferenceBasedAggregator/MeanAggregator/
+MedianAggregator/KSAggregator/AUROCAggregator and the _AGGREGATORS
+registry, aggregate_embeddings() combination/backward-compat, and the
+Hydra `main()` CLI end-to-end. Ground-truth numerical tests are adapted
+from fisseq-data-pipeline's tests/unit/test_aggregate.py, retargeted from
+its CellProfiler-style `f1`/`f2` feature columns to this pipeline's
+`emb_0000`/`emb_0001` embedding columns (the only columns
 EMBEDDING_SELECTOR matches).
 """
 
@@ -256,8 +256,8 @@ def test_auroc_aggregator_null_when_reference_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Control-row exclusion -- user-confirmed decision (SPEC.md §6.5 deviation):
-# every aggregator, including mean/median, excludes control rows.
+# Control-row exclusion: every aggregator, including mean/median, excludes
+# control rows.
 # ---------------------------------------------------------------------------
 
 
@@ -299,7 +299,7 @@ def test_wt_label_is_not_treated_as_control() -> None:
 
 
 # ---------------------------------------------------------------------------
-# aggregate_embeddings() -- combination & backward-compat (Story 5.2)
+# aggregate_embeddings() -- combination & backward-compat
 # ---------------------------------------------------------------------------
 
 
@@ -410,7 +410,7 @@ def test_aggregate_embeddings_duplicate_aggregator_raises(
 
 def _write_cli_fixture(tmp_path: Path) -> "tuple[Path, Path, Path]":
     """Build embeddings.parquet/filtered_keys.parquet/normalizer.parquet the
-    way FILTER_EMBEDDINGS (Epic 4) would, for a realistic end-to-end input
+    way FILTER_EMBEDDINGS would, for a realistic end-to-end input
     to AGGREGATE_EMBEDDINGS's CLI. A1A is synonymous+untagged (control);
     M1K/WT are reportable variants; every cell passes QC."""
     embeddings_df = pl.DataFrame(
@@ -500,9 +500,9 @@ def test_main_is_hydra_entry_point() -> None:
 
 
 # ---------------------------------------------------------------------------
-# AggregateEmbeddingsConfig -- dropped-fields regression (SPEC.md §6.5's two
-# Resolved notes: no per_barcode pooling option, no WT-null-bootstrap/
-# block_list reproducibility-gate machinery -- Epic 11 Story 11.1)
+# AggregateEmbeddingsConfig -- dropped-fields regression: no per_barcode
+# pooling option, no WT-null-bootstrap/block_list reproducibility-gate
+# machinery
 # ---------------------------------------------------------------------------
 
 

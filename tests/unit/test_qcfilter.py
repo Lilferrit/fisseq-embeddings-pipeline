@@ -1,4 +1,4 @@
-"""Tests for QC_FILTER (SPEC.md §6.2, IMPLEMENTATION_CHECKLIST.md Epic 2)."""
+"""Tests for QC_FILTER."""
 
 from __future__ import annotations
 
@@ -259,7 +259,7 @@ class TestFilterColumns:
 
     def test_composite_join_key_columns_pass_through(self):
         """meta_batch/meta_well/meta_tile/meta_cell_index (BUILD_DATASET's
-        composite join key, SPEC.md §6.2's Output note) survive
+        composite join key) survive
         filter_columns unconditionally, since it keeps every meta_-prefixed
         column."""
         df = _make_cell_df(["bc1"], ["M1K"]).with_columns(
@@ -588,7 +588,7 @@ class TestSelectVariants:
 
 
 # ---------------------------------------------------------------------------
-# QcFilterConfig -- dropped-fields regression (SPEC.md §6.2's Resolved note)
+# QcFilterConfig -- dropped-fields regression
 # ---------------------------------------------------------------------------
 
 

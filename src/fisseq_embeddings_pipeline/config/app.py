@@ -1,9 +1,9 @@
 """Base Hydra structured config shared by every pipeline entry point.
 
 Defines :class:`AppConfig` -- vendored from fisseq-data-pipeline's
-config/app.py with one added field, `random_seed` (SPEC.md §3 decision 11).
-See SPEC.md's architecture-decisions section for the full docstring this
-was copied from.
+config/app.py with one added field, `random_seed`: the one shared seed
+every stochastic stage reads from, rather than each stage owning its own
+seed field.
 """
 
 import dataclasses
@@ -27,7 +27,7 @@ class AppConfig:
     random_seed : int
         Shared seed for every stochastic pipeline stage (StratifiedKFold
         shuffling, XGBoost's own `seed` param, calibration's inner split,
-        PCA's solver -- see SPEC.md §6.6/§6.7). Defaults to ``0``.
+        PCA's solver). Defaults to ``0``.
     """
 
     output_dir: str = MISSING

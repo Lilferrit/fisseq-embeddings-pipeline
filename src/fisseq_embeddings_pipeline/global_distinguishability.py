@@ -1,10 +1,14 @@
-"""GLOBAL_VARIANT_DISTINGUISHABILITY -- SPEC.md §6.8 (Epic 8).
+"""GLOBAL_VARIANT_DISTINGUISHABILITY.
 
-Two steps, not one (SPEC.md §3 decision 9): per-experiment, z-score
-auroc_pooled/auroc_median_barcode against that experiment's own synonymous
-variants (variant_classification + Normalizer, vendored unchanged, same
-machinery filter.py uses), *then* cross-experiment median the z-scored
-values -- not a direct median of raw AUROC.
+Two steps, not one: per-experiment, z-score auroc_pooled/auroc_median_barcode
+against that experiment's own synonymous variants (variant_classification +
+Normalizer, vendored unchanged, same machinery filter.py uses), *then*
+cross-experiment median the z-scored values -- not a direct median of raw
+AUROC. Raw AUROC isn't comparable across experiments (different cell
+counts, embedding quality, and batch effects all shift where a
+genuinely-neutral variant's classifier score sits), so each experiment is
+first re-centered against its own synonymous-variant population before
+pooling across experiments.
 
 ``variant_classification`` and ``Normalizer`` are imported from ``.filter``/
 ``.utils.normalizer`` rather than duplicated -- see filter.py's own
@@ -44,14 +48,14 @@ def global_variant_distinguishability(
     cell). Normalizer.apply() needs no changes either: it operates on
     FEATURE_SELECTOR (exclude meta_*), which already matches
     auroc_pooled/auroc_median_barcode and excludes meta_n_barcodes/
-    meta_n_cells (SPEC.md §6.6's Output note) with zero modification --
-    provided label_column itself carries the conventional meta_ prefix
-    (true for every default/example in this pipeline).
+    meta_n_cells with zero modification -- provided label_column itself
+    carries the conventional meta_ prefix (true for every default/example
+    in this pipeline).
 
     Parameters
     ----------
     batch_score_dfs : list[pl.DataFrame]
-        Each experiment's OVWT_BATCHWISE results.parquet (Epic 6) --
+        Each experiment's OVWT_BATCHWISE results.parquet --
         ``label_column``, ``auroc_pooled``, ``auroc_median_barcode``, plus
         ``meta_n_barcodes``/``meta_n_cells``. Must be non-empty.
     label_column : str
@@ -104,10 +108,10 @@ class GlobalVariantDistinguishabilityConfig(AppConfig):
     """
     Hydra structured configuration for GLOBAL_VARIANT_DISTINGUISHABILITY.
 
-    Extends AppConfig (output_dir, output_root, log_level, random_seed --
-    SPEC.md §3 decision 11); this stage's own logic doesn't consume
-    random_seed itself (z-scoring and medianing are both deterministic),
-    but every stage config inherits it uniformly.
+    Extends AppConfig (output_dir, output_root, log_level, random_seed);
+    this stage's own logic doesn't consume random_seed itself (z-scoring
+    and medianing are both deterministic), but every stage config inherits
+    it uniformly.
 
     Attributes
     ----------

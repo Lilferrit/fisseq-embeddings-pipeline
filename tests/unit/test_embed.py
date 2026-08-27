@@ -1,4 +1,4 @@
-"""Unit tests for EMBED_CELLS (embed.py, SPEC.md §6.3, Epic 3).
+"""Unit tests for EMBED_CELLS (embed.py).
 
 Two real Cell-DINO checkpoints are available locally under weights/ (see
 docs/architecture.md's "Real checkpoint" section) -- their tests are
@@ -145,8 +145,8 @@ def test_load_cell_dino_raises_on_unknown_arch(tmp_path: Path):
 def test_load_cell_dino_strips_prefixes_and_loads_nonstrict(tmp_path: Path):
     """Real checkpoints commonly wrap weights under module./backbone.
     prefixes and a "teacher" top-level key (dinov2.utils.utils.
-    load_pretrained_weights, see the module docstring's Story 3.1 note) --
-    confirm load_cell_dino()'s ported version of that logic actually
+    load_pretrained_weights) -- confirm load_cell_dino()'s ported version
+    of that logic actually
     strips them and loads the real values, not just constructs fresh
     random weights silently."""
     reference = vit_small(
@@ -338,8 +338,8 @@ def test_load_cell_dino_and_embed_batch_against_real_vits8_checkpoint(tmp_path: 
 )
 def test_load_cell_dino_and_embed_batch_against_real_vitl16_checkpoint(tmp_path: Path):
     """weights/channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth --
-    the bag-of-channels vit_large/patch-16/224 shape SPEC.md §6.3
-    originally assumed (see the module docstring): loads with this
+    a bag-of-channels vit_large/patch-16/224 checkpoint (see the module
+    docstring): loads with this
     module's plain defaults (arch/patch_size/crop_size unchanged), and
     embed_batch()'s default cfg.channels=[0,1,2,3]/channel_apply_mask
     selects/masks 4 of a 6-channel crop."""
@@ -575,9 +575,8 @@ def test_embed_batch_raises_on_channel_count_mismatch_in_joint_mode():
 
 
 def test_embed_batch_against_random_weight_real_model():
-    """SPEC.md/IMPLEMENTATION_CHECKLIST.md Story 3.3's acceptance
-    criterion: embed_batch() against a random-weight (not pretrained) model
-    of the same real architecture, confirming output shape (B, D)."""
+    """embed_batch() against a random-weight (not pretrained) model of the
+    same real architecture, confirming output shape (B, D)."""
     model = DinoVisionTransformer(
         img_size=CROP,
         patch_size=16,

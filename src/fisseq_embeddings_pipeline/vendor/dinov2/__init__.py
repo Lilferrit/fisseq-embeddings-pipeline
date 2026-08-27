@@ -1,4 +1,4 @@
-"""Minimal vendored subset of facebookresearch/dinov2 (SPEC.md §6.3, Epic 3).
+"""Minimal vendored subset of facebookresearch/dinov2.
 
 Only the pure-``torch`` model-definition code needed to construct a
 channel-adaptive ViT and run inference is vendored here -- not the full

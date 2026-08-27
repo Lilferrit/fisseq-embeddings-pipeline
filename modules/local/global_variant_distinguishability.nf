@@ -1,6 +1,5 @@
-// SPEC.md §6.8 -- GLOBAL_VARIANT_DISTINGUISHABILITY (Epic 8). Per-experiment
-// synonymous z-score, then cross-experiment median (§3 decision 9) -- not a
-// direct median of raw AUROC.
+// GLOBAL_VARIANT_DISTINGUISHABILITY. Per-experiment synonymous z-score,
+// then cross-experiment median -- not a direct median of raw AUROC.
 //
 // `stageAs: "res_input_*.parquet"` avoids every experiment's identically-
 // named results.parquet colliding when collected into this one task, same

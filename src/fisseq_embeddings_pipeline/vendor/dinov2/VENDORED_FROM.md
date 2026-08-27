@@ -4,7 +4,7 @@
 **Commit:** `7764ea0f912e53c92e82eb78a2a1631e92725fc8` (`main` branch, fetched 2026-08-26)
 **License:** Apache License, Version 2.0 (original per-file headers preserved below).
 
-## Why vendored instead of installed as a dependency (SPEC.md §6.3/§10 item 1)
+## Why vendored instead of installed as a dependency
 
 `dinov2` is not published on PyPI, and installing it from GitHub (e.g. a pinned
 `dinov2 @ git+https://github.com/facebookresearch/dinov2@<sha>` entry in `pyproject.toml`) drags
@@ -38,11 +38,8 @@ doesn't use).
 installed as the top-level `dinov2` package) -- flagged inline at that file's top. Every other
 vendored file is byte-for-byte upstream, including its original Apache-2.0 header.
 
-## What this vendoring does *not* resolve
+## Verification
 
-No Cell-DINO checkpoint (`.pth`) is available in this environment, so the checkpoint's actual
-state-dict key (`"teacher"` vs. top-level) and shape compatibility with the vendored
-`vit_large(in_chans=1, channel_adaptive=True, patch_size=16)` construction are unverified against
-real weights -- see `docs/architecture.md` and `SPEC.md` §10 item 1. Everything in this
-vendored subtree, and the wrapper in `embed.py`, is verified against the *real* `dinov2` source
-(not `SPEC.md`'s placeholder sketch), but not yet against a real checkpoint.
+This vendored subtree, and the wrapper in `embed.py`, are verified against real Cell-DINO
+checkpoints -- see `docs/architecture.md` for the checkpoint shapes `load_cell_dino()` has been
+confirmed to load with zero missing/unexpected keys.

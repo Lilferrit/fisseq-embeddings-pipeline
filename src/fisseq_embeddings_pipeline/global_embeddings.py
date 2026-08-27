@@ -1,42 +1,35 @@
-"""GLOBAL_VARIANT_EMBEDDINGS -- SPEC.md §6.7 (Epic 7).
+"""GLOBAL_VARIANT_EMBEDDINGS.
 
 Cross-experiment median pooling of every experiment's aggregate.parquet
 (utils/globalfeatureselect.py's median_across_batches, vendored unchanged)
-then PCA (utils/dimreduction.py's compute_pca, vendored with ONE added
-parameter -- random_state, threaded from the shared random_seed, SPEC.md §3
-decision 11). Runs once, unconditionally, over every experiment (§3
-decision 8) -- no fisseq-data-pipeline-style global_channels scoping.
+then PCA (utils/dimreduction.py's compute_pca, vendored with one added
+parameter -- random_state, threaded from the shared random_seed). Runs
+once, unconditionally, over every experiment -- no fisseq-data-pipeline-
+style global_channels scoping.
 
-**Revision versus SPEC.md's original sketch (per request): no `n_components`
-config knob.** SPEC.md's own sketch fixes ``n_components=50`` by default;
-here, :func:`global_variant_embeddings` instead always computes the full
-retained rank -- ``min(n_variants, n_retained_feature_dims)`` after
+:func:`global_variant_embeddings` always computes PCA at the full retained
+rank -- ``min(n_variants, n_retained_feature_dims)`` after
 :func:`~fisseq_embeddings_pipeline.utils.dimreduction.compute_pca`'s own
 all-null-feature-column drop -- so every component the data can actually
 support is kept, not a fixed subset chosen ahead of time. This keeps
 ``compute_pca`` itself (a vendored function used only for its already-
 established contract) untouched; the full-rank count is computed at this
-call site instead of inside it.
+call site instead of inside it. There is no ``n_components`` config field.
 
-**Revision versus SPEC.md's original sketch (per request): three PCA
-output files instead of two.** SPEC.md's Output note writes
-``pca_scores.parquet`` and ``pca_components.parquet``, with the latter
-carrying both per-component feature loadings *and*
-``meta_variance_explained``/``meta_cumulative_variance_explained`` in one
-frame. Here, :func:`global_variant_embeddings` splits
-``compute_pca``'s combined ``components_df`` into two separate frames:
+``compute_pca``'s combined ``components_df`` (per-component feature
+loadings plus ``meta_variance_explained``/``meta_cumulative_variance_explained``
+in one frame) is split here into two separate output frames:
 ``pca_components.parquet`` (loadings only) and
 ``pca_variance_explained.parquet`` (both variance-explained columns, one
 row per component) -- plus ``pca_scores.parquet`` and the pre-PCA
 ``median_aggregate.parquet``.
 
-**Further revision (per request): a fifth output, ``pca_reduced.parquet``.**
-The full ``meta_pc_1..meta_pc_{n}`` matrix (``pca_scores.parquet``) is still
-written in full, unchanged -- this adds a *reduced* view on top of it,
-truncated to the smallest number of leading components whose cumulative
-variance explained reaches a new ``cumulative_variance_explained: float =
-0.9`` config threshold (:func:`_n_components_for_variance`), plus two
-pieces of per-variant metadata computed on that reduced matrix, mirroring
+A fifth output, ``pca_reduced.parquet``, truncates the full
+``meta_pc_1..meta_pc_{n}`` matrix (``pca_scores.parquet``, still written in
+full) to the smallest number of leading components whose cumulative
+variance explained reaches a ``cumulative_variance_explained: float = 0.9``
+config threshold (:func:`_n_components_for_variance`), plus two pieces of
+per-variant metadata computed on that reduced matrix, mirroring
 fisseq-data-pipeline's own ``globalfeatureselect.py`` step 6 (see that
 module's docstring: "re-derive meta_is_control ... lost in [the
 cross-batch median's] metadata collapse, and compute each variant's
@@ -49,11 +42,11 @@ cosine-distance impact score against the control median"):
   per-variant table).
 - ``meta_impact_score``, via :func:`~fisseq_embeddings_pipeline.utils.vectors.compute_impact_score`
   (cosine distance from the control/synonymous median, scaled to
-  ``[0, 1]``) -- **computed on the reduced PC matrix itself** (per
-  request), not on the original ``emb_*`` feature matrix the way
-  ``globalfeatureselect.py``'s own ``main()`` orders it (there, impact
-  score is computed pre-PCA and PCA scores are appended afterward as
-  extra columns). ``compute_impact_score`` determines its feature columns
+  ``[0, 1]``) -- **computed on the reduced PC matrix itself**, not on the
+  original ``emb_*`` feature matrix the way ``globalfeatureselect.py``'s
+  own ``main()`` orders it (there, impact score is computed pre-PCA and PCA
+  scores are appended afterward as extra columns). ``compute_impact_score``
+  determines its feature columns
   via ``FEATURE_SELECTOR`` (exclude ``meta_*``), which would otherwise
   exclude the ``meta_pc_*`` columns themselves -- :func:`_impact_score_on_reduced_pcs`
   works around this by temporarily stripping their ``meta_`` prefix for
@@ -191,8 +184,7 @@ def global_variant_embeddings(
     Parameters
     ----------
     batch_aggregate_lfs : list[pl.LazyFrame]
-        Each experiment's AGGREGATE_EMBEDDINGS output (Epic 5). Must be
-        non-empty.
+        Each experiment's AGGREGATE_EMBEDDINGS output. Must be non-empty.
     batch_labels : list[str]
         Per-experiment identifiers (batch stems), same order and length as
         ``batch_aggregate_lfs`` -- used only to name batches in
@@ -201,8 +193,7 @@ def global_variant_embeddings(
     label_column : str
         Name of the column identifying variant labels.
     random_seed : int
-        Seed threaded into ``compute_pca``'s ``random_state`` (SPEC.md §3
-        decision 11).
+        Seed threaded into ``compute_pca``'s ``random_state``.
     cumulative_variance_explained : float
         Threshold in ``(0, 1]`` used to select the leading components kept
         in ``reduced_df`` (see :func:`_n_components_for_variance`). Defaults
@@ -274,10 +265,9 @@ class GlobalVariantEmbeddingsConfig(AppConfig):
     """
     Hydra structured configuration for GLOBAL_VARIANT_EMBEDDINGS.
 
-    Extends AppConfig (output_dir, output_root, log_level, random_seed --
-    SPEC.md §3 decision 11); ``random_seed`` is threaded into
-    ``compute_pca``'s ``random_state`` (defense-in-depth only -- see
-    ``utils/dimreduction.py``'s docstring).
+    Extends AppConfig (output_dir, output_root, log_level, random_seed);
+    ``random_seed`` is threaded into ``compute_pca``'s ``random_state``
+    (defense-in-depth only -- see ``utils/dimreduction.py``'s docstring).
 
     Attributes
     ----------

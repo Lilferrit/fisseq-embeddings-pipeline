@@ -120,7 +120,7 @@ def test_split_indices_stratified_80_10_10_and_disjoint():
 
 # ---------------------------------------------------------------------------
 # train_binary_xgboost / predict / evaluate -- the one deviating file:
-# reads cfg.random_seed, not cfg.random_state (SPEC.md §6.6 Seed note).
+# reads cfg.random_seed, not cfg.random_state.
 # ---------------------------------------------------------------------------
 
 
