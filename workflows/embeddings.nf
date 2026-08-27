@@ -1,26 +1,59 @@
-// SPEC.md §7.2. TODO(Epic 9): finish per IMPLEMENTATION_CHECKLIST.md Epic 9
-// once modules/local/*.nf (Epics 1-8) are implemented -- this is the sketch
-// from SPEC.md §7.2, not yet verified against real Nextflow syntax/behavior.
+// SPEC.md §7.2 -- EmbeddingsPipeline. Wires BUILD_DATASET -> {QC_FILTER,
+// EMBED_CELLS} -> FILTER_EMBEDDINGS -> {AGGREGATE_EMBEDDINGS,
+// OVWT_BATCHWISE} -> {GLOBAL_VARIANT_EMBEDDINGS, GLOBAL_VARIANT_
+// DISTINGUISHABILITY} per IMPLEMENTATION_CHECKLIST.md Epic 9.
+nextflow.enable.dsl = 2
+
+include { BUILD_DATASET } from '../modules/local/build_dataset'
+include { QC_FILTER } from '../modules/local/qc_filter'
+include { EMBED_CELLS } from '../modules/local/embed_cells'
+include { FILTER_EMBEDDINGS } from '../modules/local/filter_embeddings'
+include { AGGREGATE_EMBEDDINGS } from '../modules/local/aggregate_embeddings'
+include { OVWT_BATCHWISE } from '../modules/local/ovwt_batchwise'
+include { GLOBAL_VARIANT_EMBEDDINGS } from '../modules/local/global_variant_embeddings'
+include { GLOBAL_VARIANT_DISTINGUISHABILITY } from '../modules/local/global_variant_distinguishability'
 
 workflow EmbeddingsPipeline {
     if (params.pipeline_dir == null) {
         error "ERROR: --pipeline_dir is required."
     }
     def configsDir = file("${params.pipeline_dir}/configs")
+    if (!configsDir.isDirectory()) {
+        error "ERROR: ${params.pipeline_dir}/configs does not exist or is not a directory"
+    }
     def config_files = configsDir.listFiles()?.findAll { it.name.endsWith('.yaml') } ?: []
     if (config_files.size() == 0) {
         error "ERROR: No .yaml files found in ${params.pipeline_dir}/configs"
     }
 
-    // TODO: build config_ch from config_files (batch_stem, config path) --
-    // see fisseq-data-pipeline's per-batch resolution pattern (BatchParams.resolve).
+    // Every configs/<batch_stem>.yaml supplies BuildDatasetConfig's
+    // per-experiment fields (phenotyping_dir, wells, grid_size, window,
+    // ...) directly -- batch_stem comes from the filename, not a key
+    // inside the file. Parsed here (not passed through as a raw file) so
+    // BUILD_DATASET's -resume cache key is the actual scalar values, not
+    // the YAML's bytes -- a non-semantic edit (e.g. reordering keys,
+    // touching a comment) shouldn't bust the cache, matching
+    // fisseq-data-pipeline's own INPUT/BatchParams.resolve precedent for
+    // this exact problem (see modules/local/input.nf there). A
+    // `batch_stem` key inside the YAML itself, if present, is dropped --
+    // the filename is always authoritative -- so it can never disagree
+    // with the value BUILD_DATASET is actually invoked with.
+    config_ch = channel.fromList(config_files).map { f ->
+        def batch_stem = f.baseName
+        def batch_config = (new org.yaml.snakeyaml.Yaml().load(f.text) ?: [:]) as Map
+        tuple(batch_stem, batch_config.findAll { k, v -> k != 'batch_stem' })
+    }
 
     // Per-batch (per-experiment) chain -- identical shape to
-    // fisseq-data-pipeline's per-batch resolution pattern.
+    // fisseq-data-pipeline's per-batch resolution pattern (BatchParams.resolve).
     dataset_ch = BUILD_DATASET(config_ch)                 // (batch_stem, [dataset-*.tar shards], metadata.parquet)
-    qc_ch      = QC_FILTER(dataset_ch.map { s, shards, meta -> tuple(s, meta) })     // (batch_stem, filtered_cells, ...) -- reads metadata.parquet only
+    qc_ch      = QC_FILTER(dataset_ch.map { s, shards, meta -> tuple(s, meta) })     // (batch_stem, filtered_cells, barcode_counts, variants_per_barcode) -- reads metadata.parquet only
     embed_ch   = EMBED_CELLS(dataset_ch.map { s, shards, meta -> tuple(s, shards) }) // (batch_stem, embeddings.parquet) -- streams the shards; no QC dependency, matches diagram
-    filtered_ch = FILTER_EMBEDDINGS(embed_ch.join(qc_ch)) // (batch_stem, filtered_keys.parquet, normalizer.parquet) -- no emb_* columns, §3 decision 10
+    // FILTER_EMBEDDINGS only wants the join key (filtered_cells.parquet),
+    // not qc_ch's other two (informational, QC-report-only) outputs.
+    filtered_ch = FILTER_EMBEDDINGS(
+        embed_ch.join(qc_ch.map { s, filtered_cells, barcode_counts, variants_per_barcode -> tuple(s, filtered_cells) })
+    ) // (batch_stem, filtered_keys.parquet, normalizer.parquet) -- no emb_* columns, §3 decision 10
 
     // Both downstream consumers need the raw embeddings.parquet *and*
     // filtered_ch's join key + normalizer -- neither reads a pre-normalized

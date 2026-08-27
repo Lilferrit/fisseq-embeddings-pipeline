@@ -1,10 +1,10 @@
 // SPEC.md §6.6 -- OVWT_BATCHWISE (Epic 6). Same three-input shape as
 // aggregate_embeddings.nf (§3 decision 10); k-fold CV controlled by
 // ovwt_n_folds/ovwt_calibrate, all randomness from random_seed (§3 decision 11).
-// TODO(Epic 9): wire into workflows/embeddings.nf and verify against a real
-// (small) Nextflow run per IMPLEMENTATION_CHECKLIST.md Epic 9 / Epic 6
-// Story 6.5's last bullet. The script block below already matches
-// OvwtEmbeddingConfig's CLI contract exactly.
+// Wired into workflows/embeddings.nf (Epic 9); the script block matches
+// OvwtEmbeddingConfig's CLI contract exactly, but is unverified against a
+// real `nextflow run` (no nextflow/docker available in this sandbox --
+// see IMPLEMENTATION_CHECKLIST.md Epic 9 Story 9.3's note).
 
 process OVWT_BATCHWISE {
     errorStrategy 'ignore'

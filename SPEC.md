@@ -929,6 +929,14 @@ workflow EmbeddingsPipeline {
 
 Every process above is invoked with `--random_seed` in scope (default from `params.yaml`, §9.1) — since `random_seed` lives on the shared `AppConfig` base (§3 decision 11), every `python -m <pkg>.<module>` call below appends `random_seed=${params.random_seed}` the same way, whether or not that particular stage's own logic consults it.
 
+**Revision (Epic 9)**: the sketch above leaves `config_ch` as a bare reference and joins `embed_ch.join(qc_ch)` directly. The real implementation (`workflows/embeddings.nf`) differs in three ways:
+
+1. **`config_ch`** parses each `configs/<batch_stem>.yaml` via Groovy's `org.yaml.snakeyaml.Yaml()` (same library `fisseq-data-pipeline`'s `workflows/fisseq.nf` uses for its own per-batch YAMLs) into a `Map`, pairing it with `batch_stem` taken from the filename — not a key inside the file, which is dropped if present. `BUILD_DATASET` receives `tuple(batch_stem, batch_config)`, not the raw file, so a non-semantic YAML edit doesn't bust `-resume`'s cache (`fisseq-data-pipeline`'s `INPUT`/`BatchParams.resolve` precedent for the identical problem). `modules/local/build_dataset.nf` threads every key in that map through as an individual Hydra CLI override (the same `List` → `'key=[a,b]'` convention as `aggregate_embeddings.nf`'s `aggregators=[...]`) — **not** `--config-path`/`--config-name` pointed at the YAML file directly, which doesn't compose against `dataset.py`'s `hydra.main` (registered with a fixed `config_name="dataset_main"`/`config_path=None` via `ConfigStore`, not a loadable external file).
+2. **`embed_ch.join(qc_ch)`** must first narrow `qc_ch` to just `(batch_stem, filtered_cells_parquet)` — `QC_FILTER` outputs 4 fields (`batch_stem` + 3 parquet files), but `FILTER_EMBEDDINGS` only declares 2 input path slots, so joining all of `qc_ch` in unmodified fails at run time.
+3. `modules/local/qc_filter.nf`'s CLI overrides were keyed `barcode_count_threshold=`/`variant_barcode_count_threshold=` (`params.yaml`'s own key names) rather than `QcFilterConfig`'s actual field names `bc_threshold`/`variant_bc_threshold` — fixed; every other module's field names were cross-checked against Epics 1-8's real dataclasses and were already correct.
+
+A new `local` profile (`nextflow.config`) sets `docker.enabled = false` / `process.container = null`, purely so `tests/integration/test_integration.py` (§9.3) can run the real pipeline without building `fisseq-embeddings-pipeline:latest` first — the default (no `-profile` flag) is still fully containerized.
+
 ### 7.3 `modules/local/embed_cells.nf` (sketch — the GPU stage)
 
 ```groovy
@@ -988,8 +996,10 @@ Every other `modules/local/*.nf` file follows the exact same `errorStrategy 'ign
   global/
     embeddings/
       median_aggregate.parquet            # cross-experiment median, pre-PCA
-      pca_scores.parquet                  # Global Variant Embeddings
-      pca_components.parquet
+      pca_scores.parquet                  # Global Variant Embeddings -- full retained rank
+      pca_components.parquet              # loadings only (§6.7's Revision)
+      pca_variance_explained.parquet      # per-component + cumulative variance explained (§6.7's Revision)
+      pca_reduced.parquet                 # variance-thresholded PC scores + propagated meta_is_control + meta_impact_score (§6.7's Further revision)
     distinguishability/
       global_scores.parquet               # Global Variant Distinguish-ability Scores
 ```
