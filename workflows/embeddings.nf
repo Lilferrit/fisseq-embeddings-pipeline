@@ -14,8 +14,16 @@ include { GLOBAL_VARIANT_EMBEDDINGS } from '../modules/local/global_variant_embe
 include { GLOBAL_VARIANT_DISTINGUISHABILITY } from '../modules/local/global_variant_distinguishability'
 
 workflow EmbeddingsPipeline {
+    // SPEC.md §9.1's Resolved note: -params-file params.yaml is mandatory
+    // (there's no nextflow.config-embedded fallback), so fail fast here
+    // with a specific message for every required-with-no-default param --
+    // params.yaml's own "Required, no default" section -- rather than
+    // letting Nextflow's generic "no such property" surface first.
     if (params.pipeline_dir == null) {
         error "ERROR: --pipeline_dir is required."
+    }
+    if (params.cell_dino_checkpoint == null) {
+        error "ERROR: --cell_dino_checkpoint is required (path to a Cell-DINO .pth checkpoint -- see SPEC.md §6.3)."
     }
     def configsDir = file("${params.pipeline_dir}/configs")
     if (!configsDir.isDirectory()) {

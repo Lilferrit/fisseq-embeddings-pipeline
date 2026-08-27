@@ -16,10 +16,38 @@ cell_dino_checkpoint: null
 # ── Reproducibility (§3 decision 11) ────────────────────────────────────────
 random_seed: 0
 
+# No BUILD_DATASET (§6.1) entries here, deliberately (Epic 10 Story 10.1
+# audit): every BuildDatasetConfig field (phenotyping_dir, wells, grid_size,
+# window, shard_maxcount, batch_stem, barcode_col_name/aa_changes_col_name/
+# edit_distance_col_name, ...) is per-experiment, not a pipeline-wide
+# default -- it comes from <pipeline_dir>/configs/<batch_stem>.yaml instead
+# (see build_dataset.nf / workflows/embeddings.nf's config_ch), since a
+# single global value could never be right across every experiment's own
+# wells/grid/raw-CSV-column-name layout.
+
 # ── QC filtering (QC_FILTER, §6.2) ──────────────────────────────────────────
 barcode_count_threshold: 10
 variant_barcode_count_threshold: 4
 edit_distance_threshold: 1
+# QcFilterConfig's own label_column is wired to filter_label_column below
+# (Epic 10) so overriding one label column changes it pipeline-wide.
+#
+# Deliberately NOT exposed here (Epic 10 Story 10.1 audit):
+#   - barcode_col_name / aa_changes_col_name / edit_distance_col_name:
+#     these name BUILD_DATASET's fixed "meta_barcode"/"meta_aa_changes"/
+#     "meta_edit_distance" output columns (Epic 1's meta_* convention) --
+#     structural, not something a per-run override should ever change.
+#   - n_variants / variant_downsample_classes / variant_downsample_mode /
+#     variant_allow_list_file: the optional per-class variant-downsampling
+#     cap (distinct from the dropped downsample_amounts/downsample_classes/
+#     downsample_seed pseudo-variant machinery, SPEC.md §6.2's Resolved
+#     note -- this one is real, just off by default). n_variants defaults
+#     to null (disabled); enable via a direct Hydra override on QC_FILTER
+#     if ever needed. Not promoted to a global param for v1 because
+#     variant_downsample_classes' default ("Single Missense") contains a
+#     space, which this repo's List -> 'key=[a,b]' Groovy-interpolation
+#     convention (used by aggregate_methods/cell_dino_channels/etc.) can't
+#     round-trip safely without per-element quoting.
 
 # ── Cell Embeddings / Cell-DINO (EMBED_CELLS, §6.3) ─────────────────────────
 # Defaults here match weights/channel_adaptive_dino_vitl16_pretrain_cells-
@@ -38,7 +66,12 @@ cell_dino_device: "cuda"
 cell_dino_batch_size: 256
 cell_dino_num_workers: 4
 
-# ── Filter Embeddings (FILTER_EMBEDDINGS, §6.4) ─────────────────────────────
+# ── Label column, shared pipeline-wide ──────────────────────────────────────
+# Read by QC_FILTER, FILTER_EMBEDDINGS (§6.4), AGGREGATE_EMBEDDINGS (§6.5),
+# OVWT_BATCHWISE (§6.6), and both global stages (§6.7/§6.8) -- one override
+# changes the variant label column everywhere at once, rather than each
+# stage needing its own (Epic 10 fix: OVWT_BATCHWISE previously left this
+# off its script block entirely and silently kept its own Hydra default).
 filter_label_column: "meta_aa_changes"
 
 # ── Aggregation (AGGREGATE_EMBEDDINGS, §6.5) ────────────────────────────────
@@ -48,6 +81,7 @@ filter_label_column: "meta_aa_changes"
 aggregate_methods: ["median"]
 
 # ── OVWT Distinguish-ability Scores (OVWT_BATCHWISE, §6.6) ──────────────────
+ovwt_wt_label: "WT"
 ovwt_n_folds: 5
 ovwt_calibrate: true
 ovwt_min_cells: 250
