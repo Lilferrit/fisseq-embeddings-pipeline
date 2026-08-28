@@ -29,12 +29,13 @@ serve as the in-experiment control population.
 
 ### CellProfiler-feature track (optional)
 
-`params.yaml`'s `cp_features_experiments:` list opts an experiment into a
-second, parallel track: `BUILD_CP_FEATURES` reads that experiment's
-already-computed CellProfiler measurements (from `starcall-workflow`) and
-the same downstream shape -- filter, aggregate, OVWT, global pooling --
-runs again, reusing `QC_FILTER`'s existing output rather than QC-filtering
-twice. See [Architecture](architecture.md) and
+Setting `cp_features: true` on one of `params.yaml`'s `experiments:`
+entries opts that experiment into a second, parallel track:
+`BUILD_CP_FEATURES` reads that experiment's already-computed CellProfiler
+measurements (from `starcall-workflow`) and the same downstream shape --
+filter, aggregate, OVWT, global pooling -- runs again, reusing
+`QC_FILTER`'s existing output rather than QC-filtering twice. See
+[Architecture](architecture.md) and
 [Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
 
 ## Where to go next

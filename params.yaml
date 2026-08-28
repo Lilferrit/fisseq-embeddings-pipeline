@@ -14,18 +14,20 @@ container_image: "fisseq-embeddings-pipeline:latest"
 cell_dino_checkpoint: null
 experiments: []
 
-# ── Per-experiment configs (BUILD_DATASET) ──────────────────────────────────
+# ── Per-experiment configs (BUILD_DATASET / BUILD_CP_FEATURES) ──────────────
 # Every BuildDatasetConfig field (phenotyping_dir, wells, grid_size, window,
 # shard_maxcount, segmentation_type, use_corrected, batch_stem,
 # barcode_col_name/aa_changes_col_name/edit_distance_col_name,
 # csv_schema_scan_rows, ...) is per-experiment, not a pipeline-wide default
 # -- a single global value could never be right across every experiment's
 # own wells/grid/raw-CSV-column-name layout. Supply one map per experiment
-# here; `batch_stem` is required on every map (there's no filename to
-# derive it from), must be unique across the list, and any field a map
-# omits falls back to BuildDatasetConfig's own Hydra default (or raises
-# Hydra's own "missing mandatory value" error if that field has none, e.g.
-# phenotyping_dir).
+# in `experiments:` below; `batch_stem` is required on every map (there's
+# no filename to derive it from), must be unique across the list, and any
+# field a map omits falls back to the matching global default in "Shared
+# per-experiment defaults" below (`window`, `cellprofiler_pipeline`,
+# `cellprofiler_cycle`), or failing that, BuildDatasetConfig's own Hydra
+# default (or raises Hydra's own "missing mandatory value" error if that
+# field has none, e.g. phenotyping_dir).
 #
 # `grid_size` is optional -- when omitted, it's auto-detected per well by
 # scanning phenotyping_dir for that well's `{well}_grid<N>` directory
@@ -33,7 +35,20 @@ experiments: []
 # you only need to set it explicitly if a well has more than one such
 # directory and detection can't disambiguate.
 #
-# The empty list above is deliberate -- every real run supplies its own
+# Set `cp_features: true` on an entry to also run that experiment through
+# the CellProfiler-feature track (see docs/architecture.md):
+# BUILD_CP_FEATURES onward, reusing this SAME entry's phenotyping_dir/
+# wells/grid_size/segmentation_type/etc. -- there's no separate list to
+# keep in sync with `experiments:`. `window`/`shard_maxcount` are
+# BuildDatasetConfig-only and ignored for that track; conversely
+# `cellprofiler_pipeline`/`cellprofiler_cycle` (CpFeaturesConfig-only) can
+# be set directly on a `cp_features: true` entry to override this
+# experiment's CellProfiler filename components, falling back to the
+# global defaults below when omitted. Omit `cp_features` (or leave it
+# `false`) for a cellDINO-only experiment -- the default, so existing runs
+# work unchanged.
+#
+# The empty list below is deliberate -- every real run supplies its own
 # `experiments:` list by editing this file (or a full copy of it; Nextflow
 # only accepts one -params-file at a time, so there's no "just point at a
 # directory of per-experiment files" shortcut any more).
@@ -42,39 +57,30 @@ experiments: []
 #   - batch_stem: experiment1
 #     phenotyping_dir: /data/experiment1/phenotyping
 #     wells: [well1, well2]        # grid_size omitted -- auto-detected per well
-#     window: 224
+#     # window omitted -- falls back to the global `window` default below
+#     cp_features: true            # also run the CellProfiler-feature track for this experiment
+#     # cellprofiler_pipeline/cellprofiler_cycle omitted -- fall back to
+#     # the global defaults below
 #   - batch_stem: experiment2
 #     phenotyping_dir: /data/experiment2/phenotyping
 #     wells: [well3]
 #     grid_size: 8                 # explicit override
-#     window: 224
+#     window: 180                  # per-experiment override of the global default
+#     # cp_features omitted -- cellDINO-only for this experiment
 
-# ── Per-experiment configs (BUILD_CP_FEATURES) ───────────────────────────────
-# Optional second track: for each experiment that also has CellProfiler
-# measurements (see docs/architecture.md), supply one map here with the
-# same shape as `experiments:` above -- `batch_stem` required (must also
-# appear in `experiments:`, since FILTER_CP_FEATURES reuses that
-# experiment's QC_FILTER output), plus every CpFeaturesConfig field
-# (phenotyping_dir, wells, grid_size, segmentation_type,
-# cellprofiler_cycle, cellprofiler_pipeline,
-# barcode_col_name/aa_changes_col_name/edit_distance_col_name,
-# csv_schema_scan_rows, ...). In practice `phenotyping_dir`/`wells`/
-# `grid_size` are usually the same values as that experiment's
-# `experiments:` entry, since BUILD_CP_FEATURES discovers tiles the same
-# way BUILD_DATASET does.
-#
-# The empty list below is deliberate -- it means "no CellProfiler-feature
-# track for this run" and the whole BUILD_CP_FEATURES-onward chain is
-# skipped, so a cellDINO-only run works unchanged. Supply entries here to
-# opt an experiment in.
-#
-# cp_features_experiments:
-#   - batch_stem: experiment1
-#     phenotyping_dir: /data/experiment1/phenotyping
-#     wells: [well1, well2]
-#     cellprofiler_pipeline: my_pipeline   # required -- the .cppipe basename
-#     # cellprofiler_cycle: cycle0         # only if starcall-workflow ran cellprofiler per-cycle
-cp_features_experiments: []
+# ── Shared per-experiment defaults (window / cellprofiler_pipeline / cellprofiler_cycle) ──
+# `window` (BuildDatasetConfig), `cellprofiler_pipeline` and
+# `cellprofiler_cycle` (CpFeaturesConfig) are logically per-experiment
+# fields (see "Per-experiment configs" above), but in practice are almost
+# always the same value across every experiment in a run -- one crop size
+# per Cell-DINO checkpoint, one CellProfiler pipeline per run. Set the
+# shared value once here; `workflows/embeddings.nf` fills it in for any
+# `experiments:` entry that doesn't set its own value for that key, and an
+# entry that *does* set its own value always wins over the global default
+# here.
+window: 224                    # crop size in pixels -- must match cell_dino_crop_size below
+cellprofiler_pipeline: null    # the CellProfiler .cppipe pipeline's basename -- required (here, or per `cp_features: true` entry) once any experiment sets cp_features: true
+cellprofiler_cycle: ""         # "" (no cycle) unless starcall-workflow ran cellprofiler per-cycle
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
 random_seed: 0

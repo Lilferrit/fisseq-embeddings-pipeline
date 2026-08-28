@@ -7,13 +7,17 @@ a `--pipeline_dir` directory holding that experiment's raw data:
 
 ```yaml
 # params.yaml
+window: 224   # must match your Cell-DINO checkpoint's crop size -- global
+              # default, used by every experiment below that doesn't set
+              # its own `window`
+
 experiments:
   - batch_stem: experiment1
     phenotyping_dir: /data/experiment1/phenotyping   # starcall-workflow output root
     wells: [well1, well2]
-    window: 224                                       # must match your Cell-DINO checkpoint's crop size
     # grid_size omitted -- auto-detected per well from phenotyping_dir's
     # own {well}_grid<N> directory naming; set it explicitly to override.
+    # window omitted -- falls back to the global `window` default above.
 ```
 
 See [`BUILD_DATASET`'s stage reference](cli/dataset.md) for every field

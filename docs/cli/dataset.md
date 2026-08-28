@@ -29,7 +29,7 @@ Extends the [common config fields](#common-config-fields) below.
 | `phenotyping_dir` | **required** | `starcall-workflow`'s phenotyping output root. |
 | `wells` | **required** | Wells belonging to this experiment, e.g. `["well1", "well2"]`. |
 | `grid_size` | `null` | Tile grid size, matching `starcall-workflow`'s own directory convention. When unset, auto-detected per well from `phenotyping_dir`'s `{well}_grid<N>` directory name; set explicitly to skip detection (e.g. if a well has more than one such directory). |
-| `window` | **required** | Crop size to produce around each cell's bbox-derived center -- must match the loaded Cell-DINO checkpoint's expected input. |
+| `window` | **required** | Crop size to produce around each cell's bbox-derived center -- must match the loaded Cell-DINO checkpoint's expected input. When run via `BUILD_DATASET`, an `experiments:` entry omitting this falls back to `params.yaml`'s pipeline-wide `window` default (see [Configuration](../configuration.md)); required here only when invoking this module's CLI directly. |
 | `batch_stem` | **required** | This experiment's identifier, written into every sample's `meta.json` as `meta_batch`. |
 | `segmentation_type` | `"cells"` | Which segmentation output to use (`{segmentation_type}.csv` / `{segmentation_type}_mask.tif`). |
 | `use_corrected` | `false` | Whether to read `corrected_pt.tif` or `raw_pt.tif`. |

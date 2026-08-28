@@ -56,6 +56,9 @@ workflow EmbeddingsPipeline {
         if (!(entry.batch_stem instanceof String) || entry.batch_stem.trim().isEmpty()) {
             error "ERROR: params.experiments[${i}] is missing a required, non-empty 'batch_stem' field."
         }
+        if (entry.containsKey('cp_features') && !(entry.cp_features instanceof Boolean)) {
+            error "ERROR: params.experiments[${i}].cp_features must be a boolean (true/false), got ${entry.cp_features?.getClass()?.simpleName}."
+        }
     }
     def batch_stems = params.experiments.collect { it.batch_stem }
     def duplicate_stems = batch_stems.findAll { s -> batch_stems.count(s) > 1 }.unique()
@@ -63,11 +66,25 @@ workflow EmbeddingsPipeline {
         error "ERROR: params.experiments has duplicate batch_stem value(s): ${duplicate_stems.join(', ')}. Every experiment's batch_stem must be unique."
     }
 
+    // `cp_features` opts an experiment into the CellProfiler-feature track
+    // below and isn't a BuildDatasetConfig field itself, so BUILD_DATASET
+    // never sees it; `cellprofiler_pipeline`/`cellprofiler_cycle` are
+    // CpFeaturesConfig-only fields a `cp_features: true` entry may also
+    // carry (see below), so BUILD_DATASET never sees those either.
+    //
     // Parsed here (not passed through as a raw file) so BUILD_DATASET's
     // -resume cache key is the actual scalar values -- matching this
     // repo's prior configs/*.yaml-parsing precedent for the same reason.
+    // `window` falls back to the global params.window default (see
+    // params.yaml's "Shared per-experiment defaults" section) whenever an
+    // entry doesn't set its own -- an entry's own value always wins.
+    def dataset_field_excludes = ['batch_stem', 'cp_features', 'cellprofiler_pipeline', 'cellprofiler_cycle'] as Set
     config_ch = channel.fromList(params.experiments).map { entry ->
-        tuple(entry.batch_stem, entry.findAll { k, v -> k != 'batch_stem' })
+        def overrides = entry.findAll { k, v -> !(k in dataset_field_excludes) }
+        if (!overrides.containsKey('window') && params.window != null) {
+            overrides = overrides + [window: params.window]
+        }
+        tuple(entry.batch_stem, overrides)
     }
 
     // Per-batch (per-experiment) chain -- identical shape to
@@ -102,33 +119,33 @@ workflow EmbeddingsPipeline {
     )
 
     // ── CellProfiler-feature track (optional second track) ──────────────
-    // params.cp_features_experiments defaults to [] (see params.yaml) --
-    // an empty list means "no CellProfiler-feature track for this run",
-    // skipping BUILD_CP_FEATURES onward entirely rather than erroring, so
-    // existing cellDINO-only runs work unchanged.
-    def cp_experiments = params.cp_features_experiments ?: []
+    // An `experiments:` entry opts itself into this track by setting
+    // `cp_features: true` -- there's no separate list to keep in sync with
+    // `experiments:` any more, so batch_stem existence/uniqueness are
+    // already guaranteed by the validation above. No entries opting in
+    // (the default) skips BUILD_CP_FEATURES onward entirely, so existing
+    // cellDINO-only runs work unchanged.
+    def cp_experiments = params.experiments.findAll { it.cp_features == true }
     if (cp_experiments) {
-        cp_experiments.eachWithIndex { entry, i ->
-            if (!(entry instanceof Map)) {
-                error "ERROR: params.cp_features_experiments[${i}] must be a map, got ${entry?.getClass()?.simpleName}."
-            }
-            if (!(entry.batch_stem instanceof String) || entry.batch_stem.trim().isEmpty()) {
-                error "ERROR: params.cp_features_experiments[${i}] is missing a required, non-empty 'batch_stem' field."
-            }
-        }
-        def cp_batch_stems = cp_experiments.collect { it.batch_stem }
-        def cp_duplicate_stems = cp_batch_stems.findAll { s -> cp_batch_stems.count(s) > 1 }.unique()
-        if (cp_duplicate_stems) {
-            error "ERROR: params.cp_features_experiments has duplicate batch_stem value(s): ${cp_duplicate_stems.join(', ')}. Every experiment's batch_stem must be unique."
-        }
-        def unknown_stems = cp_batch_stems.findAll { s -> !(s in batch_stems) }
-        if (unknown_stems) {
-            error "ERROR: params.cp_features_experiments has batch_stem value(s) not present in params.experiments: ${unknown_stems.join(', ')}. FILTER_CP_FEATURES reuses that experiment's QC_FILTER output, which only exists for experiments listed in params.experiments."
-        }
-
-        // Same per-experiment parsed-config-channel shape as config_ch above.
+        // Same per-experiment parsed-config-channel shape as config_ch
+        // above, reusing each opted-in entry's own phenotyping_dir/wells/
+        // grid_size/segmentation_type/etc. `window`/`shard_maxcount` are
+        // BuildDatasetConfig-only fields a `cp_features: true` entry may
+        // also carry (for BUILD_DATASET's own sake), so BUILD_CP_FEATURES
+        // never sees them; `cp_features` itself isn't a CpFeaturesConfig
+        // field either. `cellprofiler_pipeline`/`cellprofiler_cycle` fall
+        // back to their global params.yaml defaults the same way `window`
+        // does for config_ch -- an entry's own value always wins.
+        def cp_field_excludes = ['batch_stem', 'cp_features', 'window', 'shard_maxcount'] as Set
         cp_config_ch = channel.fromList(cp_experiments).map { entry ->
-            tuple(entry.batch_stem, entry.findAll { k, v -> k != 'batch_stem' })
+            def overrides = entry.findAll { k, v -> !(k in cp_field_excludes) }
+            if (!overrides.containsKey('cellprofiler_pipeline') && params.cellprofiler_pipeline != null) {
+                overrides = overrides + [cellprofiler_pipeline: params.cellprofiler_pipeline]
+            }
+            if (!overrides.containsKey('cellprofiler_cycle') && params.cellprofiler_cycle != null) {
+                overrides = overrides + [cellprofiler_cycle: params.cellprofiler_cycle]
+            }
+            tuple(entry.batch_stem, overrides)
         }
 
         cp_ch = BUILD_CP_FEATURES(cp_config_ch)   // (batch_stem, cp_features.parquet)

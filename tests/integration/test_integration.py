@@ -146,17 +146,22 @@ def _write_cellprofiler_csv(tile_dir: Path, cell_ids: Sequence[int]) -> None:
 
 def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -> Path:
     """Write a tiny synthetic phenotyping_dir under exp_dir, plus a
-    params.yaml (repo defaults + an `experiments:` entry for this batch,
-    plus a matching `cp_features_experiments:` entry for the
-    CellProfiler-feature track) also under exp_dir, matching
-    BUILD_DATASET's real input contract closely enough to run end to end.
-    Returns exp_dir.
+    params.yaml (repo defaults + a single `experiments:` entry for this
+    batch, with `cp_features: true` opting it into the CellProfiler-feature
+    track too) also under exp_dir, matching BUILD_DATASET's real input
+    contract closely enough to run end to end. Returns exp_dir.
 
-    include_grid_size=False omits grid_size from the experiment entry
-    entirely, exercising BUILD_DATASET's auto-detection of it from
+    include_grid_size=False omits grid_size from the entry entirely,
+    exercising BUILD_DATASET's (and, since the same entry also drives
+    BUILD_CP_FEATURES here, BUILD_CP_FEATURES') auto-detection of it from
     phenotyping_dir's own `well1_grid1` directory naming instead.
-    `cp_features_experiments`'s entry always omits grid_size (relying on
-    the same auto-detection), independent of this flag."""
+
+    The entry sets neither `window` nor `cellprofiler_pipeline` itself --
+    both are set only via this params.yaml's top-level `window`/
+    `cellprofiler_pipeline` globals instead, exercising
+    workflows/embeddings.nf's per-experiment fallback-to-global-default
+    wiring end to end (an entry's own value, if present, would still win
+    -- see workflows/embeddings.nf)."""
     phenotyping_dir = exp_dir / "phenotyping"
     tile_dir = phenotyping_dir / "well1_grid1" / "tile0x0y"
 
@@ -182,18 +187,14 @@ def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -
     batch_config = {
         "phenotyping_dir": str(phenotyping_dir),
         "wells": ["well1"],
-        "window": _WINDOW,
+        "cp_features": True,
     }
     if include_grid_size:
         batch_config["grid_size"] = 1
-    cp_batch_config = {
-        "phenotyping_dir": str(phenotyping_dir),
-        "wells": ["well1"],
-        "cellprofiler_pipeline": _CELLPROFILER_PIPELINE,
-    }
     params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
+    params["window"] = _WINDOW
+    params["cellprofiler_pipeline"] = _CELLPROFILER_PIPELINE
     params["experiments"] = [{"batch_stem": "batch1", **batch_config}]
-    params["cp_features_experiments"] = [{"batch_stem": "batch1", **cp_batch_config}]
     with open(exp_dir / "params.yaml", "w") as f:
         yaml.safe_dump(params, f)
 

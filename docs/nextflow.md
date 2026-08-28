@@ -30,6 +30,13 @@ duplicate `batch_stem`s) and pairs each entry's remaining keys with its
 scalar values. `modules/local/build_dataset.nf` threads every key in that
 map through as an individual Hydra CLI override.
 
+`window` is the one field with its own pipeline-wide default
+(`params.window`, see [Configuration](configuration.md)):
+`workflows/embeddings.nf` fills it into an entry's overrides only when
+that entry doesn't already set `window` itself, so a single value covers
+every experiment sharing a crop size while any experiment needing a
+different one can still override it locally.
+
 ## Stage graph
 
 ```text
@@ -77,18 +84,26 @@ disambiguate; `reconstruct_staged_paths()` handles both cases.
 ## CellProfiler-feature track
 
 An optional, parallel second track processes the same experiments'
-hand-engineered CellProfiler measurements, driven by `params.yaml`'s
-separate `cp_features_experiments:` list (same shape as `experiments:` --
-one map per experiment, `batch_stem` required and unique, remaining keys
-supplying `CpFeaturesConfig` fields). An empty (or unset) list -- the
-default -- skips `BUILD_CP_FEATURES` onward entirely, so a run with no
-CellProfiler data works exactly as before. Every
-`cp_features_experiments[i].batch_stem` must also appear in `experiments`,
-since this track's own filter stage reuses that experiment's `QC_FILTER`
-output rather than running QC a second time:
+hand-engineered CellProfiler measurements. There's no separate list to
+keep in sync with `experiments:` -- an entry opts itself in by setting
+`cp_features: true`, and that same entry's `phenotyping_dir`/`wells`/
+`grid_size`/`segmentation_type`/etc. (plus any `cellprofiler_pipeline`/
+`cellprofiler_cycle` it sets) feed `CpFeaturesConfig` directly. No entry
+setting `cp_features: true` -- the default -- skips `BUILD_CP_FEATURES`
+onward entirely, so a run with no CellProfiler data works exactly as
+before. Because the opted-in entries are a subset of `params.experiments`
+itself, `batch_stem` existence/uniqueness are already guaranteed by that
+list's own validation, and this track's own filter stage reuses that same
+experiment's `QC_FILTER` output rather than running QC a second time.
+
+`cellprofiler_pipeline` and `cellprofiler_cycle` each have their own
+pipeline-wide default too (`params.cellprofiler_pipeline`,
+`params.cellprofiler_cycle` -- see [Configuration](configuration.md)),
+filled into an entry's overrides the same way `window` is for
+`experiments:` above -- only when that entry doesn't set its own value:
 
 ```text
-cp_config_ch (params.cp_features_experiments)
+cp_config_ch (params.experiments entries with cp_features: true)
     │
     ▼
 BUILD_CP_FEATURES
@@ -192,8 +207,9 @@ Every `modules/local/*.nf` file follows the same shape: `errorStrategy
 
 The `cp_features/`, `filter_cp_features/`, `feature_select_batchwise_cp_features/`,
 `ovwt_batchwise_cp_features/`, and `global/*_cp_features` directories only
-appear when `params.cp_features_experiments` is non-empty (see
-[CellProfiler-feature track](#cellprofiler-feature-track) above).
+appear when at least one `params.experiments` entry sets `cp_features:
+true` (see [CellProfiler-feature track](#cellprofiler-feature-track)
+above).
 
 See the [Stage Reference](cli/dataset.md) pages for each Parquet file's
 exact column set.

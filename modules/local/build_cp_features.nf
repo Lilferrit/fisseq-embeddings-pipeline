@@ -1,11 +1,11 @@
 // BUILD_CP_FEATURES. Reads a per-experiment config (phenotyping_dir, wells,
 // grid_size, segmentation_type, cellprofiler_cycle, cellprofiler_pipeline,
 // barcode_col_name, aa_changes_col_name, edit_distance_col_name) from one
-// entry of params.yaml's `cp_features_experiments:` list -- same blind
-// per-experiment-map CLI-override forwarding as build_dataset.nf. Its own
-// process, not depending on BUILD_DATASET's task output -- it reads the
-// same phenotyping_dir tiles directly, plus each tile's already-computed
-// CellProfiler CSV alongside them.
+// entry of params.yaml's `experiments:` list that sets `cp_features: true`
+// -- same blind per-experiment-map CLI-override forwarding as
+// build_dataset.nf. Its own process, not depending on BUILD_DATASET's task
+// output -- it reads the same phenotyping_dir tiles directly, plus each
+// tile's already-computed CellProfiler CSV alongside them.
 
 process BUILD_CP_FEATURES {
     errorStrategy 'ignore'

@@ -40,8 +40,8 @@ Extends the [common config fields](#common-config-fields) below.
 | `grid_size` | `null` | Tile grid size; auto-detected per well when unset, same convention as `BUILD_DATASET`. |
 | `segmentation_type` | `"cells"` | Which segmentation output's cell table to read (`{segmentation_type}.csv`). |
 | `use_corrected` | `false` | **Unused by this stage's own logic** -- present only because `discover_tiles()` (reused for tile discovery) reads it to populate an image-path column this stage never reads. |
-| `cellprofiler_cycle` | `""` | The `{cycle}` component of the CellProfiler output filename -- `""` (no cycle) or `"cycle<N>"`. |
-| `cellprofiler_pipeline` | **required** | The `{pipeline}` component of that filename -- the CellProfiler `.cppipe` pipeline's basename. |
+| `cellprofiler_cycle` | `""` | The `{cycle}` component of the CellProfiler output filename -- `""` (no cycle) or `"cycle<N>"`. When run via `BUILD_CP_FEATURES`, a `cp_features: true` `experiments:` entry omitting this falls back to `params.yaml`'s pipeline-wide `cellprofiler_cycle` default (see [Configuration](../configuration.md)). |
+| `cellprofiler_pipeline` | **required** | The `{pipeline}` component of that filename -- the CellProfiler `.cppipe` pipeline's basename. When run via `BUILD_CP_FEATURES`, a `cp_features: true` `experiments:` entry omitting this falls back to `params.yaml`'s pipeline-wide `cellprofiler_pipeline` default; required here only when invoking this module's CLI directly (or when neither the entry nor the global default sets it). |
 | `batch_stem` | **required** | This experiment's identifier, written into every row as `meta_batch`. |
 | `barcode_col_name` | `"upBarcode"` | Input column name for cell barcodes, read from the cell table. |
 | `aa_changes_col_name` | `"aaChanges"` | Input column name for amino-acid change labels. |

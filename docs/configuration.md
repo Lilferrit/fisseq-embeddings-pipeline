@@ -25,15 +25,23 @@ two:
 less-specific "no such property" error surface first.
 
 `BUILD_DATASET`'s own fields (`phenotyping_dir`, `wells`, `grid_size`,
-`window`, ...) are per-experiment, not pipeline-wide, so they don't have a
-single default value in the rest of `params.yaml` -- instead each
+`window`, ...) are per-experiment, not pipeline-wide -- instead each
 experiment supplies its own map of these fields as one entry of
 `params.yaml`'s `experiments:` list (see
 [Nextflow Workflow](nextflow.md#per-experiment-configs)).
 `BUILD_CP_FEATURES`' fields (`phenotyping_dir`, `wells`, `grid_size`,
-`cellprofiler_cycle`, `cellprofiler_pipeline`, ...) work the same way, via
-the separate, optional `cp_features_experiments:` list -- see
-[Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
+`cellprofiler_cycle`, `cellprofiler_pipeline`, ...) work the same way, but
+there's no separate list -- an `experiments:` entry opts itself into the
+CellProfiler-feature track by setting `cp_features: true`, reusing that
+same entry's fields -- see
+[Nextflow Workflow](nextflow.md#cellprofiler-feature-track). Three fields
+that are logically per-experiment but in practice are almost always the
+same across every experiment in a run -- `window`, `cellprofiler_pipeline`,
+`cellprofiler_cycle` -- are the exception: each has its own pipeline-wide
+default below (`window`, `cellprofiler_pipeline`, `cellprofiler_cycle` in
+the Fields table), used for any experiment entry that doesn't set its own
+value for that key; an entry's own value always wins over the global
+default.
 
 ### Fields
 
@@ -42,8 +50,10 @@ the separate, optional `cp_features_experiments:` list -- see
 | `pipeline_dir` | *(required)* | all |
 | `container_image` | `"fisseq-embeddings-pipeline:latest"` | all |
 | `cell_dino_checkpoint` | *(required)* | `EMBED_CELLS` |
-| `experiments` | `[]` (required non-empty) | `BUILD_DATASET` (list of per-experiment maps, each requiring `batch_stem`; see above) |
-| `cp_features_experiments` | `[]` (optional) | `BUILD_CP_FEATURES` (list of per-experiment maps, each requiring `batch_stem`; empty means no CellProfiler-feature track for this run -- see below) |
+| `experiments` | `[]` (required non-empty) | `BUILD_DATASET`, and `BUILD_CP_FEATURES` for any entry setting `cp_features: true` (list of per-experiment maps, each requiring `batch_stem`; see above) |
+| `window` | `224` | `BUILD_DATASET` (global default for any `experiments` entry that omits `window`; an entry's own `window` wins) |
+| `cellprofiler_pipeline` | `null` (required, here or per `cp_features: true` entry, once any experiment sets `cp_features: true`) | `BUILD_CP_FEATURES` (global default for any `cp_features: true` entry that omits `cellprofiler_pipeline`) |
+| `cellprofiler_cycle` | `""` | `BUILD_CP_FEATURES` (global default for any `cp_features: true` entry that omits `cellprofiler_cycle`) |
 | `random_seed` | `0` | every stochastic stage |
 | `barcode_count_threshold` | `10` | `QC_FILTER` |
 | `variant_barcode_count_threshold` | `4` | `QC_FILTER` |
