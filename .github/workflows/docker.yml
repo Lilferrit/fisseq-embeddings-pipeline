@@ -59,7 +59,7 @@ jobs:
         if: github.event_name != 'pull_request'
         id: tags
         run: |
-          image="ghcr.io/${{ github.repository }}"
+          image="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
           tags="${image}:latest,${image}:${GITHUB_SHA::7}"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/v}"
