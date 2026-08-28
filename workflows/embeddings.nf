@@ -1,6 +1,12 @@
 // EmbeddingsPipeline. Wires BUILD_DATASET -> {QC_FILTER, EMBED_CELLS} ->
 // FILTER_EMBEDDINGS -> {AGGREGATE_EMBEDDINGS, OVWT_BATCHWISE} ->
 // {GLOBAL_VARIANT_EMBEDDINGS, GLOBAL_VARIANT_DISTINGUISHABILITY}.
+//
+// A second, parallel CellProfiler-feature track shares QC_FILTER's output
+// (the same cells, just a different feature space) rather than running a
+// second QC pass: BUILD_CP_FEATURES -> FILTER_CP_FEATURES ->
+// {AGGREGATE_CP_FEATURES, OVWT_BATCHWISE_CP_FEATURES} ->
+// {GLOBAL_VARIANT_CP_FEATURES, GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES}.
 nextflow.enable.dsl = 2
 
 include { BUILD_DATASET } from '../modules/local/build_dataset'
@@ -11,6 +17,12 @@ include { AGGREGATE_EMBEDDINGS } from '../modules/local/aggregate_embeddings'
 include { OVWT_BATCHWISE } from '../modules/local/ovwt_batchwise'
 include { GLOBAL_VARIANT_EMBEDDINGS } from '../modules/local/global_variant_embeddings'
 include { GLOBAL_VARIANT_DISTINGUISHABILITY } from '../modules/local/global_variant_distinguishability'
+include { BUILD_CP_FEATURES } from '../modules/local/build_cp_features'
+include { FILTER_CP_FEATURES } from '../modules/local/filter_cp_features'
+include { AGGREGATE_CP_FEATURES } from '../modules/local/aggregate_cp_features'
+include { OVWT_BATCHWISE_CP_FEATURES } from '../modules/local/ovwt_batchwise_cp_features'
+include { GLOBAL_VARIANT_CP_FEATURES } from '../modules/local/global_variant_cp_features'
+include { GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES } from '../modules/local/global_variant_distinguishability_cp_features'
 
 workflow EmbeddingsPipeline {
     // -params-file params.yaml is mandatory (there's no
@@ -88,4 +100,54 @@ workflow EmbeddingsPipeline {
         ovwt_ch.map { stem, results, cell_scores, models -> results }.collect(),
         ovwt_ch.map { stem, results, cell_scores, models -> stem }.collect(),
     )
+
+    // ── CellProfiler-feature track (optional second track) ──────────────
+    // params.cp_features_experiments defaults to [] (see params.yaml) --
+    // an empty list means "no CellProfiler-feature track for this run",
+    // skipping BUILD_CP_FEATURES onward entirely rather than erroring, so
+    // existing cellDINO-only runs work unchanged.
+    def cp_experiments = params.cp_features_experiments ?: []
+    if (cp_experiments) {
+        cp_experiments.eachWithIndex { entry, i ->
+            if (!(entry instanceof Map)) {
+                error "ERROR: params.cp_features_experiments[${i}] must be a map, got ${entry?.getClass()?.simpleName}."
+            }
+            if (!(entry.batch_stem instanceof String) || entry.batch_stem.trim().isEmpty()) {
+                error "ERROR: params.cp_features_experiments[${i}] is missing a required, non-empty 'batch_stem' field."
+            }
+        }
+        def cp_batch_stems = cp_experiments.collect { it.batch_stem }
+        def cp_duplicate_stems = cp_batch_stems.findAll { s -> cp_batch_stems.count(s) > 1 }.unique()
+        if (cp_duplicate_stems) {
+            error "ERROR: params.cp_features_experiments has duplicate batch_stem value(s): ${cp_duplicate_stems.join(', ')}. Every experiment's batch_stem must be unique."
+        }
+        def unknown_stems = cp_batch_stems.findAll { s -> !(s in batch_stems) }
+        if (unknown_stems) {
+            error "ERROR: params.cp_features_experiments has batch_stem value(s) not present in params.experiments: ${unknown_stems.join(', ')}. FILTER_CP_FEATURES reuses that experiment's QC_FILTER output, which only exists for experiments listed in params.experiments."
+        }
+
+        // Same per-experiment parsed-config-channel shape as config_ch above.
+        cp_config_ch = channel.fromList(cp_experiments).map { entry ->
+            tuple(entry.batch_stem, entry.findAll { k, v -> k != 'batch_stem' })
+        }
+
+        cp_ch = BUILD_CP_FEATURES(cp_config_ch)   // (batch_stem, cp_features.parquet)
+        // Reuses the SAME qc_ch computed above for the cellDINO track --
+        // no second QC_FILTER run.
+        cp_qc_join_ch = qc_ch.map { s, filtered_cells, barcode_counts, variants_per_barcode -> tuple(s, filtered_cells) }
+        cp_filtered_ch = FILTER_CP_FEATURES(cp_ch.join(cp_qc_join_ch)) // (batch_stem, filtered_keys.parquet, normalizer.parquet)
+
+        cp_and_filtered_ch = cp_ch.join(cp_filtered_ch) // (batch_stem, cp_features.parquet, filtered_keys.parquet, normalizer.parquet)
+        cp_agg_ch  = AGGREGATE_CP_FEATURES(cp_and_filtered_ch)
+        cp_ovwt_ch = OVWT_BATCHWISE_CP_FEATURES(cp_and_filtered_ch)
+
+        GLOBAL_VARIANT_CP_FEATURES(
+            cp_agg_ch.map { stem, path -> path }.collect(),
+            cp_agg_ch.map { stem, path -> stem }.collect(),
+        )
+        GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES(
+            cp_ovwt_ch.map { stem, results, cell_scores, models -> results }.collect(),
+            cp_ovwt_ch.map { stem, results, cell_scores, models -> stem }.collect(),
+        )
+    }
 }

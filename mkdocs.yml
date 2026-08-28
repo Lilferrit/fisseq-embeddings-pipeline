@@ -15,6 +15,12 @@ nav:
       - OVWT Distinguish-ability (OVWT_BATCHWISE): cli/ovwt.md
       - Global Variant Embeddings: cli/global_embeddings.md
       - Global Variant Distinguish-ability: cli/global_distinguishability.md
+      - "CellProfiler Feature Dataset (BUILD_CP_FEATURES)": cli/cp_features.md
+      - "Filter CP Features (FILTER_CP_FEATURES)": cli/filter_cp_features.md
+      - "Aggregation, CP Track (AGGREGATE_CP_FEATURES)": cli/aggregate_cp_features.md
+      - "OVWT Distinguish-ability, CP Track (OVWT_BATCHWISE_CP_FEATURES)": cli/ovwt_cp_features.md
+      - Global Variant CP Features: cli/global_variant_cp_features.md
+      - Global Variant Distinguish-ability, CP Track: cli/global_variant_distinguishability_cp_features.md
   - API Reference:
       - dataset: api/dataset.md
       - qcfilter: api/qcfilter.md
@@ -24,6 +30,12 @@ nav:
       - ovwt: api/ovwt.md
       - global_embeddings: api/global_embeddings.md
       - global_distinguishability: api/global_distinguishability.md
+      - cp_features: api/cp_features.md
+      - filter_cp_features: api/filter_cp_features.md
+      - aggregate_cp_features: api/aggregate_cp_features.md
+      - ovwt_cp_features: api/ovwt_cp_features.md
+      - global_variant_cp_features: api/global_variant_cp_features.md
+      - global_variant_distinguishability_cp_features: api/global_variant_distinguishability_cp_features.md
       - config: api/config.md
       - utils: api/utils.md
 theme:

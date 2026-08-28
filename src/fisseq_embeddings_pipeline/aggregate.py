@@ -23,9 +23,14 @@ control) -- only genuinely-synonymous variant labels drop out of the
 per-variant output, since they exist only to define the reference baseline,
 not to be scored against it.
 
-`_feature_columns` keys off this pipeline's EMBEDDING_SELECTOR
-(``^emb_\\d+$``) instead of fisseq-data-pipeline's FEATURE_SELECTOR -- the
-pipeline only ever aggregates emb_* dimensions.
+`_feature_columns` keys off a ``feature_selector`` parameter, defaulting to
+this pipeline's EMBEDDING_SELECTOR (``^emb_\\d+$``) -- both
+``BaseAggregator.__init__`` and :func:`aggregate_embeddings` accept it, so
+AGGREGATE_CP_FEATURES (aggregate_cp_features.py) can reuse this same class
+hierarchy and dispatch logic against CellProfiler-shaped columns by passing
+``FEATURE_SELECTOR`` instead, without forking any of the KS/AUROC Polars
+implementation below. The default is unchanged, so AGGREGATE_EMBEDDINGS'
+own behavior is untouched.
 
 :func:`aggregate_embeddings` dispatches over one or more requested
 aggregator names (validating the whole set up front -- empty, unknown, or
@@ -33,11 +38,12 @@ duplicate names all raise before any aggregator runs), joins their outputs
 on ``label_column`` (each aggregator's ``_stat_suffix`` already namespaces
 columns, so no collision across methods), then joins in
 :func:`fisseq_embeddings_pipeline.utils.metadata.get_aggregate_meta_data`.
-When ``aggregators`` is exactly ``("median",)`` (the default), the
-``_median`` suffix is stripped before returning, producing bare
-``emb_0000..emb_{D-1}`` columns and keeping ``EMBEDDING_SELECTOR`` valid
-for any future consumer in the default case. Any other selection (multiple
-methods, or a single non-median method) keeps suffixed columns.
+When ``aggregators`` is exactly ``("median",)``, the ``_median`` suffix is
+stripped before returning, producing bare feature columns and keeping the
+selector valid for any future consumer in that case. Any other selection
+(multiple methods, or a single non-median method) keeps suffixed columns --
+including AGGREGATE_EMBEDDINGS' own new default, ``("median", "KS",
+"AUROC")``, which no longer hits this bare-column special case.
 """
 
 import abc
@@ -84,15 +90,26 @@ class BaseAggregator(abc.ABC):
     label_col : str
         Name of the column used to identify variant groups. Defaults to
         ``"meta_aa_changes"``.
+    feature_selector : pl.Expr
+        Polars selector expression identifying feature columns to
+        aggregate. Defaults to ``EMBEDDING_SELECTOR``
+        (``^emb_\d+$``) -- pass ``FEATURE_SELECTOR`` (exclude ``meta_*``)
+        to aggregate CellProfiler-shaped columns instead (see this
+        module's docstring).
     """
 
     _stat_suffix: ClassVar[str]
 
-    def __init__(self, label_col: str = "meta_aa_changes") -> None:
+    def __init__(
+        self,
+        label_col: str = "meta_aa_changes",
+        feature_selector: pl.Expr = EMBEDDING_SELECTOR,
+    ) -> None:
         self.label_col = label_col
+        self.feature_selector = feature_selector
 
     def _feature_columns(self, lf: pl.LazyFrame) -> list[str]:
-        return lf.select(EMBEDDING_SELECTOR).collect_schema().names()
+        return lf.select(self.feature_selector).collect_schema().names()
 
     @staticmethod
     def _native_clean(feat: str) -> pl.Expr:
@@ -394,6 +411,7 @@ def aggregate_embeddings(
     filtered_lf: pl.LazyFrame,
     label_column: str,
     aggregators: Sequence[str] = ("median",),
+    feature_selector: pl.Expr = EMBEDDING_SELECTOR,
 ) -> pl.DataFrame:
     """
     Aggregate synonymous-corrected embeddings per variant via one or more methods.
@@ -420,6 +438,11 @@ def aggregate_embeddings(
         Aggregation method(s) to run, in the given order. One or more of
         ``"mean"``, ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to
         ``("median",)``.
+    feature_selector : pl.Expr
+        Polars selector identifying feature columns, forwarded to each
+        aggregator. Defaults to ``EMBEDDING_SELECTOR``; pass
+        ``FEATURE_SELECTOR`` for CellProfiler-shaped columns (see this
+        module's docstring).
 
     Returns
     -------
@@ -454,7 +477,9 @@ def aggregate_embeddings(
 
     result_lf: Optional[pl.LazyFrame] = None
     for name in aggregators:
-        agg_lf = _AGGREGATORS[name](label_col=label_column).aggregate(filtered_lf)
+        agg_lf = _AGGREGATORS[name](
+            label_col=label_column, feature_selector=feature_selector
+        ).aggregate(filtered_lf)
         result_lf = (
             agg_lf
             if result_lf is None
@@ -494,17 +519,23 @@ class AggregateEmbeddingsConfig(AppConfig):
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     aggregators : List[str]
         Aggregation method(s) to run, in order. One or more of ``"mean"``,
-        ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to ``["median"]`` --
-        output columns are bare ``emb_0000..emb_{D-1}`` only for this exact
-        default; any other selection produces suffixed columns (see
-        :func:`aggregate_embeddings`).
+        ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to
+        ``["median", "KS", "AUROC"]`` -- note this means output columns are
+        suffixed by method (``emb_0000_median``, ``emb_0000_KS``,
+        ``emb_0000_AUROC``, ...) by default; only the exact single-element
+        selection ``["median"]`` produces bare ``emb_0000..emb_{D-1}``
+        columns (see :func:`aggregate_embeddings`). Contrast
+        AGGREGATE_CP_FEATURES' ``AggregateCpFeaturesConfig.aggregators``,
+        whose default stays ``["median"]``.
     """
 
     embeddings_file: str = MISSING
     filtered_keys_file: str = MISSING
     normalizer_file: str = MISSING
     label_column: str = "meta_aa_changes"
-    aggregators: List[str] = dataclasses.field(default_factory=lambda: ["median"])
+    aggregators: List[str] = dataclasses.field(
+        default_factory=lambda: ["median", "KS", "AUROC"]
+    )
 
 
 _cs = ConfigStore.instance()

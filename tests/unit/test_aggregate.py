@@ -404,6 +404,70 @@ def test_aggregate_embeddings_duplicate_aggregator_raises(
 
 
 # ---------------------------------------------------------------------------
+# feature_selector -- CellProfiler-shaped columns via FEATURE_SELECTOR,
+# reused (unforked) by AGGREGATE_CP_FEATURES (aggregate_cp_features.py).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cp_style_df() -> pl.DataFrame:
+    """Same shape as simple_df, but with CellProfiler-style feature-column
+    names (uppercase, underscore-separated) instead of emb_%04d -- these
+    are NOT matched by EMBEDDING_SELECTOR, only by FEATURE_SELECTOR."""
+    return pl.DataFrame(
+        {
+            "meta_aa_changes": ["A", "A", "A", "B", "B", "B"],
+            "meta_is_control": [False, False, False, False, False, False],
+            "Cells_AreaShape_Area": [1.0, 2.0, 3.0, 10.0, 20.0, 30.0],
+            "Cells_Intensity_MeanIntensity_DNA": [4.0, 5.0, 6.0, 40.0, 50.0, 60.0],
+        }
+    )
+
+
+def test_base_aggregator_default_feature_selector_ignores_cp_style_columns(
+    cp_style_df: pl.DataFrame,
+) -> None:
+    """With the default feature_selector (EMBEDDING_SELECTOR), a frame
+    with only CellProfiler-style columns has zero feature columns to
+    aggregate -- confirms the default is unchanged by the new parameter."""
+    result = m.MedianAggregator().aggregate(cp_style_df.lazy()).collect()
+    assert result.columns == ["meta_aa_changes"]
+
+
+def test_median_aggregator_with_feature_selector_matches_cp_style_columns(
+    cp_style_df: pl.DataFrame,
+) -> None:
+    from fisseq_embeddings_pipeline.utils.constants import FEATURE_SELECTOR
+
+    result = (
+        m.MedianAggregator(feature_selector=FEATURE_SELECTOR)
+        .aggregate(cp_style_df.lazy())
+        .collect()
+    )
+    assert {
+        "Cells_AreaShape_Area_median",
+        "Cells_Intensity_MeanIntensity_DNA_median",
+    }.issubset(set(result.columns))
+    row_a = _get_row(result, "A")
+    assert row_a["Cells_AreaShape_Area_median"] == pytest.approx(
+        np.median([1.0, 2.0, 3.0])
+    )
+
+
+def test_aggregate_embeddings_with_feature_selector_matches_cp_style_columns(
+    cp_style_df: pl.DataFrame,
+) -> None:
+    from fisseq_embeddings_pipeline.utils.constants import FEATURE_SELECTOR
+
+    result = m.aggregate_embeddings(
+        cp_style_df.lazy(), "meta_aa_changes", feature_selector=FEATURE_SELECTOR
+    )
+    assert "Cells_AreaShape_Area" in result.columns
+    row_a = _get_row(result, "A")
+    assert row_a["Cells_AreaShape_Area"] == pytest.approx(np.median([1.0, 2.0, 3.0]))
+
+
+# ---------------------------------------------------------------------------
 # main() -- CLI end-to-end (subprocess, mirroring test_filter.py's pattern)
 # ---------------------------------------------------------------------------
 
@@ -452,6 +516,11 @@ def _run_aggregate(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def test_main_runs_end_to_end_via_cli_default(tmp_path: Path) -> None:
+    """AggregateEmbeddingsConfig's default is `["median", "KS", "AUROC"]`
+    (not bare `["median"]`) -- so the CLI's own default run produces
+    suffixed columns for all three methods, not bare `emb_0000`. See
+    test_main_runs_end_to_end_via_cli_explicit_median_only below for the
+    bare-column case."""
     embeddings_path, filtered_keys_path, normalizer_path = _write_cli_fixture(tmp_path)
     output_dir = tmp_path / "out"
 
@@ -461,6 +530,29 @@ def test_main_runs_end_to_end_via_cli_default(tmp_path: Path) -> None:
         f"embeddings_file={embeddings_path}",
         f"filtered_keys_file={filtered_keys_path}",
         f"normalizer_file={normalizer_path}",
+    )
+    assert result.returncode == 0, result.stderr
+
+    agg = pl.read_parquet(output_dir / "aggregate.parquet")
+    assert {"emb_0000_median", "emb_0000_KS", "emb_0000_AUROC"}.issubset(
+        set(agg.columns)
+    )
+    assert "emb_0000" not in agg.columns
+    assert "A1A" not in agg["meta_aa_changes"].to_list()
+    assert set(agg["meta_aa_changes"].to_list()) == {"M1K", "WT"}
+
+
+def test_main_runs_end_to_end_via_cli_explicit_median_only(tmp_path: Path) -> None:
+    embeddings_path, filtered_keys_path, normalizer_path = _write_cli_fixture(tmp_path)
+    output_dir = tmp_path / "out"
+
+    result = _run_aggregate(
+        tmp_path,
+        f"output_dir={output_dir}",
+        f"embeddings_file={embeddings_path}",
+        f"filtered_keys_file={filtered_keys_path}",
+        f"normalizer_file={normalizer_path}",
+        "aggregators=[median]",
     )
     assert result.returncode == 0, result.stderr
 
@@ -504,6 +596,13 @@ def test_main_is_hydra_entry_point() -> None:
 # pooling option, no WT-null-bootstrap/block_list reproducibility-gate
 # machinery
 # ---------------------------------------------------------------------------
+
+
+def test_aggregate_embeddings_config_default_aggregators_is_median_ks_auroc():
+    cfg = m.AggregateEmbeddingsConfig(
+        embeddings_file="x", filtered_keys_file="y", normalizer_file="z"
+    )
+    assert cfg.aggregators == ["median", "KS", "AUROC"]
 
 
 def test_aggregate_config_omits_per_barcode_and_wt_null_fields():

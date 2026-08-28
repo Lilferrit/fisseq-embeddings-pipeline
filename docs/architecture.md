@@ -35,6 +35,37 @@ Global Variant Distinguish-ability Scores    (once, across all experiments)
                                                                                   Distinguish-ability Scores
 ```
 
+### CellProfiler-feature track (optional second track)
+
+A second, parallel track processes the same experiments' hand-engineered
+CellProfiler measurements alongside the cellDINO-embedding track above --
+the whole point being the two are directly comparable, run against the
+same cells. QC filtering isn't duplicated: this track's own filter stage
+joins against `QC_FILTER`'s existing output instead of running QC a
+second time.
+
+```text
+Batch Aggregates And Variant Scores (CellProfiler)  (per experiment, runs independently)
+  starcall-workflow's CellProfiler   ─► CellProfiler Feature Dataset ─┐
+    output (per tile)                                                 ├─► Filter CP Features
+  Cell Info Table ─────► QC Filtering (shared with the embeddings ─────┘         │
+                                        track above -- not rerun)       ┌────────┴────────┐
+                                                                        ▼                  ▼
+                                                       Aggregation (Synonymous    OVWT Distinguish-ability
+                                                       STD Corrected)              Scores (Synonymous STD
+                                                             │                      Corrected)
+                                                             ▼                            ▼
+                                                 Experiment N CP Aggregates    Experiment N CP Distinguish-
+                                                                                ability Scores
+
+Global Variant CP Features                   (once, across all experiments)
+  Experiment {1..N} CP Aggregates ─► Variant-wise median pooling ─► PCA ─► Global Variant CP Features
+
+Global Variant CP Distinguish-ability Scores (once, across all experiments)
+  Experiment {1..N} CP Distinguish-ability Scores ─► Variant-wise median pooling ─► Global Variant CP
+                                                                                      Distinguish-ability Scores
+```
+
 ## Terminology map
 
 | Diagram node | This pipeline's stage | Reuses / adapts from `fisseq-data-pipeline` |
@@ -50,6 +81,12 @@ Global Variant Distinguish-ability Scores    (once, across all experiments)
 | Variant-wise median pooling (embeddings branch) | `GLOBAL_VARIANT_EMBEDDINGS` -- median step | `globalfeatureselect.py`'s `median_across_batches` |
 | PCA | `GLOBAL_VARIANT_EMBEDDINGS` -- PCA step | `utils/dimreduction.py`'s `compute_pca` |
 | Variant-wise median pooling (scores branch) | `GLOBAL_VARIANT_DISTINGUISHABILITY` | per-experiment synonymous z-score then a `median_across_batches`-style pool, adapted for two scalar (AUROC) columns instead of a feature matrix |
+| CellProfiler Feature Dataset | `BUILD_CP_FEATURES` (new) | reads starcall-workflow's already-computed per-tile CellProfiler CSV alongside the same per-tile cell table `BUILD_DATASET` reads -- see [Data contracts](#cellprofiler-feature-csv-input-from-starcall-workflow) |
+| Filter CP Features | `FILTER_CP_FEATURES` (thin wrapper) | reuses `filter.py`'s `filter_and_fit_normalizer`/`load_filtered_embeddings` directly (already feature-agnostic) -- joins against `QC_FILTER`'s existing output, not a second QC run |
+| Aggregation (CellProfiler track) | `AGGREGATE_CP_FEATURES` (thin wrapper) | reuses `aggregate.py`'s `aggregate_embeddings` with `feature_selector=FEATURE_SELECTOR` |
+| OVWT Distinguish-ability Scores (CellProfiler track) | `OVWT_BATCHWISE_CP_FEATURES` (thin wrapper) | reuses `ovwt.py`'s `ovwt_batchwise` with `feature_selector=FEATURE_SELECTOR` |
+| Variant-wise median pooling + PCA (CellProfiler track) | `GLOBAL_VARIANT_CP_FEATURES` (thin wrapper) | reuses `global_embeddings.py`'s `global_variant_embeddings` directly (already `FEATURE_SELECTOR`-based, no fork needed) |
+| Variant-wise median pooling (CellProfiler scores branch) | `GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES` (thin wrapper) | reuses `global_distinguishability.py`'s `global_variant_distinguishability` directly (already feature-agnostic) |
 
 ## Architecture decisions
 
@@ -107,6 +144,32 @@ Global Variant Distinguish-ability Scores    (once, across all experiments)
     Python package, its dependencies, and (for `EMBED_CELLS`) the
     CUDA/torch stack; every Nextflow process runs inside that image via
     `process.container`.
+14. **The CellProfiler-feature track is a set of thin wrappers, not a
+    fork.** `filter.py`/`global_embeddings.py`/`global_distinguishability.py`
+    were already feature-agnostic (keyed off `FEATURE_SELECTOR`/
+    `JOIN_KEYS`/`META_SELECTOR`, never `EMBEDDING_SELECTOR`) and are
+    imported directly, unchanged. `aggregate.py`/`ovwt.py` needed one
+    small parameterization each -- a `feature_selector` argument,
+    defaulting to `EMBEDDING_SELECTOR` so existing behavior is untouched
+    -- rather than a duplicated copy of their KS/AUROC/k-fold-XGBoost
+    logic. Every `*_CP_FEATURES` module in the table above is a thin Hydra
+    entry point around one of these reused functions, mirroring the
+    precedent `aggregate.py` already set by importing
+    `load_filtered_embeddings` from `filter.py`.
+15. **QC filtering is computed once, reused by both tracks.** Both tracks
+    score the same cells, and QC filtering (edit distance / barcode
+    counts / variant barcode counts) only ever looks at `meta_*` columns
+    -- never the feature space -- so `FILTER_CP_FEATURES` joins directly
+    against `QC_FILTER`'s existing `filtered_cells.parquet` rather than
+    running a second `QC_FILTER` process.
+16. **`BUILD_CP_FEATURES` discovers tiles the same way `BUILD_DATASET`
+    does** (`phenotyping_dir`/`wells`/`grid_size` auto-detection, reusing
+    `dataset.discover_tiles` directly) rather than taking a hand-specified
+    merged input file, since `starcall-workflow` already writes each
+    tile's CellProfiler output at a deterministic path alongside its cell
+    table. It pairs each tile's cell table and CellProfiler CSV **by row
+    position, not by index value** -- see
+    [Data contracts](#cellprofiler-feature-csv-input-from-starcall-workflow).
 
 ## Repository layout
 
@@ -127,6 +190,12 @@ fisseq-embeddings-pipeline/
     ovwt_batchwise.nf
     global_variant_embeddings.nf
     global_variant_distinguishability.nf
+    build_cp_features.nf
+    filter_cp_features.nf
+    aggregate_cp_features.nf
+    ovwt_batchwise_cp_features.nf
+    global_variant_cp_features.nf
+    global_variant_distinguishability_cp_features.nf
   src/fisseq_embeddings_pipeline/
     config/
       app.py                      # AppConfig -- vendored, + random_seed
@@ -139,6 +208,12 @@ fisseq-embeddings-pipeline/
     ovwt.py                       # OVWT_BATCHWISE
     global_embeddings.py          # GLOBAL_VARIANT_EMBEDDINGS
     global_distinguishability.py  # GLOBAL_VARIANT_DISTINGUISHABILITY
+    cp_features.py                     # BUILD_CP_FEATURES
+    filter_cp_features.py              # FILTER_CP_FEATURES (thin wrapper over filter.py)
+    aggregate_cp_features.py           # AGGREGATE_CP_FEATURES (thin wrapper over aggregate.py)
+    ovwt_cp_features.py                # OVWT_BATCHWISE_CP_FEATURES (thin wrapper over ovwt.py)
+    global_variant_cp_features.py      # GLOBAL_VARIANT_CP_FEATURES (thin wrapper over global_embeddings.py)
+    global_variant_distinguishability_cp_features.py  # GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES (thin wrapper over global_distinguishability.py)
     vendor/dinov2/                # minimal vendored dinov2 subset
     utils/
       constants.py                # vendored
@@ -219,6 +294,37 @@ segmentation mask around each cell's bbox-derived center, and repackaging
 each row as one sample keyed by a unique cell id, carrying the crop array,
 the mask array, and `meta_*` fields (barcode, variant label, edit
 distance, well/tile, cell index).
+
+### CellProfiler feature CSV (input, from starcall-workflow)
+
+`BUILD_CP_FEATURES` reads a second per-tile output `starcall-workflow`'s
+`origin/devel` `workflow/rules/phenotyping.smk` already produces (rules
+`run_cellprofiler`/`copy_cellprofiler_output`), alongside the same
+`{segmentation_type}.csv` cell table `BUILD_DATASET` reads:
+
+```text
+{tile_dir}/cellprofiler{cycle}_{pipeline}.csv
+```
+
+where `{tile_dir}` is the same `{well}_grid{N}/tile{x}x{y}y/` directory
+`discover_tiles` already resolves, `{cycle}` is `""` or `"cycle<N>"`
+(`CpFeaturesConfig.cellprofiler_cycle`), and `{pipeline}` is the
+CellProfiler `.cppipe` pipeline's basename
+(`CpFeaturesConfig.cellprofiler_pipeline`, required). One row per cell,
+one column per CellProfiler measurement -- no `meta_*` prefix, no
+identity columns (`upBarcode`/`aaChanges`/`editDistance` come from the
+cell table, not this file).
+
+**Row-position join, not index-value join.** `BUILD_CP_FEATURES` pairs the
+cell table's row `i` with the CellProfiler CSV's row `i` -- not by
+matching their first-column index *values*. This mirrors
+`BUILD_DATASET`'s own `_crop_cell(..., label=i + 1, ...)` convention
+(segmentation mask labels are the row *position*, `i + 1`, not the cell
+table's index *value* -- see `write_dataset_shards`), and CellProfiler's
+own `ObjectNumber` numbering is standardly derived from ascending
+mask-label order, i.e. that same row position. A tile whose cell table
+and CellProfiler CSV have different row counts raises rather than
+silently misaligning every downstream row.
 
 ## `EMBED_CELLS` / Cell-DINO inference internals
 

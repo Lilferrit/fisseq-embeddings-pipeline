@@ -126,15 +126,37 @@ def _write_tile(
     tifffile.imwrite(tile_dir / "cells_mask.tif", mask)
 
 
+_CELLPROFILER_PIPELINE = "test_pipeline"
+
+
+def _write_cellprofiler_csv(tile_dir: Path, cell_ids: Sequence[int]) -> None:
+    """One CellProfiler-style feature column, alongside the tile's cell
+    table -- same file-naming convention cp_features.py reads
+    (`cellprofiler{cycle}_{pipeline}.csv`, cycle="" here), row-position
+    matched to the cell table (cell_ids here are already 0..N-1 in the
+    same order the cell table itself is written in, so row position and
+    cell_id value coincide -- see cp_features.py's module docstring on the
+    row-position join)."""
+    cp_table = pd.DataFrame(
+        {"Cells_AreaShape_Area": [float(100 + cid) for cid in cell_ids]},
+        index=list(cell_ids),
+    )
+    cp_table.to_csv(tile_dir / f"cellprofiler_{_CELLPROFILER_PIPELINE}.csv")
+
+
 def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -> Path:
     """Write a tiny synthetic phenotyping_dir under exp_dir, plus a
-    params.yaml (repo defaults + an `experiments:` entry for this batch)
-    also under exp_dir, matching BUILD_DATASET's real input contract
-    closely enough to run end to end. Returns exp_dir.
+    params.yaml (repo defaults + an `experiments:` entry for this batch,
+    plus a matching `cp_features_experiments:` entry for the
+    CellProfiler-feature track) also under exp_dir, matching
+    BUILD_DATASET's real input contract closely enough to run end to end.
+    Returns exp_dir.
 
     include_grid_size=False omits grid_size from the experiment entry
     entirely, exercising BUILD_DATASET's auto-detection of it from
-    phenotyping_dir's own `well1_grid1` directory naming instead."""
+    phenotyping_dir's own `well1_grid1` directory naming instead.
+    `cp_features_experiments`'s entry always omits grid_size (relying on
+    the same auto-detection), independent of this flag."""
     phenotyping_dir = exp_dir / "phenotyping"
     tile_dir = phenotyping_dir / "well1_grid1" / "tile0x0y"
 
@@ -153,7 +175,9 @@ def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -
                 aa_changes.append(label)
                 cell_id += 1
 
-    _write_tile(tile_dir, list(range(cell_id)), centers, barcodes, aa_changes)
+    cell_ids = list(range(cell_id))
+    _write_tile(tile_dir, cell_ids, centers, barcodes, aa_changes)
+    _write_cellprofiler_csv(tile_dir, cell_ids)
 
     batch_config = {
         "phenotyping_dir": str(phenotyping_dir),
@@ -162,8 +186,14 @@ def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -
     }
     if include_grid_size:
         batch_config["grid_size"] = 1
+    cp_batch_config = {
+        "phenotyping_dir": str(phenotyping_dir),
+        "wells": ["well1"],
+        "cellprofiler_pipeline": _CELLPROFILER_PIPELINE,
+    }
     params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
     params["experiments"] = [{"batch_stem": "batch1", **batch_config}]
+    params["cp_features_experiments"] = [{"batch_stem": "batch1", **cp_batch_config}]
     with open(exp_dir / "params.yaml", "w") as f:
         yaml.safe_dump(params, f)
 
@@ -359,6 +389,70 @@ def test_global_stage_outputs_exist(pipeline_outputs):
         assert (global_embeddings_dir / name).exists(), name
     assert (
         exp_dir / "global" / "distinguishability" / "global_scores.parquet"
+    ).exists()
+
+
+# ---------------------------------------------------------------------------
+# CellProfiler-feature track (BUILD_CP_FEATURES onward)
+# ---------------------------------------------------------------------------
+
+
+def test_cp_features_produced(pipeline_outputs):
+    exp_dir, _ = pipeline_outputs
+    cp_features = pl.read_parquet(
+        exp_dir / "cp_features" / "batch1" / "cp_features.parquet"
+    )
+    metadata = pl.read_parquet(exp_dir / "dataset" / "batch1" / "metadata.parquet")
+    assert cp_features.height == metadata.height
+    assert "Cells_AreaShape_Area" in cp_features.columns
+
+
+def test_filter_cp_features_has_no_feature_columns(pipeline_outputs):
+    """filtered_keys.parquet must never carry CellProfiler feature columns,
+    only the join key + classification -- same no-copy design as
+    FILTER_EMBEDDINGS."""
+    exp_dir, _ = pipeline_outputs
+    df = pl.read_parquet(
+        exp_dir / "filter_cp_features" / "batch1" / "filtered_keys.parquet"
+    )
+    assert "Cells_AreaShape_Area" not in df.columns
+
+
+def test_aggregate_and_ovwt_cp_features_outputs_exist(pipeline_outputs):
+    exp_dir, _ = pipeline_outputs
+    agg = pl.read_parquet(
+        exp_dir
+        / "feature_select_batchwise_cp_features"
+        / "batch1"
+        / "aggregate.parquet"
+    )
+    assert agg.height >= 1
+    # aggregate_methods_cp_features defaults to ["median"] -- bare column,
+    # not suffixed.
+    assert "Cells_AreaShape_Area" in agg.columns
+    results = pl.read_parquet(
+        exp_dir / "ovwt_batchwise_cp_features" / "batch1" / "results.parquet"
+    )
+    assert {"auroc_pooled", "auroc_median_barcode"}.issubset(results.columns)
+
+
+def test_global_cp_features_stage_outputs_exist(pipeline_outputs):
+    exp_dir, _ = pipeline_outputs
+    global_cp_features_dir = exp_dir / "global" / "cp_features"
+    for name in (
+        "median_aggregate.parquet",
+        "pca_scores.parquet",
+        "pca_components.parquet",
+        "pca_variance_explained.parquet",
+        "pca_reduced.parquet",
+    ):
+        assert (global_cp_features_dir / name).exists(), name
+    median_aggregate = pl.read_parquet(
+        global_cp_features_dir / "median_aggregate.parquet"
+    )
+    assert "Cells_AreaShape_Area" in median_aggregate.columns
+    assert (
+        exp_dir / "global" / "distinguishability_cp_features" / "global_scores.parquet"
     ).exists()
 
 

@@ -408,6 +408,49 @@ def test_ovwt_batchwise_all_variants_filtered_out_returns_empty_frames():
 
 
 # ---------------------------------------------------------------------------
+# feature_selector -- CellProfiler-shaped columns via FEATURE_SELECTOR,
+# reused (unforked) by OVWT_BATCHWISE_CP_FEATURES (ovwt_cp_features.py).
+# ---------------------------------------------------------------------------
+
+
+def _cp_style_kfold_fixture_lf(wt_n: int = 15, variant_n: int = 15) -> pl.LazyFrame:
+    """Same shape/separability as _kfold_fixture_lf, but with a
+    CellProfiler-style feature-column name (not matched by
+    EMBEDDING_SELECTOR)."""
+    rng = np.random.default_rng(4)
+    rows = []
+    for i in range(wt_n):
+        rows.append(
+            {
+                "meta_aa_changes": "WT",
+                "meta_barcode": "bc_wt",
+                "Cells_AreaShape_Area": 1.0 + rng.normal(scale=0.05),
+            }
+        )
+    for i in range(variant_n):
+        rows.append(
+            {
+                "meta_aa_changes": "M1K",
+                "meta_barcode": "bc_v0",
+                "Cells_AreaShape_Area": 0.0 + rng.normal(scale=0.05),
+            }
+        )
+    return pl.DataFrame(rows).lazy()
+
+
+def test_ovwt_batchwise_with_feature_selector_matches_cp_style_columns():
+    from fisseq_embeddings_pipeline.utils.constants import FEATURE_SELECTOR
+
+    results, cell_scores, _ = ovwt_batchwise(
+        _cp_style_kfold_fixture_lf(), _ovwt_cfg(), feature_selector=FEATURE_SELECTOR
+    )
+    row = results.filter(pl.col("meta_aa_changes") == "M1K").row(0, named=True)
+    assert 0.0 <= row["auroc_pooled"] <= 1.0
+    assert row["auroc_pooled"] > 0.7  # clearly separable synthetic data
+    assert cell_scores["score"].null_count() == 0
+
+
+# ---------------------------------------------------------------------------
 # main() -- CLI end-to-end (subprocess, mirroring test_aggregate.py's pattern)
 # ---------------------------------------------------------------------------
 

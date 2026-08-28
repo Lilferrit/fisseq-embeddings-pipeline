@@ -49,6 +49,33 @@ experiments: []
 #     grid_size: 8                 # explicit override
 #     window: 224
 
+# ── Per-experiment configs (BUILD_CP_FEATURES) ───────────────────────────────
+# Optional second track: for each experiment that also has CellProfiler
+# measurements (see docs/architecture.md), supply one map here with the
+# same shape as `experiments:` above -- `batch_stem` required (must also
+# appear in `experiments:`, since FILTER_CP_FEATURES reuses that
+# experiment's QC_FILTER output), plus every CpFeaturesConfig field
+# (phenotyping_dir, wells, grid_size, segmentation_type,
+# cellprofiler_cycle, cellprofiler_pipeline,
+# barcode_col_name/aa_changes_col_name/edit_distance_col_name,
+# csv_schema_scan_rows, ...). In practice `phenotyping_dir`/`wells`/
+# `grid_size` are usually the same values as that experiment's
+# `experiments:` entry, since BUILD_CP_FEATURES discovers tiles the same
+# way BUILD_DATASET does.
+#
+# The empty list below is deliberate -- it means "no CellProfiler-feature
+# track for this run" and the whole BUILD_CP_FEATURES-onward chain is
+# skipped, so a cellDINO-only run works unchanged. Supply entries here to
+# opt an experiment in.
+#
+# cp_features_experiments:
+#   - batch_stem: experiment1
+#     phenotyping_dir: /data/experiment1/phenotyping
+#     wells: [well1, well2]
+#     cellprofiler_pipeline: my_pipeline   # required -- the .cppipe basename
+#     # cellprofiler_cycle: cycle0         # only if starcall-workflow ran cellprofiler per-cycle
+cp_features_experiments: []
+
 # ── Reproducibility ──────────────────────────────────────────────────────────
 random_seed: 0
 
@@ -95,17 +122,33 @@ cell_dino_num_workers: 4
 
 # ── Label column, shared pipeline-wide ──────────────────────────────────────
 # Read by QC_FILTER, FILTER_EMBEDDINGS, AGGREGATE_EMBEDDINGS, OVWT_BATCHWISE,
-# and both global stages -- one override changes the variant label column
-# everywhere at once, rather than each stage needing its own.
+# both global stages, and their CellProfiler-feature-track counterparts
+# (FILTER_CP_FEATURES, AGGREGATE_CP_FEATURES, OVWT_BATCHWISE_CP_FEATURES,
+# GLOBAL_VARIANT_CP_FEATURES, GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES)
+# -- one override changes the variant label column everywhere at once,
+# rather than each stage needing its own.
 filter_label_column: "meta_aa_changes"
 
 # ── Aggregation (AGGREGATE_EMBEDDINGS) ───────────────────────────────────────
-# One or more of: mean | median | KS | AUROC. The literal single-element
-# default below keeps aggregate.parquet's columns bare (emb_0000..emb_{D-1});
-# any other selection suffixes columns by method (emb_0000_mean, etc.).
-aggregate_methods: ["median"]
+# One or more of: mean | median | KS | AUROC. Only the literal single-
+# element selection ["median"] keeps aggregate.parquet's columns bare
+# (emb_0000..emb_{D-1}); the default below -- ["median", "KS", "AUROC"] --
+# suffixes every column by method instead (emb_0000_median, emb_0000_KS,
+# emb_0000_AUROC, ...).
+aggregate_methods: ["median", "KS", "AUROC"]
+
+# ── Aggregation (AGGREGATE_CP_FEATURES) ──────────────────────────────────────
+# Same choices as aggregate_methods above, applied to the CellProfiler-
+# feature track. Stays median-only by default -- CellProfiler features are
+# hand-engineered, interpretable columns where a single median summary is
+# the established baseline; KS/AUROC remain available as an explicit
+# opt-in.
+aggregate_methods_cp_features: ["median"]
 
 # ── OVWT Distinguish-ability Scores (OVWT_BATCHWISE) ─────────────────────────
+# Also reused, unchanged, by OVWT_BATCHWISE_CP_FEATURES -- these are
+# scoring-methodology hyperparameters, not tied to feature type, so there
+# is no parallel "_cp_features" set for them.
 ovwt_wt_label: "WT"
 ovwt_n_folds: 5
 ovwt_calibrate: true
@@ -120,3 +163,8 @@ ovwt_downsample_wt: true
 # pca_reduced.parquet output (PC-truncated scores + propagated meta_is_control
 # + meta_impact_score computed on that reduced matrix).
 global_variant_embeddings_cumulative_variance_explained: 0.9
+
+# ── Global Variant CellProfiler Features (GLOBAL_VARIANT_CP_FEATURES) ───────
+# Same meaning as global_variant_embeddings_cumulative_variance_explained
+# above, applied to the CellProfiler-feature track's own pca_reduced.parquet.
+global_variant_cp_features_cumulative_variance_explained: 0.9

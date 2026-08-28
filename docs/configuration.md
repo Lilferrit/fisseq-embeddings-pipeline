@@ -30,6 +30,10 @@ single default value in the rest of `params.yaml` -- instead each
 experiment supplies its own map of these fields as one entry of
 `params.yaml`'s `experiments:` list (see
 [Nextflow Workflow](nextflow.md#per-experiment-configs)).
+`BUILD_CP_FEATURES`' fields (`phenotyping_dir`, `wells`, `grid_size`,
+`cellprofiler_cycle`, `cellprofiler_pipeline`, ...) work the same way, via
+the separate, optional `cp_features_experiments:` list -- see
+[Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
 
 ### Fields
 
@@ -39,6 +43,7 @@ experiment supplies its own map of these fields as one entry of
 | `container_image` | `"fisseq-embeddings-pipeline:latest"` | all |
 | `cell_dino_checkpoint` | *(required)* | `EMBED_CELLS` |
 | `experiments` | `[]` (required non-empty) | `BUILD_DATASET` (list of per-experiment maps, each requiring `batch_stem`; see above) |
+| `cp_features_experiments` | `[]` (optional) | `BUILD_CP_FEATURES` (list of per-experiment maps, each requiring `batch_stem`; empty means no CellProfiler-feature track for this run -- see below) |
 | `random_seed` | `0` | every stochastic stage |
 | `barcode_count_threshold` | `10` | `QC_FILTER` |
 | `variant_barcode_count_threshold` | `4` | `QC_FILTER` |
@@ -52,21 +57,32 @@ experiment supplies its own map of these fields as one entry of
 | `cell_dino_device` | `"cuda"` | `EMBED_CELLS` |
 | `cell_dino_batch_size` | `256` | `EMBED_CELLS` |
 | `cell_dino_num_workers` | `4` | `EMBED_CELLS` |
-| `filter_label_column` | `"meta_aa_changes"` | `QC_FILTER`, `FILTER_EMBEDDINGS`, `AGGREGATE_EMBEDDINGS`, `OVWT_BATCHWISE`, both global stages |
-| `aggregate_methods` | `["median"]` | `AGGREGATE_EMBEDDINGS` |
-| `ovwt_wt_label` | `"WT"` | `OVWT_BATCHWISE` |
-| `ovwt_n_folds` | `5` | `OVWT_BATCHWISE` |
-| `ovwt_calibrate` | `true` | `OVWT_BATCHWISE` |
-| `ovwt_min_cells` | `250` | `OVWT_BATCHWISE` |
-| `ovwt_downsample_wt` | `true` | `OVWT_BATCHWISE` |
+| `filter_label_column` | `"meta_aa_changes"` | `QC_FILTER`, `FILTER_EMBEDDINGS`, `AGGREGATE_EMBEDDINGS`, `OVWT_BATCHWISE`, both global stages, and their CellProfiler-track counterparts |
+| `aggregate_methods` | `["median", "KS", "AUROC"]` | `AGGREGATE_EMBEDDINGS` |
+| `aggregate_methods_cp_features` | `["median"]` | `AGGREGATE_CP_FEATURES` |
+| `ovwt_wt_label` | `"WT"` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
+| `ovwt_n_folds` | `5` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
+| `ovwt_calibrate` | `true` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
+| `ovwt_min_cells` | `250` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
+| `ovwt_downsample_wt` | `true` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
 | `global_variant_embeddings_cumulative_variance_explained` | `0.9` | `GLOBAL_VARIANT_EMBEDDINGS` |
+| `global_variant_cp_features_cumulative_variance_explained` | `0.9` | `GLOBAL_VARIANT_CP_FEATURES` |
 
 `filter_label_column` is shared pipeline-wide so overriding it changes the
 variant label column everywhere at once, rather than each stage needing
-its own override. See each [Stage Reference](cli/dataset.md) page for the
-full field list a given stage's Hydra config accepts beyond what
-`params.yaml` exposes (e.g. `QC_FILTER`'s optional `n_variants`
-downsampling cap, off by default).
+its own override. `aggregate_methods` defaults to `["median", "KS",
+"AUROC"]` -- since that's not the literal single-element `["median"]`,
+`AGGREGATE_EMBEDDINGS`' default output columns are suffixed by method
+(`emb_0000_median`, `emb_0000_KS`, `emb_0000_AUROC`, ...); the
+CellProfiler-feature track's own `aggregate_methods_cp_features` stays
+`["median"]`, so `AGGREGATE_CP_FEATURES`' default output columns remain
+bare. The two `*_cumulative_variance_explained` params each have their own
+CellProfiler-track counterpart above; `ovwt_*`, by contrast, is genuinely
+shared between both tracks' OVWT stages (scoring methodology, not tied to
+feature type) -- see [Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
+See each [Stage Reference](cli/dataset.md) page for the full field list a
+given stage's Hydra config accepts beyond what `params.yaml` exposes (e.g.
+`QC_FILTER`'s optional `n_variants` downsampling cap, off by default).
 
 ## Docker image versioning & publishing
 

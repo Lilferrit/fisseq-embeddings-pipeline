@@ -74,6 +74,45 @@ all for `n == 1` -- it substitutes the pattern's `*` with an empty string,
 only switching to 1-indexed numbering once there are 2+ files to
 disambiguate; `reconstruct_staged_paths()` handles both cases.
 
+## CellProfiler-feature track
+
+An optional, parallel second track processes the same experiments'
+hand-engineered CellProfiler measurements, driven by `params.yaml`'s
+separate `cp_features_experiments:` list (same shape as `experiments:` --
+one map per experiment, `batch_stem` required and unique, remaining keys
+supplying `CpFeaturesConfig` fields). An empty (or unset) list -- the
+default -- skips `BUILD_CP_FEATURES` onward entirely, so a run with no
+CellProfiler data works exactly as before. Every
+`cp_features_experiments[i].batch_stem` must also appear in `experiments`,
+since this track's own filter stage reuses that experiment's `QC_FILTER`
+output rather than running QC a second time:
+
+```text
+cp_config_ch (params.cp_features_experiments)
+    │
+    ▼
+BUILD_CP_FEATURES
+    │
+QC_FILTER ──┐  (the SAME qc_ch used by FILTER_EMBEDDINGS above -- no
+             │   second QC_FILTER process)
+             ▼
+      FILTER_CP_FEATURES
+             │
+    ┌────────┴────────┐
+    ▼                  ▼
+AGGREGATE_CP_FEATURES   OVWT_BATCHWISE_CP_FEATURES
+    │                              │
+    ▼ (collected, all experiments) ▼ (collected, all experiments)
+GLOBAL_VARIANT_CP_FEATURES   GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES
+```
+
+Every stage here is either genuinely new (`BUILD_CP_FEATURES`, which
+discovers tiles the same way `BUILD_DATASET` does -- see
+[Architecture](architecture.md#cellprofiler-feature-csv-input-from-starcall-workflow))
+or a thin wrapper reusing the cellDINO track's own function, unchanged,
+with `feature_selector=FEATURE_SELECTOR` where that parameter exists (see
+[Architecture](architecture.md#architecture-decisions), decision 14).
+
 ## Profiles
 
 `nextflow.config` declares one profile beyond the (containerized) default:
@@ -130,7 +169,31 @@ Every `modules/local/*.nf` file follows the same shape: `errorStrategy
       pca_reduced.parquet                 # variance-thresholded PC scores + meta_is_control + meta_impact_score
     distinguishability/
       global_scores.parquet               # Global Variant Distinguish-ability Scores
+  cp_features/<batch>/cp_features.parquet   # unfiltered, all cells -- CellProfiler feature columns
+  filter_cp_features/<batch>/
+    filtered_keys.parquet                 # QC-passed join key + meta_is_control -- no CellProfiler feature columns
+    normalizer.parquet                    # fitted synonymous z-score stats
+  feature_select_batchwise_cp_features/<batch>/
+    aggregate.parquet                     # Experiment N CP Aggregates
+  ovwt_batchwise_cp_features/<batch>/
+    results.parquet
+    cell_scores.parquet
+    models.pkl
+  global/
+    cp_features/
+      median_aggregate.parquet
+      pca_scores.parquet
+      pca_components.parquet
+      pca_variance_explained.parquet
+      pca_reduced.parquet
+    distinguishability_cp_features/
+      global_scores.parquet
 ```
+
+The `cp_features/`, `filter_cp_features/`, `feature_select_batchwise_cp_features/`,
+`ovwt_batchwise_cp_features/`, and `global/*_cp_features` directories only
+appear when `params.cp_features_experiments` is non-empty (see
+[CellProfiler-feature track](#cellprofiler-feature-track) above).
 
 See the [Stage Reference](cli/dataset.md) pages for each Parquet file's
 exact column set.

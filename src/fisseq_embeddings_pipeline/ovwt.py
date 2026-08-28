@@ -12,6 +12,15 @@ field on AppConfig) -- already applied inside utils/xgbparams.py.
 `ovwt_batchwise()`'s per-variant results use ``cfg.label_column`` as the
 output column name (not a hardcoded ``"meta_aa_changes"`` literal) --
 consistent with `aggregate_embeddings()`, which does the same.
+
+`ovwt_batchwise()` also accepts a ``feature_selector`` parameter
+(defaulting to ``EMBEDDING_SELECTOR``), the same generalization applied to
+`aggregate.py`'s `BaseAggregator` -- everything downstream of the one
+``df.select(feature_selector).columns`` call (``xgbparams.get_dmatrix``,
+etc.) already treats "every non-label_col column in the already-selected
+frame" as a feature, so OVWT_BATCHWISE_CP_FEATURES
+(ovwt_cp_features.py) can reuse this function unchanged, passing
+``FEATURE_SELECTOR`` instead.
 """
 
 import dataclasses
@@ -314,7 +323,9 @@ def _stratification_key(barcodes: np.ndarray, is_wt: np.ndarray) -> np.ndarray:
 
 
 def ovwt_batchwise(
-    filtered_lf: pl.LazyFrame, cfg: OvwtEmbeddingConfig
+    filtered_lf: pl.LazyFrame,
+    cfg: OvwtEmbeddingConfig,
+    feature_selector: pl.Expr = EMBEDDING_SELECTOR,
 ) -> "tuple[pl.DataFrame, pl.DataFrame, dict[str, list[tuple[xgb.Booster, Optional[object]]]]]":
     """
     K-fold cross-validated one-vs-wildtype scoring per variant, on synonymous-corrected embeddings.
@@ -341,6 +352,10 @@ def ovwt_batchwise(
         Supplies ``label_column``, ``wt_label``, ``n_folds``, ``calibrate``,
         ``min_cells``, ``downsample_wt``, ``xgboost``, and ``random_seed``
         (inherited from ``AppConfig``).
+    feature_selector : pl.Expr
+        Polars selector identifying feature columns. Defaults to
+        ``EMBEDDING_SELECTOR``; pass ``FEATURE_SELECTOR`` for
+        CellProfiler-shaped columns (see this module's docstring).
 
     Returns
     -------
@@ -369,7 +384,7 @@ def ovwt_batchwise(
     if cfg.downsample_wt:
         df = downsample_wildtype(df, label_col, wt_label, cfg.random_seed)
 
-    feature_cols = df.select(EMBEDDING_SELECTOR).columns
+    feature_cols = df.select(feature_selector).columns
     variants = (
         df.filter(pl.col(label_col) != wt_label)
         .get_column(label_col)
