@@ -127,9 +127,10 @@ def _write_tile(
 
 
 def _write_synthetic_experiment(exp_dir: Path) -> Path:
-    """Write a tiny synthetic phenotyping_dir + configs/batch1.yaml under
-    exp_dir, matching BUILD_DATASET's real input contract closely enough
-    to run end to end. Returns exp_dir."""
+    """Write a tiny synthetic phenotyping_dir under exp_dir, plus a
+    params.yaml (repo defaults + an `experiments:` entry for this batch)
+    also under exp_dir, matching BUILD_DATASET's real input contract
+    closely enough to run end to end. Returns exp_dir."""
     phenotyping_dir = exp_dir / "phenotyping"
     tile_dir = phenotyping_dir / "well1_grid1" / "tile0x0y"
 
@@ -150,16 +151,16 @@ def _write_synthetic_experiment(exp_dir: Path) -> Path:
 
     _write_tile(tile_dir, list(range(cell_id)), centers, barcodes, aa_changes)
 
-    configs_dir = exp_dir / "configs"
-    configs_dir.mkdir(parents=True, exist_ok=True)
     batch_config = {
         "phenotyping_dir": str(phenotyping_dir),
         "wells": ["well1"],
         "grid_size": 1,
         "window": _WINDOW,
     }
-    with open(configs_dir / "batch1.yaml", "w") as f:
-        yaml.safe_dump(batch_config, f)
+    params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
+    params["experiments"] = [{"batch_stem": "batch1", **batch_config}]
+    with open(exp_dir / "params.yaml", "w") as f:
+        yaml.safe_dump(params, f)
 
     return exp_dir
 
@@ -181,7 +182,11 @@ def _run_nextflow(exp_dir: Path, checkpoint_path: Path) -> subprocess.CompletedP
     params (including `random_seed`) -- not two invocations sharing one
     `pipeline_dir`, which would let the second run's `-resume` cache hit
     reuse the first run's outputs instead of genuinely recomputing them."""
-    params_yaml = _PROJECT_ROOT / "params.yaml"
+    # exp_dir's own params.yaml (repo defaults + this run's `experiments:`
+    # entry, written by _write_synthetic_experiment) -- not the repo's root
+    # params.yaml, since Nextflow only accepts one -params-file per run and
+    # experiments now has to live inside it.
+    params_yaml = exp_dir / "params.yaml"
     return subprocess.run(
         [
             "nextflow",

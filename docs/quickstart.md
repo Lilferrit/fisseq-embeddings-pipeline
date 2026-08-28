@@ -2,16 +2,17 @@
 
 ## 1. Lay out one experiment's inputs
 
-Each experiment needs a directory (`--pipeline_dir`) containing a
-`configs/` subdirectory with one YAML file per experiment (the batch stem
-is taken from the filename, e.g. `configs/experiment1.yaml`):
+Each experiment needs an entry in `params.yaml`'s `experiments:` list, plus
+a `--pipeline_dir` directory holding that experiment's raw data:
 
 ```yaml
-# <pipeline_dir>/configs/experiment1.yaml
-phenotyping_dir: /data/experiment1/phenotyping   # starcall-workflow output root
-wells: [well1, well2]
-grid_size: 12
-window: 224                                       # must match your Cell-DINO checkpoint's crop size
+# params.yaml
+experiments:
+  - batch_stem: experiment1
+    phenotyping_dir: /data/experiment1/phenotyping   # starcall-workflow output root
+    wells: [well1, well2]
+    grid_size: 12
+    window: 224                                       # must match your Cell-DINO checkpoint's crop size
 ```
 
 See [`BUILD_DATASET`'s stage reference](cli/dataset.md) for every field
@@ -62,7 +63,8 @@ file's columns mean.
 
 ## Running multiple experiments together
 
-Add another `configs/<batch_stem>.yaml` file to the same `pipeline_dir` --
-every per-experiment stage runs once per config file, and the two global
-stages (`GLOBAL_VARIANT_EMBEDDINGS`, `GLOBAL_VARIANT_DISTINGUISHABILITY`)
-automatically pool across however many experiments are present.
+Add another map to `params.yaml`'s `experiments:` list (with its own
+unique `batch_stem`) -- every per-experiment stage runs once per entry,
+and the two global stages (`GLOBAL_VARIANT_EMBEDDINGS`,
+`GLOBAL_VARIANT_DISTINGUISHABILITY`) automatically pool across however
+many experiments are present.

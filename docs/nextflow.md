@@ -13,27 +13,27 @@ nextflow run . --pipeline_dir /path/to/experiment \
 ```
 
 `EmbeddingsPipeline` fails fast with a specific message if a required
-param (`pipeline_dir`, `cell_dino_checkpoint`, or a missing/empty
-`<pipeline_dir>/configs/` directory) is unset, rather than letting
-Nextflow's generic "no such property" error surface first.
+param (`pipeline_dir`, `cell_dino_checkpoint`, or an empty/missing
+`experiments` list) is unset, rather than letting Nextflow's generic "no
+such property" error surface first.
 
 ## Per-experiment configs
 
-Every `<pipeline_dir>/configs/<batch_stem>.yaml` supplies `BUILD_DATASET`'s
-per-experiment fields (`phenotyping_dir`, `wells`, `grid_size`, `window`,
-...) directly -- `batch_stem` comes from the filename, not a key inside
-the file (a `batch_stem` key inside the YAML, if present, is dropped).
-`workflows/embeddings.nf` parses each file itself (via Groovy's
-`org.yaml.snakeyaml.Yaml()`) into a `Map`, pairing it with `batch_stem`,
-so `BUILD_DATASET`'s `-resume` cache key is the actual scalar values, not
-the YAML's raw bytes -- a non-semantic edit (reordering keys, touching a
-comment) doesn't bust the cache. `modules/local/build_dataset.nf` threads
-every key in that map through as an individual Hydra CLI override.
+Every entry in `params.yaml`'s `experiments:` list supplies
+`BUILD_DATASET`'s per-experiment fields (`phenotyping_dir`, `wells`,
+`grid_size`, `window`, ...) directly -- `batch_stem` is a required key
+inside each entry (there's no filename to derive it from), and must be
+unique across the list. `workflows/embeddings.nf` validates `params.experiments`
+(non-empty list, every entry a map with a non-blank `batch_stem`, no
+duplicate `batch_stem`s) and pairs each entry's remaining keys with its
+`batch_stem`, so `BUILD_DATASET`'s `-resume` cache key is the actual
+scalar values. `modules/local/build_dataset.nf` threads every key in that
+map through as an individual Hydra CLI override.
 
 ## Stage graph
 
 ```text
-config_ch (parsed configs/*.yaml)
+config_ch (params.experiments)
     │
     ▼
 BUILD_DATASET ──┬──► QC_FILTER
@@ -104,7 +104,6 @@ Every `modules/local/*.nf` file follows the same shape: `errorStrategy
 
 ```text
 <pipeline_dir>/
-  configs/*.yaml                          # one per experiment, mandatory
   dataset/<batch>/
     dataset-000000.tar, dataset-000001.tar, ...   # WebDataset shards -- all cells, unfiltered
     metadata.parquet                              # same cells, meta_* only, no images

@@ -24,31 +24,38 @@ workflow EmbeddingsPipeline {
     if (params.cell_dino_checkpoint == null) {
         error "ERROR: --cell_dino_checkpoint is required (path to a Cell-DINO .pth checkpoint)."
     }
-    def configsDir = file("${params.pipeline_dir}/configs")
-    if (!configsDir.isDirectory()) {
-        error "ERROR: ${params.pipeline_dir}/configs does not exist or is not a directory"
+    // Every entry in params.experiments (a YAML list of maps, declared
+    // directly in params.yaml under the `experiments:` key -- see that
+    // file's own comment) supplies BuildDatasetConfig's per-experiment
+    // fields (phenotyping_dir, wells, grid_size, window, ...) directly.
+    // batch_stem is a required key *inside* each map now (there's no
+    // filename to derive it from any more, unlike the old
+    // configs/<batch_stem>.yaml-per-experiment mechanism this replaces).
+    // Nextflow's own -params-file YAML loader already parses this into a
+    // real List<Map> -- no manual SnakeYAML parsing needed, unlike the
+    // old config_ch, since there's no file to read here any more.
+    if (!(params.experiments instanceof List) || params.experiments.isEmpty()) {
+        error "ERROR: params.experiments must be a non-empty list of experiment maps (see params.yaml)."
     }
-    def config_files = configsDir.listFiles()?.findAll { it.name.endsWith('.yaml') } ?: []
-    if (config_files.size() == 0) {
-        error "ERROR: No .yaml files found in ${params.pipeline_dir}/configs"
+    params.experiments.eachWithIndex { entry, i ->
+        if (!(entry instanceof Map)) {
+            error "ERROR: params.experiments[${i}] must be a map, got ${entry?.getClass()?.simpleName}."
+        }
+        if (!(entry.batch_stem instanceof String) || entry.batch_stem.trim().isEmpty()) {
+            error "ERROR: params.experiments[${i}] is missing a required, non-empty 'batch_stem' field."
+        }
+    }
+    def batch_stems = params.experiments.collect { it.batch_stem }
+    def duplicate_stems = batch_stems.findAll { s -> batch_stems.count(s) > 1 }.unique()
+    if (duplicate_stems) {
+        error "ERROR: params.experiments has duplicate batch_stem value(s): ${duplicate_stems.join(', ')}. Every experiment's batch_stem must be unique."
     }
 
-    // Every configs/<batch_stem>.yaml supplies BuildDatasetConfig's
-    // per-experiment fields (phenotyping_dir, wells, grid_size, window,
-    // ...) directly -- batch_stem comes from the filename, not a key
-    // inside the file. Parsed here (not passed through as a raw file) so
-    // BUILD_DATASET's -resume cache key is the actual scalar values, not
-    // the YAML's bytes -- a non-semantic edit (e.g. reordering keys,
-    // touching a comment) shouldn't bust the cache, matching
-    // fisseq-data-pipeline's own INPUT/BatchParams.resolve precedent for
-    // this exact problem (see modules/local/input.nf there). A
-    // `batch_stem` key inside the YAML itself, if present, is dropped --
-    // the filename is always authoritative -- so it can never disagree
-    // with the value BUILD_DATASET is actually invoked with.
-    config_ch = channel.fromList(config_files).map { f ->
-        def batch_stem = f.baseName
-        def batch_config = (new org.yaml.snakeyaml.Yaml().load(f.text) ?: [:]) as Map
-        tuple(batch_stem, batch_config.findAll { k, v -> k != 'batch_stem' })
+    // Parsed here (not passed through as a raw file) so BUILD_DATASET's
+    // -resume cache key is the actual scalar values -- matching this
+    // repo's prior configs/*.yaml-parsing precedent for the same reason.
+    config_ch = channel.fromList(params.experiments).map { entry ->
+        tuple(entry.batch_stem, entry.findAll { k, v -> k != 'batch_stem' })
     }
 
     // Per-batch (per-experiment) chain -- identical shape to

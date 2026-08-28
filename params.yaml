@@ -12,18 +12,38 @@
 pipeline_dir: null
 container_image: "fisseq-embeddings-pipeline:latest"
 cell_dino_checkpoint: null
+experiments: []
+
+# ── Per-experiment configs (BUILD_DATASET) ──────────────────────────────────
+# Every BuildDatasetConfig field (phenotyping_dir, wells, grid_size, window,
+# shard_maxcount, segmentation_type, use_corrected, batch_stem,
+# barcode_col_name/aa_changes_col_name/edit_distance_col_name, ...) is
+# per-experiment, not a pipeline-wide default -- a single global value could
+# never be right across every experiment's own wells/grid/raw-CSV-column-
+# name layout. Supply one map per experiment here; `batch_stem` is required
+# on every map (there's no filename to derive it from), must be unique
+# across the list, and any field a map omits falls back to
+# BuildDatasetConfig's own Hydra default (or raises Hydra's own "missing
+# mandatory value" error if that field has none, e.g. phenotyping_dir).
+# The empty list above is deliberate -- every real run supplies its own
+# `experiments:` list by editing this file (or a full copy of it; Nextflow
+# only accepts one -params-file at a time, so there's no "just point at a
+# directory of per-experiment files" shortcut any more).
+#
+# experiments:
+#   - batch_stem: experiment1
+#     phenotyping_dir: /data/experiment1/phenotyping
+#     wells: [well1, well2]
+#     grid_size: 12
+#     window: 224
+#   - batch_stem: experiment2
+#     phenotyping_dir: /data/experiment2/phenotyping
+#     wells: [well3]
+#     grid_size: 8
+#     window: 224
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
 random_seed: 0
-
-# No BUILD_DATASET entries here, deliberately: every BuildDatasetConfig
-# field (phenotyping_dir, wells, grid_size, window, shard_maxcount,
-# batch_stem, barcode_col_name/aa_changes_col_name/edit_distance_col_name,
-# ...) is per-experiment, not a pipeline-wide default -- it comes from
-# <pipeline_dir>/configs/<batch_stem>.yaml instead (see build_dataset.nf /
-# workflows/embeddings.nf's config_ch), since a single global value could
-# never be right across every experiment's own wells/grid/raw-CSV-column-
-# name layout.
 
 # ── QC filtering (QC_FILTER) ─────────────────────────────────────────────────
 barcode_count_threshold: 10

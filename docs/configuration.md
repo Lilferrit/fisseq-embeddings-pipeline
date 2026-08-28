@@ -10,8 +10,11 @@ two:
   Loaded explicitly via `-params-file params.yaml`; Nextflow merges a
   `-params-file` YAML/JSON document into `params` natively. A per-run
   override still works the normal way, either as a bare CLI flag
-  (`--ovwt_min_cells 500`, which wins over `params.yaml`) or a second
-  `-params-file` for a whole alternate parameter set.
+  (`--ovwt_min_cells 500`, which wins over `params.yaml`) or a whole
+  separate copy of `params.yaml` passed to `-params-file` instead --
+  Nextflow accepts only one `-params-file` per run (`Can only specify
+  option -params-file once`), so there's no way to layer a second, partial
+  file on top of it.
 - **`nextflow.config`** -- executor/profile/process directives only
   (`process.container`, per-`label` resource requests, `-profile local`,
   `docker.enabled`). No default parameter values live here at all.
@@ -22,9 +25,10 @@ two:
 less-specific "no such property" error surface first.
 
 `BUILD_DATASET`'s own fields (`phenotyping_dir`, `wells`, `grid_size`,
-`window`, ...) are deliberately **not** in `params.yaml` at all -- they're
-per-experiment, not pipeline-wide, and come from
-`<pipeline_dir>/configs/<batch_stem>.yaml` instead (see
+`window`, ...) are per-experiment, not pipeline-wide, so they don't have a
+single default value in the rest of `params.yaml` -- instead each
+experiment supplies its own map of these fields as one entry of
+`params.yaml`'s `experiments:` list (see
 [Nextflow Workflow](nextflow.md#per-experiment-configs)).
 
 ### Fields
@@ -34,6 +38,7 @@ per-experiment, not pipeline-wide, and come from
 | `pipeline_dir` | *(required)* | all |
 | `container_image` | `"fisseq-embeddings-pipeline:latest"` | all |
 | `cell_dino_checkpoint` | *(required)* | `EMBED_CELLS` |
+| `experiments` | `[]` (required non-empty) | `BUILD_DATASET` (list of per-experiment maps, each requiring `batch_stem`; see above) |
 | `random_seed` | `0` | every stochastic stage |
 | `barcode_count_threshold` | `10` | `QC_FILTER` |
 | `variant_barcode_count_threshold` | `4` | `QC_FILTER` |
