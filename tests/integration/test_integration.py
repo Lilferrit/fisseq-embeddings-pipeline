@@ -126,11 +126,15 @@ def _write_tile(
     tifffile.imwrite(tile_dir / "cells_mask.tif", mask)
 
 
-def _write_synthetic_experiment(exp_dir: Path) -> Path:
+def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -> Path:
     """Write a tiny synthetic phenotyping_dir under exp_dir, plus a
     params.yaml (repo defaults + an `experiments:` entry for this batch)
     also under exp_dir, matching BUILD_DATASET's real input contract
-    closely enough to run end to end. Returns exp_dir."""
+    closely enough to run end to end. Returns exp_dir.
+
+    include_grid_size=False omits grid_size from the experiment entry
+    entirely, exercising BUILD_DATASET's auto-detection of it from
+    phenotyping_dir's own `well1_grid1` directory naming instead."""
     phenotyping_dir = exp_dir / "phenotyping"
     tile_dir = phenotyping_dir / "well1_grid1" / "tile0x0y"
 
@@ -154,9 +158,10 @@ def _write_synthetic_experiment(exp_dir: Path) -> Path:
     batch_config = {
         "phenotyping_dir": str(phenotyping_dir),
         "wells": ["well1"],
-        "grid_size": 1,
         "window": _WINDOW,
     }
+    if include_grid_size:
+        batch_config["grid_size"] = 1
     params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
     params["experiments"] = [{"batch_stem": "batch1", **batch_config}]
     with open(exp_dir / "params.yaml", "w") as f:
@@ -260,6 +265,27 @@ def test_aggregate_and_ovwt_outputs_exist(pipeline_outputs):
     assert agg.height >= 1
     results = pl.read_parquet(exp_dir / "ovwt_batchwise" / "batch1" / "results.parquet")
     assert {"auroc_pooled", "auroc_median_barcode"}.issubset(results.columns)
+
+
+def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
+    """grid_size can be omitted from an experiment entry entirely -- proves
+    auto-detection works through the real Nextflow/Hydra override
+    plumbing, not just in-process (see tests/unit/test_dataset.py for the
+    in-process coverage of the detection logic itself)."""
+    if shutil.which("nextflow") is None:
+        pytest.skip("nextflow not on PATH -- see this module's docstring")
+
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_auto_grid")
+    _write_synthetic_experiment(exp_dir, include_grid_size=False)
+
+    checkpoint_path = tmp_path_factory.mktemp("weights_auto_grid") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    result = _run_nextflow(exp_dir, checkpoint_path)
+    assert result.returncode == 0, result.stderr
+
+    metadata = pl.read_parquet(exp_dir / "dataset" / "batch1" / "metadata.parquet")
+    assert metadata.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
 
 
 def test_fails_fast_when_pipeline_dir_missing(tmp_path):

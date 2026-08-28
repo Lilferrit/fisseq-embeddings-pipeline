@@ -15,8 +15,10 @@ front.
 
 No hand-authored tile manifest is needed: `BUILD_DATASET` derives the
 tile list directly from `starcall-workflow`'s own directory convention
-(`{well}_grid{grid_size}/tile{x}x{y}y/`), given just a well list and grid
-size.
+(`{well}_grid{grid_size}/tile{x}x{y}y/`), given just a well list -- and,
+unless overridden, its own grid size too: when `grid_size` is left unset,
+each well's grid size is auto-detected by scanning `phenotyping_dir` for
+that well's `{well}_grid<N>` directory.
 
 ## Config fields
 
@@ -26,7 +28,7 @@ Extends the [common config fields](#common-config-fields) below.
 | ----- | ------- | ----------- |
 | `phenotyping_dir` | **required** | `starcall-workflow`'s phenotyping output root. |
 | `wells` | **required** | Wells belonging to this experiment, e.g. `["well1", "well2"]`. |
-| `grid_size` | **required** | Tile grid size, matching `starcall-workflow`'s own directory convention. |
+| `grid_size` | `null` | Tile grid size, matching `starcall-workflow`'s own directory convention. When unset, auto-detected per well from `phenotyping_dir`'s `{well}_grid<N>` directory name; set explicitly to skip detection (e.g. if a well has more than one such directory). |
 | `window` | **required** | Crop size to produce around each cell's bbox-derived center -- must match the loaded Cell-DINO checkpoint's expected input. |
 | `batch_stem` | **required** | This experiment's identifier, written into every sample's `meta.json` as `meta_batch`. |
 | `segmentation_type` | `"cells"` | Which segmentation output to use (`{segmentation_type}.csv` / `{segmentation_type}_mask.tif`). |
@@ -35,6 +37,7 @@ Extends the [common config fields](#common-config-fields) below.
 | `barcode_col_name` | `"upBarcode"` | Input column name for cell barcodes. |
 | `aa_changes_col_name` | `"aaChanges"` | Input column name for amino-acid change labels. |
 | `edit_distance_col_name` | `"editDistance"` | Input column name for edit distances. |
+| `csv_schema_scan_rows` | `100` | Rows scanned from each tile's cell table CSV to infer column dtypes (polars `scan_csv`'s `infer_schema_length`). `null` scans every row. |
 
 ## Output files
 
@@ -57,11 +60,14 @@ uv run python -m fisseq_embeddings_pipeline.dataset \
     output_dir=./out \
     phenotyping_dir=/data/experiment1/phenotyping \
     'wells=[well1,well2]' \
-    grid_size=12 \
     window=224 \
     batch_stem=experiment1 \
     random_seed=0
 ```
+
+`grid_size` is omitted above -- it's auto-detected per well from
+`phenotyping_dir`'s directory naming. Pass `grid_size=12` explicitly to
+override detection.
 
 ## Common config fields
 

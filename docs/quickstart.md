@@ -11,8 +11,9 @@ experiments:
   - batch_stem: experiment1
     phenotyping_dir: /data/experiment1/phenotyping   # starcall-workflow output root
     wells: [well1, well2]
-    grid_size: 12
     window: 224                                       # must match your Cell-DINO checkpoint's crop size
+    # grid_size omitted -- auto-detected per well from phenotyping_dir's
+    # own {well}_grid<N> directory naming; set it explicitly to override.
 ```
 
 See [`BUILD_DATASET`'s stage reference](cli/dataset.md) for every field

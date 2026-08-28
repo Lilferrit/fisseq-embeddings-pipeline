@@ -17,14 +17,22 @@ experiments: []
 # ── Per-experiment configs (BUILD_DATASET) ──────────────────────────────────
 # Every BuildDatasetConfig field (phenotyping_dir, wells, grid_size, window,
 # shard_maxcount, segmentation_type, use_corrected, batch_stem,
-# barcode_col_name/aa_changes_col_name/edit_distance_col_name, ...) is
-# per-experiment, not a pipeline-wide default -- a single global value could
-# never be right across every experiment's own wells/grid/raw-CSV-column-
-# name layout. Supply one map per experiment here; `batch_stem` is required
-# on every map (there's no filename to derive it from), must be unique
-# across the list, and any field a map omits falls back to
-# BuildDatasetConfig's own Hydra default (or raises Hydra's own "missing
-# mandatory value" error if that field has none, e.g. phenotyping_dir).
+# barcode_col_name/aa_changes_col_name/edit_distance_col_name,
+# csv_schema_scan_rows, ...) is per-experiment, not a pipeline-wide default
+# -- a single global value could never be right across every experiment's
+# own wells/grid/raw-CSV-column-name layout. Supply one map per experiment
+# here; `batch_stem` is required on every map (there's no filename to
+# derive it from), must be unique across the list, and any field a map
+# omits falls back to BuildDatasetConfig's own Hydra default (or raises
+# Hydra's own "missing mandatory value" error if that field has none, e.g.
+# phenotyping_dir).
+#
+# `grid_size` is optional -- when omitted, it's auto-detected per well by
+# scanning phenotyping_dir for that well's `{well}_grid<N>` directory
+# (starcall-workflow's own naming convention already encodes it there), so
+# you only need to set it explicitly if a well has more than one such
+# directory and detection can't disambiguate.
+#
 # The empty list above is deliberate -- every real run supplies its own
 # `experiments:` list by editing this file (or a full copy of it; Nextflow
 # only accepts one -params-file at a time, so there's no "just point at a
@@ -33,13 +41,12 @@ experiments: []
 # experiments:
 #   - batch_stem: experiment1
 #     phenotyping_dir: /data/experiment1/phenotyping
-#     wells: [well1, well2]
-#     grid_size: 12
+#     wells: [well1, well2]        # grid_size omitted -- auto-detected per well
 #     window: 224
 #   - batch_stem: experiment2
 #     phenotyping_dir: /data/experiment2/phenotyping
 #     wells: [well3]
-#     grid_size: 8
+#     grid_size: 8                 # explicit override
 #     window: 224
 
 # ── Reproducibility ──────────────────────────────────────────────────────────

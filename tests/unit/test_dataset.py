@@ -17,6 +17,7 @@ import webdataset as wds
 from fisseq_embeddings_pipeline.dataset import (
     BuildDatasetConfig,
     _crop_cell,
+    _resolve_grid_size,
     discover_tiles,
     main,
     write_dataset_shards,
@@ -141,6 +142,65 @@ def test_discover_tiles_empty_when_phenotyping_dir_has_no_matching_tiles(
         "pt_tif",
         "mask_tif",
     ]
+
+
+# ---------------------------------------------------------------------------
+# grid_size auto-detection
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_grid_size_returns_explicit_value_without_scanning(tmp_path: Path):
+    """An explicit grid_size is used as-is, even if it disagrees with (or no
+    {well}_grid<N> directory exists to confirm) the filesystem."""
+    assert _resolve_grid_size(str(tmp_path), "well1", 4) == 4
+
+
+def test_resolve_grid_size_auto_detects_single_matching_directory(tmp_path: Path):
+    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
+    assert _resolve_grid_size(str(tmp_path), "well1", None) == 4
+
+
+def test_resolve_grid_size_raises_when_no_matching_directory(tmp_path: Path):
+    with pytest.raises(ValueError, match="Could not auto-detect grid_size"):
+        _resolve_grid_size(str(tmp_path), "well1", None)
+
+
+def test_resolve_grid_size_raises_when_multiple_grid_sizes_found(tmp_path: Path):
+    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
+    _make_tile_dir(tmp_path, "well1", 8, 0, 0)
+    with pytest.raises(ValueError, match="multiple candidate directories"):
+        _resolve_grid_size(str(tmp_path), "well1", None)
+
+
+def test_discover_tiles_auto_detects_grid_size_when_omitted(tmp_path: Path):
+    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
+    cfg = _cfg(tmp_path, ["well1"], grid_size=None)
+    manifest = discover_tiles(cfg)
+
+    assert len(manifest) == 1
+    assert manifest.iloc[0]["tile"] == "tile0x0y"
+
+
+def test_discover_tiles_auto_detects_different_grid_size_per_well(tmp_path: Path):
+    """Wells resolve their grid size independently -- one experiment can
+    mix wells with genuinely different grid sizes when auto-detecting."""
+    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
+    _make_tile_dir(tmp_path, "well2", 8, 0, 0)
+    cfg = _cfg(tmp_path, ["well1", "well2"], grid_size=None)
+    manifest = discover_tiles(cfg)
+
+    assert len(manifest) == 2
+    assert set(manifest["well"]) == {"well1", "well2"}
+
+
+def test_discover_tiles_explicit_grid_size_overrides_auto_detection(tmp_path: Path):
+    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
+    _make_tile_dir(tmp_path, "well1", 8, 1, 1)
+    cfg = _cfg(tmp_path, ["well1"], grid_size=8)
+    manifest = discover_tiles(cfg)
+
+    assert len(manifest) == 1
+    assert manifest.iloc[0]["tile"] == "tile1x1y"
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +508,112 @@ def test_write_dataset_shards_handles_squeezed_3d_single_cycle_pt_tif(
     samples = list(wds.WebDataset(str(shard_files[0]), shardshuffle=False).decode())
     crop = samples[0]["crop.npy"]
     np.testing.assert_array_equal(crop, _expected_crop(image[0], 10, 10, WINDOW))
+
+
+# ---------------------------------------------------------------------------
+# csv_schema_scan_rows
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("csv_schema_scan_rows", [None, 100, 5])
+def test_write_dataset_shards_forwards_csv_schema_scan_rows_to_polars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_schema_scan_rows
+):
+    phenotyping_dir = tmp_path / "phenotyping"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
+    _write_populated_tile(tile_dir, [1], [(10, 10)], ["bc1"], ["A1A"], [0])
+
+    seen_infer_schema_length = []
+    original_scan_csv = pl.scan_csv
+
+    def _spy_scan_csv(path, *, infer_schema_length=None, **kwargs):
+        seen_infer_schema_length.append(infer_schema_length)
+        return original_scan_csv(
+            path, infer_schema_length=infer_schema_length, **kwargs
+        )
+
+    # pl is the same polars module object dataset.py's own `import polars as
+    # pl` refers to, so patching it here reaches dataset.py's calls too.
+    monkeypatch.setattr(pl, "scan_csv", _spy_scan_csv)
+
+    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
+    cfg.window = WINDOW
+    cfg.csv_schema_scan_rows = csv_schema_scan_rows
+    write_dataset_shards(output_dir, cfg)
+
+    assert seen_infer_schema_length == [csv_schema_scan_rows]
+
+
+def test_write_dataset_shards_correct_with_scan_rows_smaller_than_table(
+    tmp_path: Path,
+):
+    """csv_schema_scan_rows smaller than the actual row count must still
+    read every row correctly, as long as dtypes are consistent throughout
+    (the common case) -- only the *inferred dtype*, not the row count read,
+    is limited by infer_schema_length."""
+    phenotyping_dir = tmp_path / "phenotyping"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
+    cell_ids = [1, 2, 3]
+    centers = [(10, 10), (2, 2), (17, 17)]
+    barcodes = ["bcA", "bcB", "bcC"]
+    aa_changes = ["A1A", "A1B", "WT"]
+    edit_distances = [0, 1, -1]
+    _write_populated_tile(
+        tile_dir, cell_ids, centers, barcodes, aa_changes, edit_distances
+    )
+
+    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
+    cfg.window = WINDOW
+    cfg.csv_schema_scan_rows = 1
+    write_dataset_shards(output_dir, cfg)
+
+    metadata = pl.read_parquet(output_dir / "metadata.parquet").sort("meta_cell_index")
+    assert metadata["meta_cell_index"].to_list() == cell_ids
+    assert metadata[META_BARCODE_COL].to_list() == barcodes
+    assert metadata[META_EDIT_DISTANCE_COL].to_list() == edit_distances
+
+
+def test_main_runs_end_to_end_via_cli_without_grid_size_override(tmp_path: Path):
+    """grid_size is optional on the CLI too -- omitting it falls back to
+    auto-detection from phenotyping_dir's own directory naming."""
+    phenotyping_dir = tmp_path / "phenotyping"
+    output_dir = tmp_path / "out"
+    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
+    _write_populated_tile(
+        tile_dir,
+        [1, 2],
+        [(8, 8), (12, 12)],
+        ["bc1", "bc2"],
+        ["A1A", "A1B"],
+        [0, 0],
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "fisseq_embeddings_pipeline.dataset",
+            f"output_dir={output_dir}",
+            f"phenotyping_dir={phenotyping_dir}",
+            "wells=[well1]",
+            f"window={WINDOW}",
+            "batch_stem=cli_batch",
+            "random_seed=0",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    metadata = pl.read_parquet(output_dir / "metadata.parquet")
+    assert metadata.height == 2
 
 
 def test_main_runs_end_to_end_via_cli(tmp_path: Path):

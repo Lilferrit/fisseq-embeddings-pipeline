@@ -23,7 +23,7 @@ import glob
 import logging
 import pathlib
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import hydra
 import numpy as np
@@ -66,9 +66,14 @@ class BuildDatasetConfig(AppConfig):
         / tabulate_cells (segmentation.smk, devel branch) write into.
     wells : list[str]
         Wells belonging to this experiment, e.g. ["well1", "well2"].
-    grid_size : int
+    grid_size : Optional[int]
         Tile grid size, matching starcall-workflow's own
-        {well}_grid{grid_size}/tile{x}x{y}y/ directory convention.
+        {well}_grid{grid_size}/tile{x}x{y}y/ directory convention. Defaults
+        to None, which auto-detects each well's grid size by scanning
+        phenotyping_dir for its {well}_grid<N> directory instead of
+        requiring it to be typed in by hand -- set it explicitly to skip
+        detection (e.g. if a well has more than one {well}_grid<N>
+        directory and detection can't disambiguate).
     segmentation_type : str
         Which segmentation output to use ({segmentation_type}.csv /
         {segmentation_type}_mask.tif). Defaults to "cells".
@@ -96,11 +101,18 @@ class BuildDatasetConfig(AppConfig):
     edit_distance_col_name : str
         Name of the edit distance column in the source cell table. Defaults
         to ``"editDistance"``.
+    csv_schema_scan_rows : Optional[int]
+        Rows scanned from each tile's cell table CSV to infer column
+        dtypes, forwarded to polars ``scan_csv``'s ``infer_schema_length``
+        (mirrors fisseq-data-pipeline's INPUT stage's own
+        ``csv_schema_scan_rows``). Defaults to 100. None scans every row
+        instead -- slower, but avoids mis-inferred dtypes on columns whose
+        non-null/non-integer values only appear after the scanned prefix.
     """
 
     phenotyping_dir: str = MISSING
     wells: List[str] = MISSING
-    grid_size: int = MISSING
+    grid_size: Optional[int] = None
     segmentation_type: str = "cells"
     use_corrected: bool = False
     window: int = MISSING
@@ -109,9 +121,72 @@ class BuildDatasetConfig(AppConfig):
     barcode_col_name: str = "upBarcode"
     aa_changes_col_name: str = "aaChanges"
     edit_distance_col_name: str = "editDistance"
+    csv_schema_scan_rows: Optional[int] = 100
 
 
 _TILE_DIR_RE = re.compile(r"tile(\d+)x(\d+)y$")
+_GRID_DIR_RE = re.compile(r"_grid(\d+)$")
+
+
+def _resolve_grid_size(
+    phenotyping_dir: str, well: str, grid_size: Optional[int]
+) -> int:
+    """Resolve one well's tile grid size, auto-detecting it when omitted.
+
+    If ``grid_size`` is given, it's returned as-is (today's behavior,
+    unchanged). Otherwise this scans ``phenotyping_dir`` for a
+    ``{well}_grid<N>`` directory -- starcall-workflow's own naming
+    convention already encodes the grid size there, so there's no need to
+    make users repeat it in params.yaml. Exactly one distinct grid size is
+    required per well; zero matches would otherwise silently discover zero
+    tiles, and multiple different-sized matches would be ambiguous.
+
+    Parameters
+    ----------
+    phenotyping_dir : str
+        starcall-workflow's phenotyping output root.
+    well : str
+        The well to resolve a grid size for.
+    grid_size : Optional[int]
+        An explicit override, or None to auto-detect.
+
+    Returns
+    -------
+    int
+        The resolved grid size.
+
+    Raises
+    ------
+    ValueError
+        If auto-detection finds no ``{well}_grid<N>`` directory, or finds
+        more than one distinct grid size among matching directories.
+    """
+    if grid_size is not None:
+        return grid_size
+
+    matches = []
+    for candidate in glob.glob(f"{phenotyping_dir}/{well}_grid*"):
+        if not pathlib.Path(candidate).is_dir():
+            continue
+        m = _GRID_DIR_RE.search(pathlib.Path(candidate).name)
+        if m is not None:
+            matches.append((candidate, int(m.group(1))))
+
+    sizes = {size for _, size in matches}
+    if not sizes:
+        raise ValueError(
+            f"Could not auto-detect grid_size for well '{well}': no "
+            f"'{well}_grid<N>' directory found under {phenotyping_dir!r}. "
+            "Fix phenotyping_dir/wells, or set grid_size explicitly."
+        )
+    if len(sizes) > 1:
+        found = ", ".join(candidate for candidate, _ in sorted(matches))
+        raise ValueError(
+            f"Could not auto-detect grid_size for well '{well}': found "
+            f"multiple candidate directories with different grid sizes "
+            f"({found}). Set grid_size explicitly to disambiguate."
+        )
+    return sizes.pop()
 
 
 def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
@@ -140,7 +215,10 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
         ``segmentation_type``, and ``use_corrected`` (used to build the
         expected per-tile file paths). ``cfg.window`` isn't used here --
         it only matters once cropping happens, in
-        :func:`write_dataset_shards`.
+        :func:`write_dataset_shards`. ``cfg.grid_size`` is resolved per
+        well via :func:`_resolve_grid_size` -- when it's None, each well
+        gets its own auto-detected grid size independently, so wells with
+        genuinely different grid sizes within one experiment both work.
 
     Returns
     -------
@@ -152,7 +230,8 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
 
     rows = []
     for well in cfg.wells:
-        pattern = f"{cfg.phenotyping_dir}/{well}_grid{cfg.grid_size}/tile*x*y"
+        grid_size = _resolve_grid_size(cfg.phenotyping_dir, well, cfg.grid_size)
+        pattern = f"{cfg.phenotyping_dir}/{well}_grid{grid_size}/tile*x*y"
         for tile_dir in glob.glob(pattern):
             m = _TILE_DIR_RE.search(tile_dir)
             if m is None:
@@ -285,8 +364,9 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
         into. Must already exist.
     cfg : BuildDatasetConfig
         Supplies the tile manifest (via :func:`discover_tiles`), the crop
-        ``window``, column-name overrides, ``batch_stem``, and
-        ``shard_maxcount``.
+        ``window``, column-name overrides, ``batch_stem``,
+        ``shard_maxcount``, and ``csv_schema_scan_rows`` (forwarded to each
+        tile's cell table CSV read).
     """
     tile_manifest = discover_tiles(cfg)
     output_pattern = str(output_dir / "dataset-%06d.tar")
@@ -294,7 +374,19 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
 
     with wds.ShardWriter(output_pattern, maxcount=cfg.shard_maxcount) as sink:
         for row in tile_manifest.itertuples():
-            table = pd.read_csv(row.cell_table_csv, index_col=0)
+            # pl.scan_csv (not pd.read_csv) so cfg.csv_schema_scan_rows can
+            # control dtype inference; .set_index on the first column
+            # reproduces pd.read_csv's old index_col=0 -- tabulate_cells
+            # writes that column as the unnamed pandas row index via plain
+            # DataFrame.to_csv().
+            table = (
+                pl.scan_csv(
+                    row.cell_table_csv, infer_schema_length=cfg.csv_schema_scan_rows
+                )
+                .collect()
+                .to_pandas()
+            )
+            table = table.set_index(table.columns[0])
             if len(table.index) == 0:
                 logging.info("Skipping empty tile %s/%s", row.well, row.tile)
                 continue
@@ -396,6 +488,10 @@ def main(cfg: DictConfig) -> None:
             window=224 \\
             batch_stem=experiment1 \\
             random_seed=0
+
+    ``grid_size`` is optional -- omit it (or pass ``grid_size=null``) to
+    auto-detect it per well from ``phenotyping_dir``'s own
+    ``{well}_grid<N>`` directory naming instead.
     """
     build_cfg: BuildDatasetConfig = OmegaConf.to_object(cfg)
 
@@ -405,11 +501,11 @@ def main(cfg: DictConfig) -> None:
     setup_logging(build_cfg, "dataset")
 
     logging.info(
-        "Building dataset for batch %s from %s (wells=%s, grid_size=%d)",
+        "Building dataset for batch %s from %s (wells=%s, grid_size=%s)",
         build_cfg.batch_stem,
         build_cfg.phenotyping_dir,
         build_cfg.wells,
-        build_cfg.grid_size,
+        build_cfg.grid_size if build_cfg.grid_size is not None else "auto-detect",
     )
     write_dataset_shards(output_dir, build_cfg)
     logging.info("Done")
