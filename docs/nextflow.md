@@ -146,6 +146,37 @@ GPU-bound processes carry `label 'process_gpu'`; `nextflow.config` applies
 settings (SGE/Slurm queue, etc.) to that same `withLabel` block for your
 own deployment.
 
+### Singularity/Apptainer and arbitrary host paths
+
+`phenotyping_dir` (`BUILD_DATASET`/`BUILD_CP_FEATURES`) and
+`cell_dino_checkpoint` (`EMBED_CELLS`) are threaded into each process as
+plain Hydra CLI-override strings (see any `modules/local/*.nf`'s
+`overrides`/`checkpoint_path=${params.cell_dino_checkpoint}`
+interpolation) -- they're never declared as Nextflow `path` process
+inputs. That means Nextflow itself never stages or binds them; under
+Docker (the default profile) this is invisible because the whole host
+filesystem is reachable inside the container anyway, but under a
+Singularity/Apptainer-based profile it isn't. Apptainer's own
+`autoMounts` only covers `$HOME`, `$PWD` (the task work dir), and system
+default binds -- a sibling data tree outside `pipeline_dir`'s own tree
+(e.g. an experiment's `phenotyping_dir` living under a different
+top-level project directory) simply isn't visible inside the container,
+even though it's plainly there on the host.
+
+The symptom is confusing because it surfaces deep inside Python as an
+ordinary-looking "file/directory not found" error (e.g. `dataset.py`'s
+grid-size auto-detection raising `"no '{well}_grid<N>' directory found"`)
+for a path that `ls` shows fine from the host shell -- the giveaway is
+that it's a container-visibility problem, not a real `phenotyping_dir`/
+`wells` misconfiguration.
+
+Any Singularity/Apptainer profile needs an explicit bind covering every
+host root your `params.yaml` paths can point into, via
+`singularity.runOptions = '-B <path>[,<path>...]'`. See
+`scratch/nextflow.config`'s `sge` profile (Fowler lab cluster; gitignored
+since it's a per-cluster local config, not shipped in the repo) for a
+worked example binding the lab's shared NFS root.
+
 ## Nextflow modules
 
 Every `modules/local/*.nf` file follows the same shape: `errorStrategy
