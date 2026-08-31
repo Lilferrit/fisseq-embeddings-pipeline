@@ -177,7 +177,12 @@ def _resolve_grid_size(
         raise ValueError(
             f"Could not auto-detect grid_size for well '{well}': no "
             f"'{well}_grid<N>' directory found under {phenotyping_dir!r}. "
-            "Fix phenotyping_dir/wells, or set grid_size explicitly."
+            "Fix phenotyping_dir/wells, or set grid_size explicitly. If "
+            "phenotyping_dir plainly exists when you look from outside this "
+            "process (e.g. `ls` on the host), this can also mean it isn't "
+            "bind-mounted into a Singularity/Apptainer container -- see "
+            "docs/nextflow.md's 'Singularity/Apptainer and arbitrary host "
+            "paths' section."
         )
     if len(sizes) > 1:
         found = ", ".join(candidate for candidate, _ in sorted(matches))
