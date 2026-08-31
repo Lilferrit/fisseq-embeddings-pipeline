@@ -3,6 +3,13 @@ name: Deploy docs
 # Builds the mkdocs site and force-pushes it to the gh-pages branch on
 # every push to main -- gh-pages holds only the generated site, never
 # checked in alongside the source on main.
+#
+# workflow_dispatch is a manual escape hatch: GitHub's push-path-filter
+# diffing can silently no-op on a push with no common ancestor (e.g. a
+# force-push/rebase of history that hadn't been pushed yet), which is
+# exactly what let this workflow go from repo setup until now without
+# ever actually running. Without workflow_dispatch, recovering from
+# that requires a throwaway commit touching one of the watched paths.
 
 on:
   push:
@@ -14,6 +21,7 @@ on:
       - "src/**"
       - "README.md"
       - ".github/workflows/docs.yml"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
