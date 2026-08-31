@@ -1,0 +1,2065 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../nextflow/">
+      
+      
+        <link rel="next" href="../cli/dataset/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Configuration - Fisseq Embeddings Pipeline</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Fisseq Embeddings Pipeline" class="md-header__button md-logo" aria-label="Fisseq Embeddings Pipeline" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fisseq Embeddings Pipeline
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../nextflow/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Nextflow Workflow
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../cli/dataset/" class="md-tabs__link">
+          
+  
+  
+  Stage Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/dataset/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Fisseq Embeddings Pipeline" class="md-nav__button md-logo" aria-label="Fisseq Embeddings Pipeline" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fisseq Embeddings Pipeline
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nextflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Nextflow Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#paramsyaml-not-nextflowconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        params.yaml, not nextflow.config
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="params.yaml, not nextflow.config">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-image-versioning-publishing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker image versioning &amp; publishing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build_dataset-shard-sizing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BUILD_DATASET shard sizing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Stage Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Dataset (BUILD_DATASET)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/qcfilter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QC Filtering (QC_FILTER)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/embed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Embeddings (EMBED_CELLS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/filter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filter Embeddings (FILTER_EMBEDDINGS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/aggregate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aggregation (AGGREGATE_EMBEDDINGS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/ovwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OVWT Distinguish-ability (OVWT_BATCHWISE)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/global_embeddings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Global Variant Embeddings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/global_distinguishability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Global Variant Distinguish-ability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CellProfiler Feature Dataset (BUILD_CP_FEATURES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/filter_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filter CP Features (FILTER_CP_FEATURES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/aggregate_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aggregation, CP Track (AGGREGATE_CP_FEATURES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/ovwt_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OVWT Distinguish-ability, CP Track (OVWT_BATCHWISE_CP_FEATURES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/global_variant_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Global Variant CP Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/global_variant_distinguishability_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Global Variant Distinguish-ability, CP Track
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/qcfilter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    qcfilter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/embed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    embed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/filter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    filter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/aggregate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    aggregate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/ovwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ovwt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/global_embeddings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    global_embeddings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/global_distinguishability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    global_distinguishability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/filter_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    filter_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/aggregate_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    aggregate_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/ovwt_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ovwt_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/global_variant_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    global_variant_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/global_variant_distinguishability_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    global_variant_distinguishability_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    config
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    utils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#paramsyaml-not-nextflowconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        params.yaml, not nextflow.config
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="params.yaml, not nextflow.config">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-image-versioning-publishing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker image versioning &amp; publishing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build_dataset-shard-sizing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BUILD_DATASET shard sizing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="configuration-reference">Configuration reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h1>
+<h2 id="paramsyaml-not-nextflowconfig"><code>params.yaml</code>, not <code>nextflow.config</code><a class="headerlink" href="#paramsyaml-not-nextflowconfig" title="Permanent link">&para;</a></h2>
+<p><code>fisseq-data-pipeline</code>'s <code>nextflow.config</code> declares every default
+parameter directly in a <code>params { ... }</code> block. This repo splits that in
+two:</p>
+<ul>
+<li><strong><code>params.yaml</code></strong> (repo root) -- every default value, nothing else.
+  Loaded explicitly via <code>-params-file params.yaml</code>; Nextflow merges a
+  <code>-params-file</code> YAML/JSON document into <code>params</code> natively. A per-run
+  override still works the normal way, either as a bare CLI flag
+  (<code>--ovwt_min_cells 500</code>, which wins over <code>params.yaml</code>) or a whole
+  separate copy of <code>params.yaml</code> passed to <code>-params-file</code> instead --
+  Nextflow accepts only one <code>-params-file</code> per run (<code>Can only specify
+  option -params-file once</code>), so there's no way to layer a second, partial
+  file on top of it.</li>
+<li><strong><code>nextflow.config</code></strong> -- executor/profile/process directives only
+  (<code>process.container</code>, per-<code>label</code> resource requests, <code>-profile local</code>,
+  <code>docker.enabled</code>). No default parameter values live here at all.</li>
+</ul>
+<p><code>pipeline_dir</code>, <code>cell_dino_checkpoint</code> are required with no default --
+<code>EmbeddingsPipeline</code> fails fast with a specific message if either is unset
+(see <a href="../nextflow/">Nextflow Workflow</a>), rather than letting Nextflow's own
+less-specific "no such property" error surface first.</p>
+<p><code>BUILD_DATASET</code>'s own fields (<code>phenotyping_dir</code>, <code>wells</code>, <code>grid_size</code>,
+<code>window</code>, ...) are per-experiment, not pipeline-wide -- instead each
+experiment supplies its own map of these fields as one entry of
+<code>params.yaml</code>'s <code>experiments:</code> list (see
+<a href="../nextflow/#per-experiment-configs">Nextflow Workflow</a>).
+<code>BUILD_CP_FEATURES</code>' fields (<code>phenotyping_dir</code>, <code>wells</code>, <code>grid_size</code>,
+<code>cellprofiler_cycle</code>, <code>cellprofiler_pipeline</code>, ...) work the same way, but
+there's no separate list -- an <code>experiments:</code> entry opts itself into the
+CellProfiler-feature track by setting <code>cp_features: true</code>, reusing that
+same entry's fields -- see
+<a href="../nextflow/#cellprofiler-feature-track">Nextflow Workflow</a>. Three fields
+that are logically per-experiment but in practice are almost always the
+same across every experiment in a run -- <code>window</code>, <code>cellprofiler_pipeline</code>,
+<code>cellprofiler_cycle</code> -- are the exception: each has its own pipeline-wide
+default below (<code>window</code>, <code>cellprofiler_pipeline</code>, <code>cellprofiler_cycle</code> in
+the Fields table), used for any experiment entry that doesn't set its own
+value for that key; an entry's own value always wins over the global
+default.</p>
+<h3 id="fields">Fields<a class="headerlink" href="#fields" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Stage(s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pipeline_dir</code></td>
+<td><em>(required)</em></td>
+<td>all</td>
+</tr>
+<tr>
+<td><code>container_image</code></td>
+<td><code>"fisseq-embeddings-pipeline:latest"</code></td>
+<td>all</td>
+</tr>
+<tr>
+<td><code>cell_dino_checkpoint</code></td>
+<td><em>(required)</em></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>experiments</code></td>
+<td><code>[]</code> (required non-empty)</td>
+<td><code>BUILD_DATASET</code>, and <code>BUILD_CP_FEATURES</code> for any entry setting <code>cp_features: true</code> (list of per-experiment maps, each requiring <code>batch_stem</code>; see above)</td>
+</tr>
+<tr>
+<td><code>window</code></td>
+<td><code>224</code></td>
+<td><code>BUILD_DATASET</code> (global default for any <code>experiments</code> entry that omits <code>window</code>; an entry's own <code>window</code> wins)</td>
+</tr>
+<tr>
+<td><code>cellprofiler_pipeline</code></td>
+<td><code>null</code> (required, here or per <code>cp_features: true</code> entry, once any experiment sets <code>cp_features: true</code>)</td>
+<td><code>BUILD_CP_FEATURES</code> (global default for any <code>cp_features: true</code> entry that omits <code>cellprofiler_pipeline</code>)</td>
+</tr>
+<tr>
+<td><code>cellprofiler_cycle</code></td>
+<td><code>""</code></td>
+<td><code>BUILD_CP_FEATURES</code> (global default for any <code>cp_features: true</code> entry that omits <code>cellprofiler_cycle</code>)</td>
+</tr>
+<tr>
+<td><code>random_seed</code></td>
+<td><code>0</code></td>
+<td>every stochastic stage</td>
+</tr>
+<tr>
+<td><code>barcode_count_threshold</code></td>
+<td><code>10</code></td>
+<td><code>QC_FILTER</code></td>
+</tr>
+<tr>
+<td><code>variant_barcode_count_threshold</code></td>
+<td><code>4</code></td>
+<td><code>QC_FILTER</code></td>
+</tr>
+<tr>
+<td><code>edit_distance_threshold</code></td>
+<td><code>1</code></td>
+<td><code>QC_FILTER</code></td>
+</tr>
+<tr>
+<td><code>cell_dino_arch</code></td>
+<td><code>"vit_large"</code></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>cell_dino_patch_size</code></td>
+<td><code>16</code></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>cell_dino_crop_size</code></td>
+<td><code>224</code></td>
+<td><code>EMBED_CELLS</code> (must match <code>BUILD_DATASET</code>'s per-experiment <code>window</code>)</td>
+</tr>
+<tr>
+<td><code>cell_dino_channels</code></td>
+<td><code>[0, 1, 2, 3]</code></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>cell_dino_channel_apply_mask</code></td>
+<td><code>[true, true, true, true]</code></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>cell_dino_channel_pool</code></td>
+<td><code>"mean"</code></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>cell_dino_device</code></td>
+<td><code>"cuda"</code></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>cell_dino_batch_size</code></td>
+<td><code>256</code></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>cell_dino_num_workers</code></td>
+<td><code>4</code></td>
+<td><code>EMBED_CELLS</code></td>
+</tr>
+<tr>
+<td><code>filter_label_column</code></td>
+<td><code>"meta_aa_changes"</code></td>
+<td><code>QC_FILTER</code>, <code>FILTER_EMBEDDINGS</code>, <code>AGGREGATE_EMBEDDINGS</code>, <code>OVWT_BATCHWISE</code>, both global stages, and their CellProfiler-track counterparts</td>
+</tr>
+<tr>
+<td><code>aggregate_methods</code></td>
+<td><code>["median", "KS", "AUROC"]</code></td>
+<td><code>AGGREGATE_EMBEDDINGS</code></td>
+</tr>
+<tr>
+<td><code>aggregate_methods_cp_features</code></td>
+<td><code>["median"]</code></td>
+<td><code>AGGREGATE_CP_FEATURES</code></td>
+</tr>
+<tr>
+<td><code>ovwt_wt_label</code></td>
+<td><code>"WT"</code></td>
+<td><code>OVWT_BATCHWISE</code>, <code>OVWT_BATCHWISE_CP_FEATURES</code></td>
+</tr>
+<tr>
+<td><code>ovwt_n_folds</code></td>
+<td><code>5</code></td>
+<td><code>OVWT_BATCHWISE</code>, <code>OVWT_BATCHWISE_CP_FEATURES</code></td>
+</tr>
+<tr>
+<td><code>ovwt_calibrate</code></td>
+<td><code>true</code></td>
+<td><code>OVWT_BATCHWISE</code>, <code>OVWT_BATCHWISE_CP_FEATURES</code></td>
+</tr>
+<tr>
+<td><code>ovwt_min_cells</code></td>
+<td><code>250</code></td>
+<td><code>OVWT_BATCHWISE</code>, <code>OVWT_BATCHWISE_CP_FEATURES</code></td>
+</tr>
+<tr>
+<td><code>ovwt_downsample_wt</code></td>
+<td><code>true</code></td>
+<td><code>OVWT_BATCHWISE</code>, <code>OVWT_BATCHWISE_CP_FEATURES</code></td>
+</tr>
+<tr>
+<td><code>global_variant_embeddings_cumulative_variance_explained</code></td>
+<td><code>0.9</code></td>
+<td><code>GLOBAL_VARIANT_EMBEDDINGS</code></td>
+</tr>
+<tr>
+<td><code>global_variant_cp_features_cumulative_variance_explained</code></td>
+<td><code>0.9</code></td>
+<td><code>GLOBAL_VARIANT_CP_FEATURES</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>filter_label_column</code> is shared pipeline-wide so overriding it changes the
+variant label column everywhere at once, rather than each stage needing
+its own override. <code>aggregate_methods</code> defaults to <code>["median", "KS",
+"AUROC"]</code> -- since that's not the literal single-element <code>["median"]</code>,
+<code>AGGREGATE_EMBEDDINGS</code>' default output columns are suffixed by method
+(<code>emb_0000_median</code>, <code>emb_0000_KS</code>, <code>emb_0000_AUROC</code>, ...); the
+CellProfiler-feature track's own <code>aggregate_methods_cp_features</code> stays
+<code>["median"]</code>, so <code>AGGREGATE_CP_FEATURES</code>' default output columns remain
+bare. The two <code>*_cumulative_variance_explained</code> params each have their own
+CellProfiler-track counterpart above; <code>ovwt_*</code>, by contrast, is genuinely
+shared between both tracks' OVWT stages (scoring methodology, not tied to
+feature type) -- see <a href="../nextflow/#cellprofiler-feature-track">Nextflow Workflow</a>.
+See each <a href="../cli/dataset/">Stage Reference</a> page for the full field list a
+given stage's Hydra config accepts beyond what <code>params.yaml</code> exposes (e.g.
+<code>QC_FILTER</code>'s optional <code>n_variants</code> downsampling cap, off by default).</p>
+<h2 id="docker-image-versioning-publishing">Docker image versioning &amp; publishing<a class="headerlink" href="#docker-image-versioning-publishing" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Registry:</strong> GitHub Container Registry, <code>ghcr.io/&lt;owner&gt;/&lt;repo&gt;</code>
+  (derived from the repo's own <code>${{ github.repository }}</code> at build time).</li>
+<li><strong>Tags, on every push to <code>main</code>:</strong> <code>:latest</code> (moving -- convenience/dev
+  use) and <code>:&lt;short-sha&gt;</code> (exact, 7-character commit SHA -- what
+  <code>params.yaml</code>'s <code>container_image</code> should point at for anything that
+  needs to pin a specific build instead of floating on <code>:latest</code>, e.g. a
+  reproducibility-sensitive run).</li>
+<li><strong>Tags, on a pushed <code>v*</code> git tag</strong> (a real release): additionally
+  <code>:&lt;version&gt;</code> (the tag with its <code>v</code> prefix stripped, e.g. <code>v0.1.0</code> -&gt;
+  <code>0.1.0</code>) -- not tied to <code>pyproject.toml</code>'s own <code>version</code> field
+  automatically; bump that field and push a matching <code>vX.Y.Z</code> tag together
+  when cutting a release.</li>
+<li><strong>Every PR:</strong> build-only, no push, no registry credentials needed -- a
+  smoke test against Dockerfile regressions.</li>
+</ul>
+<p>One CUDA-capable base image serves every stage, including the CPU-only
+ones (<code>QC_FILTER</code>, <code>FILTER_EMBEDDINGS</code>, etc.) -- simpler to build/publish/
+version as a single artifact than a GPU image plus a slimmer CPU image, at
+the cost of a larger pull for CPU-only processes. Worth splitting into two
+images later if that pull cost matters in practice; not required for v1.</p>
+<h2 id="build_dataset-shard-sizing"><code>BUILD_DATASET</code> shard sizing<a class="headerlink" href="#build_dataset-shard-sizing" title="Permanent link">&para;</a></h2>
+<p><code>shard_maxcount</code> (default <code>2000</code>, <code>BuildDatasetConfig.shard_maxcount</code>)
+controls how many cells <code>write_dataset_shards()</code> packs into each
+<code>dataset-*.tar</code> shard.</p>
+<p><strong>Inputs to the estimate:</strong></p>
+<ul>
+<li>Channel count: <strong>4</strong>, from <code>starcall-workflow</code>'s default single
+  phenotype cycle (<code>phenotype_cycles: ['PT']</code>, <code>phenotyping_channels:
+  ['DAPI', 'GFP', 'Ph+WGA', 'Mito']</code>). <code>crop.npy</code>'s actual channel
+  dimension is <code>num_phenotyping_cycles × num_channels</code> (cycle-major
+  flattened), so a deployment configuring more than one phenotyping cycle
+  scales this estimate proportionally.</li>
+<li>Crop window: <strong>224</strong> (<code>window</code>/<code>crop_size</code>), matching Cell-DINO's
+  channel-adaptive eval config (<code>global_crops_size: 224</code>).</li>
+<li>Crop dtype: <strong>uint16</strong>, the standard bit depth for fluorescence
+  microscopy TIFFs.</li>
+<li>Mask dtype: <strong>uint8</strong> label mask.</li>
+</ul>
+<p><strong>Per-sample size:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Formula</th>
+<th>Size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>crop.npy</code></td>
+<td>4 × 224 × 224 × 2 bytes</td>
+<td>≈ 392 KB</td>
+</tr>
+<tr>
+<td><code>mask.npy</code></td>
+<td>224 × 224 × 1 byte</td>
+<td>≈ 49 KB</td>
+</tr>
+<tr>
+<td><code>meta.json</code> + tar per-file headers (3 files/sample)</td>
+<td>--</td>
+<td>a few KB</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td></td>
+<td><strong>≈ 440 KB/sample</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Per-shard size</strong> at the default <code>shard_maxcount=2000</code>:
+440 KB × 2000 ≈ <strong>~880 MB/shard</strong> -- within the "hundreds of MB to ~1GB"
+band generally considered reasonable for a WebDataset shard, so the
+<code>2000</code> default is kept as-is. Re-check this estimate (or better, measure
+directly) against a real experiment's actual byte sizes if channel count,
+crop dtype, or window change meaningfully -- e.g. a channel count above
+~9 or a <code>uint32</code>/float crop dtype would push a shard past 1GB at the
+current default.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "toc.follow", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

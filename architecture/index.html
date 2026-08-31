@@ -1,0 +1,2680 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../quickstart/">
+      
+      
+        <link rel="next" href="../nextflow/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Architecture - Fisseq Embeddings Pipeline</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Fisseq Embeddings Pipeline" class="md-header__button md-logo" aria-label="Fisseq Embeddings Pipeline" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fisseq Embeddings Pipeline
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../nextflow/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Nextflow Workflow
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../cli/dataset/" class="md-tabs__link">
+          
+  
+  
+  Stage Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/dataset/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Fisseq Embeddings Pipeline" class="md-nav__button md-logo" aria-label="Fisseq Embeddings Pipeline" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fisseq Embeddings Pipeline
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cellprofiler-feature-track-optional-second-track" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CellProfiler-feature track (optional second track)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terminology-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terminology map
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repository-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repository layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendored-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendored code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data contracts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data contracts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-note-on-branches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A note on branches
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cell-info-table-input-from-starcall-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell Info Table (input, from starcall-workflow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cell-images-input-from-starcall-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell Images (input, from starcall-workflow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cell-dataset-this-pipelines-join" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell Dataset (this pipeline's join)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cellprofiler-feature-csv-input-from-starcall-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CellProfiler feature CSV (input, from starcall-workflow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#embed_cells-cell-dino-inference-internals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EMBED_CELLS / Cell-DINO inference internals
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EMBED_CELLS / Cell-DINO inference internals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-model-construction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Model construction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-checkpoint-loading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Checkpoint loading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-pooling-forward-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Pooling / forward path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-vendoring-dinov2-not-installing-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Vendoring dinov2, not installing it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-real-checkpoints-arent-all-the-same-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Real checkpoints aren't all the same shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-configurable-input-channels-and-per-channel-masking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Configurable input channels and per-channel masking
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nextflow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Nextflow Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stage Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Stage Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Dataset (BUILD_DATASET)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/qcfilter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QC Filtering (QC_FILTER)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/embed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Embeddings (EMBED_CELLS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/filter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filter Embeddings (FILTER_EMBEDDINGS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/aggregate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aggregation (AGGREGATE_EMBEDDINGS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/ovwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OVWT Distinguish-ability (OVWT_BATCHWISE)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/global_embeddings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Global Variant Embeddings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/global_distinguishability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Global Variant Distinguish-ability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CellProfiler Feature Dataset (BUILD_CP_FEATURES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/filter_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Filter CP Features (FILTER_CP_FEATURES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/aggregate_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aggregation, CP Track (AGGREGATE_CP_FEATURES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/ovwt_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OVWT Distinguish-ability, CP Track (OVWT_BATCHWISE_CP_FEATURES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/global_variant_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Global Variant CP Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/global_variant_distinguishability_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Global Variant Distinguish-ability, CP Track
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    dataset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/qcfilter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    qcfilter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/embed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    embed
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/filter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    filter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/aggregate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    aggregate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/ovwt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ovwt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/global_embeddings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    global_embeddings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/global_distinguishability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    global_distinguishability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/filter_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    filter_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/aggregate_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    aggregate_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/ovwt_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ovwt_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/global_variant_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    global_variant_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/global_variant_distinguishability_cp_features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    global_variant_distinguishability_cp_features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    config
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    utils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cellprofiler-feature-track-optional-second-track" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CellProfiler-feature track (optional second track)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terminology-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terminology map
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repository-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repository layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendored-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendored code
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data contracts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data contracts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-note-on-branches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A note on branches
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cell-info-table-input-from-starcall-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell Info Table (input, from starcall-workflow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cell-images-input-from-starcall-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell Images (input, from starcall-workflow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cell-dataset-this-pipelines-join" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell Dataset (this pipeline's join)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cellprofiler-feature-csv-input-from-starcall-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CellProfiler feature CSV (input, from starcall-workflow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#embed_cells-cell-dino-inference-internals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EMBED_CELLS / Cell-DINO inference internals
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="EMBED_CELLS / Cell-DINO inference internals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-model-construction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Model construction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-checkpoint-loading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Checkpoint loading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-pooling-forward-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Pooling / forward path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-vendoring-dinov2-not-installing-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Vendoring dinov2, not installing it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-real-checkpoints-arent-all-the-same-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Real checkpoints aren't all the same shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-configurable-input-channels-and-per-channel-masking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Configurable input channels and per-channel masking
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h1>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>Each FISSEQ/VIS-seq experiment produces a population of segmented,
+barcoded cells. The Cell Info Table gives per-cell metadata (position,
+barcode, variant call, edit distance); Cell Images gives per-cell
+fluorescence crops. Instead of extracting hand-engineered CellProfiler
+features from those crops (the <code>fisseq-data-pipeline</code> path), this pipeline
+embeds each cell with a pretrained <strong>Cell-DINO</strong> vision transformer and
+runs the same downstream variant-vs-wildtype analysis on the learned
+embedding space instead of a curated feature space.</p>
+<p>High-level shape:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Batch Aggregates And Variant Scores          (per experiment, runs independently)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  Cell Info Table ─┬─► Cell Dataset ─► Cell Embeddings (Cell DINO) ─┐
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  Cell Images     ─┘                                                 ├─► Filter Embeddings
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  Cell Info Table ─────► QC Filtering ───────────────────────────────┘         │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                                                                     ┌──────────┴──────────┐
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                                                                     ▼                      ▼
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                                                    Aggregation (Synonymous        OVWT Distinguish-ability
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                                                    STD Corrected)                  Scores (Synonymous STD
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                                                          │                          Corrected)
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>                                                          ▼                                ▼
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                                              Experiment N Aggregates          Experiment N Distinguish-
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                                                                                ability Scores
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>Global Variant Embeddings                    (once, across all experiments)
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>  Experiment {1..N} Aggregates ─► Variant-wise median pooling ─► PCA ─► Global Variant Embeddings
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>Global Variant Distinguish-ability Scores    (once, across all experiments)
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  Experiment {1..N} Distinguish-ability Scores ─► Variant-wise median pooling ─► Global Variant
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>                                                                                  Distinguish-ability Scores
+</code></pre></div>
+<h3 id="cellprofiler-feature-track-optional-second-track">CellProfiler-feature track (optional second track)<a class="headerlink" href="#cellprofiler-feature-track-optional-second-track" title="Permanent link">&para;</a></h3>
+<p>A second, parallel track processes the same experiments' hand-engineered
+CellProfiler measurements alongside the cellDINO-embedding track above --
+the whole point being the two are directly comparable, run against the
+same cells. QC filtering isn't duplicated: this track's own filter stage
+joins against <code>QC_FILTER</code>'s existing output instead of running QC a
+second time.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Batch Aggregates And Variant Scores (CellProfiler)  (per experiment, runs independently)
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  starcall-workflow's CellProfiler   ─► CellProfiler Feature Dataset ─┐
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    output (per tile)                                                 ├─► Filter CP Features
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  Cell Info Table ─────► QC Filtering (shared with the embeddings ─────┘         │
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                                        track above -- not rerun)       ┌────────┴────────┐
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                                                                        ▼                  ▼
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>                                                       Aggregation (Synonymous    OVWT Distinguish-ability
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>                                                       STD Corrected)              Scores (Synonymous STD
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>                                                             │                      Corrected)
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>                                                             ▼                            ▼
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>                                                 Experiment N CP Aggregates    Experiment N CP Distinguish-
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>                                                                                ability Scores
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>Global Variant CP Features                   (once, across all experiments)
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>  Experiment {1..N} CP Aggregates ─► Variant-wise median pooling ─► PCA ─► Global Variant CP Features
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>Global Variant CP Distinguish-ability Scores (once, across all experiments)
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>  Experiment {1..N} CP Distinguish-ability Scores ─► Variant-wise median pooling ─► Global Variant CP
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>                                                                                      Distinguish-ability Scores
+</code></pre></div>
+<h2 id="terminology-map">Terminology map<a class="headerlink" href="#terminology-map" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Diagram node</th>
+<th>This pipeline's stage</th>
+<th>Reuses / adapts from <code>fisseq-data-pipeline</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cell Info Table</td>
+<td>upstream input, unchanged</td>
+<td><code>starcall-workflow</code>'s cell table -- same <code>upBarcode</code>/<code>aaChanges</code>/<code>editDistance</code> columns <code>qcfilter.py</code> already expects</td>
+</tr>
+<tr>
+<td>Cell Images</td>
+<td>upstream input, unchanged</td>
+<td><code>starcall-workflow</code>'s stitched tile image + mask -- <strong>on the <code>origin/devel</code> branch</strong></td>
+</tr>
+<tr>
+<td>Cell Dataset</td>
+<td><code>BUILD_DATASET</code> (new)</td>
+<td>crops a whole experiment's cells from stitched tile images into a WebDataset, porting <code>make_cell_images</code>'s crop-window algorithm</td>
+</tr>
+<tr>
+<td>QC Filtering</td>
+<td><code>QC_FILTER</code> (vendored, ~unchanged)</td>
+<td><code>qcfilter.py</code> directly</td>
+</tr>
+<tr>
+<td>Cell Embeddings (Cell DINO)</td>
+<td><code>EMBED_CELLS</code> (new)</td>
+<td>none -- wraps Meta's <code>dinov2</code> Cell-DINO</td>
+</tr>
+<tr>
+<td>Filter Embeddings</td>
+<td><code>FILTER_EMBEDDINGS</code> (adapted)</td>
+<td><code>normalize.py</code>'s <code>Normalizer</code>, retargeted to a synonymous control query -- publishes a join key + fitted stats, not a normalized copy of the embeddings</td>
+</tr>
+<tr>
+<td>Aggregation (Synonymous STD Corrected)</td>
+<td><code>AGGREGATE_EMBEDDINGS</code> (adapted)</td>
+<td><code>aggregate.py</code>'s aggregator classes + <code>get_aggregate_meta_data</code></td>
+</tr>
+<tr>
+<td>OVWT Distinguish-ability Scores (Synonymous STD Corrected)</td>
+<td><code>OVWT_BATCHWISE</code> (adapted)</td>
+<td><code>ovwt.py</code> + <code>utils/xgbparams.py</code>, training/eval primitives reused per-fold under a <em>k</em>-fold CV loop</td>
+</tr>
+<tr>
+<td>Variant-wise median pooling (embeddings branch)</td>
+<td><code>GLOBAL_VARIANT_EMBEDDINGS</code> -- median step</td>
+<td><code>globalfeatureselect.py</code>'s <code>median_across_batches</code></td>
+</tr>
+<tr>
+<td>PCA</td>
+<td><code>GLOBAL_VARIANT_EMBEDDINGS</code> -- PCA step</td>
+<td><code>utils/dimreduction.py</code>'s <code>compute_pca</code></td>
+</tr>
+<tr>
+<td>Variant-wise median pooling (scores branch)</td>
+<td><code>GLOBAL_VARIANT_DISTINGUISHABILITY</code></td>
+<td>per-experiment synonymous z-score then a <code>median_across_batches</code>-style pool, adapted for two scalar (AUROC) columns instead of a feature matrix</td>
+</tr>
+<tr>
+<td>CellProfiler Feature Dataset</td>
+<td><code>BUILD_CP_FEATURES</code> (new)</td>
+<td>reads starcall-workflow's already-computed per-tile CellProfiler CSV alongside the same per-tile cell table <code>BUILD_DATASET</code> reads -- see <a href="#cellprofiler-feature-csv-input-from-starcall-workflow">Data contracts</a></td>
+</tr>
+<tr>
+<td>Filter CP Features</td>
+<td><code>FILTER_CP_FEATURES</code> (thin wrapper)</td>
+<td>reuses <code>filter.py</code>'s <code>filter_and_fit_normalizer</code>/<code>load_filtered_embeddings</code> directly (already feature-agnostic) -- joins against <code>QC_FILTER</code>'s existing output, not a second QC run</td>
+</tr>
+<tr>
+<td>Aggregation (CellProfiler track)</td>
+<td><code>AGGREGATE_CP_FEATURES</code> (thin wrapper)</td>
+<td>reuses <code>aggregate.py</code>'s <code>aggregate_embeddings</code> with <code>feature_selector=FEATURE_SELECTOR</code></td>
+</tr>
+<tr>
+<td>OVWT Distinguish-ability Scores (CellProfiler track)</td>
+<td><code>OVWT_BATCHWISE_CP_FEATURES</code> (thin wrapper)</td>
+<td>reuses <code>ovwt.py</code>'s <code>ovwt_batchwise</code> with <code>feature_selector=FEATURE_SELECTOR</code></td>
+</tr>
+<tr>
+<td>Variant-wise median pooling + PCA (CellProfiler track)</td>
+<td><code>GLOBAL_VARIANT_CP_FEATURES</code> (thin wrapper)</td>
+<td>reuses <code>global_embeddings.py</code>'s <code>global_variant_embeddings</code> directly (already <code>FEATURE_SELECTOR</code>-based, no fork needed)</td>
+</tr>
+<tr>
+<td>Variant-wise median pooling (CellProfiler scores branch)</td>
+<td><code>GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES</code> (thin wrapper)</td>
+<td>reuses <code>global_distinguishability.py</code>'s <code>global_variant_distinguishability</code> directly (already feature-agnostic)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="architecture-decisions">Architecture decisions<a class="headerlink" href="#architecture-decisions" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Standalone repo</strong>, sibling to <code>fisseq-data-pipeline</code> and
+   <code>starcall-workflow</code>, following the same Nextflow DSL2 + Python (Hydra +
+   polars) conventions.</li>
+<li><strong>Fully standalone</strong>: vendors the small pieces of <code>fisseq-data-pipeline</code>
+   it actually needs (<code>Normalizer</code>, <code>load_batches</code>, <code>xgbparams</code> helpers,
+   <code>compute_pca</code>, the Hydra config base classes, <code>classify_variant</code>)
+   rather than depending on that repo as a library.</li>
+<li><strong>Cell-DINO</strong> = Meta's <code>dinov2</code> repo, run in <strong>Bag of Channels</strong> mode by
+   default (though not every real checkpoint is bag-of-channels -- see
+   <a href="#embed_cells-cell-dino-inference-internals">below</a>).</li>
+<li><strong>OvWT distinguish-ability metric</strong>: one binary XGBoost classifier per
+   variant vs. wildtype, run on embedding columns instead of CellProfiler
+   feature columns -- <em>k</em>-fold cross-validated, producing an out-of-fold
+   score for every cell and two summary numbers per variant: a pooled
+   AUROC and a median-across-barcodes AUROC.</li>
+<li><strong>"Synonymous STD Corrected"</strong> = a full z-score (subtract synonymous-
+   population mean, divide by synonymous-population std), computed per
+   embedding dimension, mechanically identical to <code>fisseq-data-pipeline</code>'s
+   <code>Normalizer</code> -- just fit on synonymous rows rather than the wildtype
+   rows <code>normalize.py</code> uses for the CellProfiler pipeline.</li>
+<li><strong>PCA only on the embeddings branch</strong>. The distinguish-ability-scores
+   branch is a plain cross-batch median with no dimensionality reduction.</li>
+<li>The synonymous z-score is folded into <code>FILTER_EMBEDDINGS</code> itself (fit
+   once per experiment, applied once), rather than duplicated inside both
+   downstream stages.</li>
+<li>Unlike <code>fisseq-data-pipeline</code>'s <code>global_channels</code> mechanism, the two
+   global stages here run once, unconditionally, over <strong>every</strong>
+   experiment.</li>
+<li><strong>Global distinguish-ability pooling is two steps, not one</strong>:
+   <code>GLOBAL_VARIANT_DISTINGUISHABILITY</code> first z-scores each experiment's
+   <code>auroc_pooled</code>/<code>auroc_median_barcode</code> against that same experiment's
+   own synonymous variants, <em>then</em> medians the z-scored values across
+   experiments -- rather than medianing raw AUROC directly.</li>
+<li><strong>No pipeline stage copies another stage's data wholesale -- outputs
+    reference each other by join key instead</strong>, the same pattern
+    <code>QC_FILTER</code> already uses. <code>FILTER_EMBEDDINGS</code> publishes only the
+    QC-passed join keys and the fitted <code>Normalizer</code> stats; every
+    downstream consumer joins back to <code>EMBED_CELLS</code>' single
+    <code>embeddings.parquet</code> and applies the normalizer itself.</li>
+<li><strong>One <code>random_seed</code> field, defined once on the shared <code>AppConfig</code>
+    base, reused by every stage that needs randomness</strong> -- not a separate
+    <code>random_state</code>/seed field owned by each stage's own config. A single
+    pipeline-level <code>--random_seed</code> override therefore reproduces an
+    entire run's stochastic stages (<code>OVWT_BATCHWISE</code>'s CV/XGBoost/
+    calibration, <code>GLOBAL_VARIANT_EMBEDDINGS</code>'s PCA) at once.</li>
+<li><strong>Default pipeline parameters live in a YAML file (<code>params.yaml</code>,
+    repo root), not in <code>nextflow.config</code>'s <code>params {}</code> block</strong>.
+    <code>nextflow.config</code> is left for what Nextflow actually needs a
+    <code>.config</code> file for (executor/profile/container settings); see
+    <a href="../configuration/">Configuration</a>.</li>
+<li><strong>The pipeline is containerized</strong>: one Docker image bundles the
+    Python package, its dependencies, and (for <code>EMBED_CELLS</code>) the
+    CUDA/torch stack; every Nextflow process runs inside that image via
+    <code>process.container</code>.</li>
+<li><strong>The CellProfiler-feature track is a set of thin wrappers, not a
+    fork.</strong> <code>filter.py</code>/<code>global_embeddings.py</code>/<code>global_distinguishability.py</code>
+    were already feature-agnostic (keyed off <code>FEATURE_SELECTOR</code>/
+    <code>JOIN_KEYS</code>/<code>META_SELECTOR</code>, never <code>EMBEDDING_SELECTOR</code>) and are
+    imported directly, unchanged. <code>aggregate.py</code>/<code>ovwt.py</code> needed one
+    small parameterization each -- a <code>feature_selector</code> argument,
+    defaulting to <code>EMBEDDING_SELECTOR</code> so existing behavior is untouched
+    -- rather than a duplicated copy of their KS/AUROC/k-fold-XGBoost
+    logic. Every <code>*_CP_FEATURES</code> module in the table above is a thin Hydra
+    entry point around one of these reused functions, mirroring the
+    precedent <code>aggregate.py</code> already set by importing
+    <code>load_filtered_embeddings</code> from <code>filter.py</code>.</li>
+<li><strong>QC filtering is computed once, reused by both tracks.</strong> Both tracks
+    score the same cells, and QC filtering (edit distance / barcode
+    counts / variant barcode counts) only ever looks at <code>meta_*</code> columns
+    -- never the feature space -- so <code>FILTER_CP_FEATURES</code> joins directly
+    against <code>QC_FILTER</code>'s existing <code>filtered_cells.parquet</code> rather than
+    running a second <code>QC_FILTER</code> process.</li>
+<li><strong><code>BUILD_CP_FEATURES</code> discovers tiles the same way <code>BUILD_DATASET</code>
+    does</strong> (<code>phenotyping_dir</code>/<code>wells</code>/<code>grid_size</code> auto-detection, reusing
+    <code>dataset.discover_tiles</code> directly) rather than taking a hand-specified
+    merged input file, since <code>starcall-workflow</code> already writes each
+    tile's CellProfiler output at a deterministic path alongside its cell
+    table. It pairs each tile's cell table and CellProfiler CSV <strong>by row
+    position, not by index value</strong> -- see
+    <a href="#cellprofiler-feature-csv-input-from-starcall-workflow">Data contracts</a>.</li>
+</ol>
+<h2 id="repository-layout">Repository layout<a class="headerlink" href="#repository-layout" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>fisseq-embeddings-pipeline/
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  main.nf
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  nextflow.config                 # executor/profile/container settings only
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  params.yaml                     # every default pipeline parameter
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  Dockerfile                      # single image every process runs in
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  workflows/
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    embeddings.nf                 # the one pipeline_mode this repo has
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  modules/local/
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    build_dataset.nf
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    qc_filter.nf
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    embed_cells.nf
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    filter_embeddings.nf
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    aggregate_embeddings.nf
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    ovwt_batchwise.nf
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    global_variant_embeddings.nf
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    global_variant_distinguishability.nf
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    build_cp_features.nf
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    filter_cp_features.nf
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    aggregate_cp_features.nf
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    ovwt_batchwise_cp_features.nf
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    global_variant_cp_features.nf
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    global_variant_distinguishability_cp_features.nf
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>  src/fisseq_embeddings_pipeline/
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    config/
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>      app.py                      # AppConfig -- vendored, + random_seed
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>      input.py                    # InputConfig, LabeledInputConfig -- vendored
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>    dataset.py                    # BUILD_DATASET
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    qcfilter.py                   # QC_FILTER -- vendored, ~unchanged
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>    embed.py                      # EMBED_CELLS -- Cell-DINO wrapper
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>    filter.py                     # FILTER_EMBEDDINGS
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    aggregate.py                  # AGGREGATE_EMBEDDINGS
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>    ovwt.py                       # OVWT_BATCHWISE
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>    global_embeddings.py          # GLOBAL_VARIANT_EMBEDDINGS
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>    global_distinguishability.py  # GLOBAL_VARIANT_DISTINGUISHABILITY
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>    cp_features.py                     # BUILD_CP_FEATURES
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a>    filter_cp_features.py              # FILTER_CP_FEATURES (thin wrapper over filter.py)
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>    aggregate_cp_features.py           # AGGREGATE_CP_FEATURES (thin wrapper over aggregate.py)
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>    ovwt_cp_features.py                # OVWT_BATCHWISE_CP_FEATURES (thin wrapper over ovwt.py)
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>    global_variant_cp_features.py      # GLOBAL_VARIANT_CP_FEATURES (thin wrapper over global_embeddings.py)
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>    global_variant_distinguishability_cp_features.py  # GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES (thin wrapper over global_distinguishability.py)
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>    vendor/dinov2/                # minimal vendored dinov2 subset
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a>    utils/
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>      constants.py                # vendored
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a>      variant.py                  # vendored (classify_variant)
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a>      batches.py                  # vendored (load_batches)
+<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>      xgbparams.py                # vendored, one retargeted seed field
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>      dimreduction.py             # vendored (compute_pca), + random_state passthrough
+<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>      globalfeatureselect.py      # vendored (median_across_batches only)
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>      vectors.py                  # vendored (compute_impact_score/compute_cosine_distance)
+<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>      nextflow_staging.py         # stageAs-numbered-filename reconstruction helper
+<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>      log.py                      # vendored
+<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>  docs/
+<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a>  tests/
+<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a>    unit/
+<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a>    integration/                  # end-to-end nextflow run + output assertions
+</code></pre></div>
+<p>New dependency versus <code>fisseq-data-pipeline</code>'s stack: <strong><code>webdataset</code></strong>
+(<code>BUILD_DATASET</code> writes shards, <code>EMBED_CELLS</code> reads them), plus whatever
+<code>torch</code> pulls in for the GPU stage.</p>
+<h2 id="vendored-code">Vendored code<a class="headerlink" href="#vendored-code" title="Permanent link">&para;</a></h2>
+<p>Every module that ports code from <code>fisseq-data-pipeline</code> says so, and
+what, in its own module docstring -- see <code>src/fisseq_embeddings_pipeline/</code>.
+<code>dinov2</code> itself is vendored (not installed as a dependency) directly under
+<code>src/fisseq_embeddings_pipeline/vendor/dinov2/</code>; see that directory's
+<code>VENDORED_FROM.md</code> for the exact upstream commit, file list, and the one
+deliberate line change versus upstream.</p>
+<h2 id="data-contracts">Data contracts<a class="headerlink" href="#data-contracts" title="Permanent link">&para;</a></h2>
+<h3 id="a-note-on-branches">A note on branches<a class="headerlink" href="#a-note-on-branches" title="Permanent link">&para;</a></h3>
+<p>This pipeline tracks <code>starcall-workflow</code>'s <code>origin/devel</code> branch, not
+<code>master</code>, which has a differently-shaped <code>make_cell_images</code> and no
+<code>extract_embeddings</code> rule at all.</p>
+<h3 id="cell-info-table-input-from-starcall-workflow">Cell Info Table (input, from <code>starcall-workflow</code>)<a class="headerlink" href="#cell-info-table-input-from-starcall-workflow" title="Permanent link">&para;</a></h3>
+<p>One row per segmented cell. Columns <code>qcfilter.py</code> reads (unchanged, per
+its config defaults):</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>upBarcode</code></td>
+<td>sequenced/matched barcode string</td>
+</tr>
+<tr>
+<td><code>aaChanges</code></td>
+<td>variant label (renamed to <code>meta_aa_changes</code> on ingest)</td>
+</tr>
+<tr>
+<td><code>editDistance</code></td>
+<td>base changes needed to match the barcode; <code>-1</code> = unmatched</td>
+</tr>
+<tr>
+<td><code>bbox_x1/y1/x2/y2</code></td>
+<td>cell bounding box, in phenotype-image scale</td>
+</tr>
+</tbody>
+</table>
+<p>Written by <code>starcall-workflow</code>'s <code>rule tabulate_cells</code>. The real schema has
+no <code>xpos</code>/<code>ypos</code> columns -- only <code>bbox_x1/y1/x2/y2</code>. <code>BUILD_DATASET</code>
+computes each cell's crop center as the bbox midpoint,
+<code>((bbox_x1+bbox_x2)//2, (bbox_y1+bbox_y2)//2)</code>.</p>
+<h3 id="cell-images-input-from-starcall-workflow">Cell Images (input, from <code>starcall-workflow</code>)<a class="headerlink" href="#cell-images-input-from-starcall-workflow" title="Permanent link">&para;</a></h3>
+<p><code>BUILD_DATASET</code> reads two per-tile outputs directly rather than depending
+on a pre-cropped per-cell file (which isn't reliably produced for every
+experiment):</p>
+<ul>
+<li><strong><code>rule stitch_tile_pt</code></strong> -- the entire stitched phenotype image for one
+  tile: <code>'{path}/{corrected|raw}_pt.tif'</code>,
+  <code>(num_phenotyping_cycles, num_channels, width, height)</code>.</li>
+<li><strong><code>rule stitch_tile_from_well_segmentation</code></strong> -- the tile's segmentation
+  label mask: <code>'{path}/{segmentation_type}_mask.tif'</code>.</li>
+</ul>
+<p><code>BUILD_DATASET</code> ports <code>rule make_cell_images</code>'s crop-window algorithm
+directly into Python (window-centered box, clipped and zero-padded at tile
+edges, mask label matched positionally as <code>i + 1</code>) rather than depending on
+that rule's own output.</p>
+<h3 id="cell-dataset-this-pipelines-join">Cell Dataset (this pipeline's join)<a class="headerlink" href="#cell-dataset-this-pipelines-join" title="Permanent link">&para;</a></h3>
+<p>Per experiment: a <strong>WebDataset</strong> (sharded <code>.tar</code> archives, one sample per
+cell) built by cropping every tile's stitched phenotype image and
+segmentation mask around each cell's bbox-derived center, and repackaging
+each row as one sample keyed by a unique cell id, carrying the crop array,
+the mask array, and <code>meta_*</code> fields (barcode, variant label, edit
+distance, well/tile, cell index).</p>
+<h3 id="cellprofiler-feature-csv-input-from-starcall-workflow">CellProfiler feature CSV (input, from starcall-workflow)<a class="headerlink" href="#cellprofiler-feature-csv-input-from-starcall-workflow" title="Permanent link">&para;</a></h3>
+<p><code>BUILD_CP_FEATURES</code> reads a second per-tile output <code>starcall-workflow</code>'s
+<code>origin/devel</code> <code>workflow/rules/phenotyping.smk</code> already produces (rules
+<code>run_cellprofiler</code>/<code>copy_cellprofiler_output</code>), alongside the same
+<code>{segmentation_type}.csv</code> cell table <code>BUILD_DATASET</code> reads:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>{tile_dir}/cellprofiler{cycle}_{pipeline}.csv
+</code></pre></div>
+<p>where <code>{tile_dir}</code> is the same <code>{well}_grid{N}/tile{x}x{y}y/</code> directory
+<code>discover_tiles</code> already resolves, <code>{cycle}</code> is <code>""</code> or <code>"cycle&lt;N&gt;"</code>
+(<code>CpFeaturesConfig.cellprofiler_cycle</code>), and <code>{pipeline}</code> is the
+CellProfiler <code>.cppipe</code> pipeline's basename
+(<code>CpFeaturesConfig.cellprofiler_pipeline</code>, required). One row per cell,
+one column per CellProfiler measurement -- no <code>meta_*</code> prefix, no
+identity columns (<code>upBarcode</code>/<code>aaChanges</code>/<code>editDistance</code> come from the
+cell table, not this file).</p>
+<p><strong>Row-position join, not index-value join.</strong> <code>BUILD_CP_FEATURES</code> pairs the
+cell table's row <code>i</code> with the CellProfiler CSV's row <code>i</code> -- not by
+matching their first-column index <em>values</em>. This mirrors
+<code>BUILD_DATASET</code>'s own <code>_crop_cell(..., label=i + 1, ...)</code> convention
+(segmentation mask labels are the row <em>position</em>, <code>i + 1</code>, not the cell
+table's index <em>value</em> -- see <code>write_dataset_shards</code>), and CellProfiler's
+own <code>ObjectNumber</code> numbering is standardly derived from ascending
+mask-label order, i.e. that same row position. A tile whose cell table
+and CellProfiler CSV have different row counts raises rather than
+silently misaligning every downstream row.</p>
+<h2 id="embed_cells-cell-dino-inference-internals"><code>EMBED_CELLS</code> / Cell-DINO inference internals<a class="headerlink" href="#embed_cells-cell-dino-inference-internals" title="Permanent link">&para;</a></h2>
+<p><code>dinov2</code>'s own docs don't publish a documented inference API -- only
+training/linear-eval/kNN-eval scripts. This section records what's
+actually verified against the real <code>facebookresearch/dinov2</code> source
+(<code>vendor/dinov2/VENDORED_FROM.md</code> has the exact commit).</p>
+<p><strong>Cell-DINO is real, not a fictional stand-in</strong> -- the public <code>dinov2</code>
+repo ships <code>docs/README_CELL_DINO.md</code>, <code>docs/README_CHANNEL_ADAPTIVE_DINO.md</code>,
+<code>LICENSE_CELL_DINO_CODE</code>, and a <code>channel_adaptive</code> constructor flag on
+<code>DinoVisionTransformer</code>.</p>
+<h3 id="1-model-construction">1. Model construction<a class="headerlink" href="#1-model-construction" title="Permanent link">&para;</a></h3>
+<p>Construction goes through the architecture factory function directly
+(<code>vision_transformer.vit_large(...)</code>, dict-dispatched by <code>cfg.arch</code>)
+rather than <code>dinov2.eval.setup</code>/<code>build_model_from_cfg</code>, which needs a full
+training-style config object this pipeline doesn't have.</p>
+<h3 id="2-checkpoint-loading">2. Checkpoint loading<a class="headerlink" href="#2-checkpoint-loading" title="Permanent link">&para;</a></h3>
+<p><code>load_cell_dino()</code> ports the real <code>dinov2/utils/utils.py::
+load_pretrained_weights(model, path, checkpoint_key)</code> logic:</p>
+<ol>
+<li><code>torch.load(path, map_location="cpu")</code>.</li>
+<li>If <code>checkpoint_key</code> (<code>"teacher"</code>) is a key in the loaded dict, index into it.</li>
+<li>Strip <code>module.</code> and <code>backbone.</code> prefixes from every state-dict key
+   (real checkpoints commonly carry these from the training-time
+   multicrop/DDP wrapper).</li>
+<li><code>model.load_state_dict(state_dict, strict=False)</code> -- not strict, since a
+   backbone-only checkpoint legitimately won't have <code>head</code>/EMA-only keys.</li>
+</ol>
+<p><code>load_cell_dino()</code> additionally raises a <code>RuntimeError</code> on any non-empty
+<code>missing_keys</code> (never on <code>unexpected_keys</code>, which stays informational) --
+since this pipeline's own <code>head</code> is always <code>nn.Identity()</code> (no parameters
+that could ever legitimately be missing), a missing key means the
+constructed architecture doesn't match the checkpoint. Without this check,
+a shape mismatch could silently leave part of the backbone at its random
+initialization while <code>embed_batch()</code> ran anyway, no crash, no warning
+above INFO level -- just quietly wrong embeddings.</p>
+<h3 id="3-pooling-forward-path">3. Pooling / forward path<a class="headerlink" href="#3-pooling-forward-path" title="Permanent link">&para;</a></h3>
+<p><code>DinoVisionTransformer.forward(x, is_training=False)</code> returns
+<code>self.head(x_norm_clstoken)</code>, and <code>head</code> defaults to <code>nn.Identity()</code> -- so
+plain <code>model(x)</code> on an <code>(N, 1, H, W)</code> batch already returns <code>(N, D)</code> CLS
+embeddings directly: reshape <code>(B, C, H, W) -&gt; (B*C, 1, H, W)</code>, call
+<code>model(x)</code>, reshape back to <code>(B, C, D)</code>, then mean/max-pool over the
+channel dimension.</p>
+<p>One thing worth recording: the model's own <code>channel_adaptive=True</code>
+constructor flag (what the real repo calls "bag of channels") only changes
+behavior inside <code>get_intermediate_layers()</code> -- used by the paper's own
+<em>linear-probe</em> eval scripts, which concatenate several transformer
+blocks' tokens and avgpool patch tokens, not just the final CLS token.
+That's a heavier protocol built for training a linear classifier, not for
+producing one fixed-length embedding per cell. Since this pipeline only
+wants a single per-cell embedding for downstream median-pooling/
+distinguishability scoring, the simpler plain-<code>forward()</code> CLS-token path
+is used instead, and <code>channel_adaptive=True</code> is passed at construction
+time only so the checkpoint's own state dict lines up -- not because
+<code>get_intermediate_layers</code>'s bag-of-channels branch is invoked.</p>
+<h3 id="4-vendoring-dinov2-not-installing-it">4. Vendoring <code>dinov2</code>, not installing it<a class="headerlink" href="#4-vendoring-dinov2-not-installing-it" title="Permanent link">&para;</a></h3>
+<p><code>dinov2</code>'s own <code>requirements.txt</code> pins <code>torch==2.0.0</code>, <code>xformers==0.0.18</code>,
+<code>cuml-cu11</code> -- incompatible with this repo's <code>torch&gt;=2.4.0</code>, and
+<code>xformers</code>/<code>cuml</code> are GPU-toolchain-specific and unneeded: every
+<code>xformers</code> import in the real source is wrapped in <code>try/except
+ImportError</code>, falling back to plain <code>torch.nn.functional.
+scaled_dot_product_attention</code>. Only the minimal pure-<code>torch</code> file subset
+needed for inference is vendored into
+<code>src/fisseq_embeddings_pipeline/vendor/dinov2/</code>.</p>
+<h3 id="5-real-checkpoints-arent-all-the-same-shape">5. Real checkpoints aren't all the same shape<a class="headerlink" href="#5-real-checkpoints-arent-all-the-same-shape" title="Permanent link">&para;</a></h3>
+<p>Real Cell-DINO checkpoints come in genuinely different families --
+<code>README_CELL_DINO.md</code> describes a plain, fixed-channel-count model,
+<code>README_CHANNEL_ADAPTIVE_DINO.md</code> describes the bag-of-channels one. Two
+real checkpoints have been verified against this pipeline's loader:</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th><code>cell_dino_vits8_pretrain_cp-37d20e9c.pth</code></th>
+<th><code>channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Checkpoint key</td>
+<td>top-level (no wrapper key)</td>
+<td>top-level (no wrapper key)</td>
+</tr>
+<tr>
+<td>Architecture</td>
+<td><code>vit_small</code> (embed_dim 384), patch <strong>8</strong></td>
+<td><code>vit_large</code> (embed_dim 1024), patch 16</td>
+</tr>
+<tr>
+<td><code>in_chans</code></td>
+<td><strong>5</strong> -- a fixed 5-channel backbone</td>
+<td><code>1</code> -- bag of channels</td>
+</tr>
+<tr>
+<td><code>channel_adaptive</code></td>
+<td><code>False</code> (structurally -- each patch is convolved jointly over all 5 channels)</td>
+<td><code>True</code></td>
+</tr>
+<tr>
+<td><code>pos_embed</code> / native <code>img_size</code></td>
+<td>128 (16x16 patches x patch 8)</td>
+<td>224 (14x14 patches x patch 16)</td>
+</tr>
+<tr>
+<td><code>block_chunks</code></td>
+<td>4</td>
+<td>4</td>
+</tr>
+<tr>
+<td>LayerScale</td>
+<td>present</td>
+<td>present</td>
+</tr>
+</tbody>
+</table>
+<p>None of this is guessable from the filename or from <code>dinov2</code>'s public
+per-variant docs alone. <code>load_cell_dino()</code> doesn't hardcode either shape:
+it inspects the (prefix-stripped) checkpoint state dict itself and derives:</p>
+<ul>
+<li><code>in_chans</code> and a cross-checked <code>patch_size</code> from <code>patch_embed.proj.
+  weight</code>'s shape (<code>(embed_dim, in_chans, patch, patch)</code>) -- raising a
+  clear <code>ValueError</code> if <code>cfg.patch_size</code> disagrees with the checkpoint's
+  own kernel size, rather than silently building the wrong grid.</li>
+<li><code>img_size</code> (for a matching <code>pos_embed</code> parameter shape only -- <em>not</em> a
+  claim about what crop size can be embedded later) from <code>pos_embed</code>'s
+  patch-token count. <code>DinoVisionTransformer.interpolate_pos_encoding</code>
+  already reconciles any difference between the checkpoint's native grid
+  and the actual input size on every forward call, so construction only
+  needs to reproduce the checkpoint's own shape for <code>load_state_dict</code> to
+  succeed.</li>
+<li><code>block_chunks</code> from whether block keys match the chunked
+  <code>blocks.&lt;chunk&gt;.&lt;pos&gt;.</code> pattern (chunk count = <code>block_chunks</code>) or the
+  flat <code>blocks.&lt;pos&gt;.</code> pattern (<code>block_chunks=0</code>).</li>
+<li>Whether to pass a (placeholder, checkpoint-overwritten) nonzero
+  <code>init_values</code> at all, from whether any <code>ls1.gamma</code>/<code>ls2.gamma</code> key
+  exists in the checkpoint.</li>
+</ul>
+<p><code>embed_batch()</code> correspondingly branches on the <em>loaded model's own</em>
+<code>patch_embed.in_chans</code> rather than assuming bag-of-channels
+unconditionally: <code>in_chans == 1</code> gets the per-channel split-and-pool
+treatment; anything else is fed to the model jointly in one plain forward
+pass, raising a clear error if the crop's channel count doesn't match
+exactly. Both checkpoints load with zero missing and zero unexpected keys
+using their respective architectures -- see
+<code>tests/unit/test_embed.py::test_load_cell_dino_and_embed_batch_against_real_vits8_checkpoint</code>
+and <code>::test_load_cell_dino_and_embed_batch_against_real_vitl16_checkpoint</code>
+(skipped automatically when the checkpoint file isn't present, e.g. in
+CI, since <code>weights/</code> is gitignored).</p>
+<h3 id="6-configurable-input-channels-and-per-channel-masking">6. Configurable input channels and per-channel masking<a class="headerlink" href="#6-configurable-input-channels-and-per-channel-masking" title="Permanent link">&para;</a></h3>
+<p><code>EmbedCellsConfig.channels</code> (a <code>list[int]</code>, default <code>[0, 1, 2, 3]</code>)
+selects and orders which of the crop's channel indices actually get
+embedded -- a crop may legitimately carry more channels than the model
+should see (e.g. multiple imaging cycles), and different checkpoints/
+experiments may want a different subset or order.
+<code>EmbedCellsConfig.channel_apply_mask</code> (a <code>list[bool]</code>, same length as
+<code>channels</code>) independently controls, per selected channel, whether that
+channel gets the shared per-cell segmentation mask applied before
+embedding -- "shared" because <code>BUILD_DATASET</code> writes exactly one
+<code>mask.npy</code> per cell, not one per channel.</p>
+<p><code>embed_batch()</code> applies channel selection and per-channel masking <em>before</em>
+the bag-of-channels-vs-joint-multichannel branch above -- so, for a
+bag-of-channels model, <code>channel_pool</code> only ever pools over the selected
+channels, and for a fixed-channel-count model, <code>len(cfg.channels)</code> must
+equal that model's <code>in_chans</code> exactly.</p>
+<p>Which real checkpoint (the <code>vit_small</code>/patch-8/5-channel one or the
+<code>vit_large</code>/patch-16/bag-of-channels one) is the right choice for a given
+deployment is a product decision, not a code question --
+<code>EmbedCellsConfig.checkpoint_path</code> and <code>params.yaml</code>'s
+<code>cell_dino_checkpoint</code> are deliberately required-with-no-default, since a
+checkpoint path is inherently deployment-specific and <code>weights/</code> is
+gitignored.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "toc.follow", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
