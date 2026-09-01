@@ -34,7 +34,6 @@ import dataclasses
 import glob
 import logging
 import pathlib
-import re
 from typing import Tuple
 
 import hydra
@@ -46,7 +45,12 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
-from .utils.constants import META_BARCODE_COL, META_BATCH_COL, META_EDIT_DISTANCE_COL
+from .utils.constants import (
+    META_BARCODE_COL,
+    META_BATCH_COL,
+    META_EDIT_DISTANCE_COL,
+    TILE_DIR_RE,
+)
 from .utils.log import setup_logging
 
 # Fixed structural contract of BUILD_CELL_IMAGES' cell_table.parquet
@@ -59,13 +63,13 @@ _BBOX_Y1_COL = "bbox_y1"
 _BBOX_X2_COL = "bbox_x2"
 _BBOX_Y2_COL = "bbox_y2"
 
-# Matches a tile directory's own name (e.g. "tile2x0y") -- used only to
-# recover (tile_x, tile_y) as integers for deterministic numeric sorting in
-# discover_tiles (lexical sorting would misorder e.g. "tile10x0y" before
-# "tile2x0y"). Grid-size ambiguity itself is resolved upstream, by
-# BUILD_CELL_IMAGES -- this stage's cell_images_dir only ever contains the
-# one grid size that stage chose, so there's no grid regex here any more.
-_TILE_DIR_RE = re.compile(r"^tile(\d+)x(\d+)y$")
+# TILE_DIR_RE (utils/constants.py) matches a tile directory's own name
+# (e.g. "tile2x0y") -- used only to recover (tile_x, tile_y) as integers
+# for deterministic numeric sorting in discover_tiles (lexical sorting
+# would misorder e.g. "tile10x0y" before "tile2x0y"). Grid-size ambiguity
+# itself is resolved upstream, by BUILD_CELL_IMAGES -- this stage's
+# cell_images_dir only ever contains the one grid size that stage chose,
+# so there's no grid regex here any more.
 
 
 @dataclasses.dataclass
@@ -156,7 +160,7 @@ def discover_tiles(cfg: BuildDatasetConfig) -> pl.DataFrame:
         if not pt_matches or not mask_matches:
             continue
 
-        m = _TILE_DIR_RE.match(tile_name)
+        m = TILE_DIR_RE.match(tile_name)
         if m is None:
             continue
         rows.append(

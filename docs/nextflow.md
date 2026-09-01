@@ -173,22 +173,27 @@ own deployment.
 (`BUILD_CELL_IMAGES` only now -- see
 [Architecture](architecture.md#cell-images-buildcellimages-output-from-starcall-workflow))
 and `cell_dino_checkpoint` (`EMBED_CELLS`) are threaded into each process
-as plain Hydra CLI-override strings (or, for `BUILD_CELL_IMAGES`,
-Groovy-interpolated bash arguments -- see
-`modules/local/build_cell_images.nf`) -- they're never declared as
-Nextflow `path` process inputs. That means Nextflow itself never stages or
-binds them; under Docker (the default profile) this is invisible because
-the whole host filesystem is reachable inside the container anyway, but
-under a Singularity/Apptainer-based profile it isn't. Apptainer's own
-`autoMounts` only covers `$HOME`, `$PWD` (the task work dir), and system
-default binds -- a sibling data tree outside `pipeline_dir`'s own tree
-(e.g. an experiment's `phenotyping_dir` living under a different
-top-level project directory) simply isn't visible inside the container,
-even though it's plainly there on the host.
+as plain Hydra CLI-override strings when an experiment sets them itself
+(or, for `starcall_workflow_dir`, a Groovy-interpolated bash argument --
+see `modules/local/build_cell_images.nf`) -- when an entry omits one of
+the three data dirs, it's instead resolved inside the container/venv by
+`build_cell_images_enumerate.py`'s `resolve_data_dir`, reading
+`starcall_workflow_dir`'s own `config.yaml`/`default-config.yaml` if
+present. Either way, none of these are ever declared as Nextflow `path`
+process inputs, and the paths a project's own `config.yaml` names are just
+as host-filesystem-real as an explicit override. That means Nextflow
+itself never stages or binds any of them; under Docker (the default
+profile) this is invisible because the whole host filesystem is reachable
+inside the container anyway, but under a Singularity/Apptainer-based
+profile it isn't. Apptainer's own `autoMounts` only covers `$HOME`, `$PWD`
+(the task work dir), and system default binds -- a sibling data tree
+outside `pipeline_dir`'s own tree (e.g. an experiment's `phenotyping_dir`
+living under a different top-level project directory) simply isn't
+visible inside the container, even though it's plainly there on the host.
 
 The symptom is confusing because it surfaces deep inside Python as an
 ordinary-looking "file/directory not found" error (e.g.
-`build_cell_images_glue.py`'s grid-size auto-detection raising `"no
+`build_cell_images_enumerate.py`'s grid-size auto-detection raising `"no
 '{well}_grid<N>' directory found"`) for a path that `ls` shows fine from
 the host shell -- the giveaway is that it's a container-visibility
 problem, not a real `phenotyping_dir`/`wells` misconfiguration.
@@ -207,14 +212,18 @@ Every `modules/local/*.nf` file follows the same shape: `errorStrategy
 `python -m fisseq_embeddings_pipeline.<module>` script block ending in
 `random_seed=${params.random_seed}`. `EMBED_CELLS` additionally carries
 `label 'process_gpu'`, since it's the pipeline's only GPU-bound stage.
-`BUILD_CELL_IMAGES` (`modules/local/build_cell_images.nf`) is the one
-exception to the shape above: it uses `container "${params.starcall_container_image}"`
-(a separate image -- see `docker/starcall.Dockerfile`), its `publishDir`
-`mode:` is `'symlink'` or `'copy'` depending on `params.cell_images_hard_copy`
-(not the shared static `'copy'` every other module uses), and its script
-block invokes `snakemake` plus a standalone `build_cell_images_glue.py`
-(no `python -m fisseq_embeddings_pipeline...` -- that module deliberately
-doesn't import this repo's own package).
+`BUILD_CELL_IMAGES` (`modules/local/build_cell_images.nf`) is a partial
+exception to the shape above: its `publishDir` `mode:` is `'symlink'` or
+`'copy'` depending on `params.cell_images_hard_copy` (not the shared
+static `'copy'` every other module uses), and its script block is
+three phases rather than one -- `python -m
+fisseq_embeddings_pipeline.build_cell_images_enumerate`, then a
+`snakemake` invocation (the one step needing the `ops` conda env baked
+into the same image -- see the root `Dockerfile`), then `python -m
+fisseq_embeddings_pipeline.build_cell_images_table` -- but it uses the
+same `container "${params.container_image}"` as every other module, and
+two of its three phases do go through `python -m
+fisseq_embeddings_pipeline...` like everything else.
 
 ## Output directory layout
 

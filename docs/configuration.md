@@ -35,6 +35,15 @@ to three stages:
   `use_corrected`, `sequencing_reads_params`. This is the ONLY stage that
   touches `starcall-workflow`'s tree or invokes Snakemake -- see
   [Architecture](architecture.md#cell-images-buildcellimages-output-from-starcall-workflow).
+  `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` are all optional,
+  each auto-resolved when omitted: `starcall_workflow_dir`'s own
+  `config.yaml` (or `default-config.yaml`) is read for that key if
+  present -- the same project config `starcall-workflow`'s own
+  `workflow/Snakefile` would load -- else it falls back to a subdirectory
+  of `starcall_workflow_dir` (`phenotyping`/`segmentation`/`sequencing`,
+  matching `starcall-workflow`'s own documented default). Set one
+  explicitly only when that tree isn't colocated under
+  `starcall_workflow_dir` at all.
 - **`BUILD_DATASET`**: `window`, `shard_maxcount`, `barcode_col_name`/
   `aa_changes_col_name`/`edit_distance_col_name`. `cell_images_dir` (which
   directory to read) is injected automatically from `BUILD_CELL_IMAGES`'
@@ -63,8 +72,7 @@ time; see `params.yaml`'s own comment on this).
 | Key | Default | Stage(s) |
 | --- | --- | --- |
 | `pipeline_dir` | *(required)* | all |
-| `container_image` | `"fisseq-embeddings-pipeline:latest"` | all stages except `BUILD_CELL_IMAGES` |
-| `starcall_container_image` | `null` (required once any experiment is present) | `BUILD_CELL_IMAGES` -- a separate image from `container_image`, see [Architecture](architecture.md) |
+| `container_image` | `"fisseq-embeddings-pipeline:latest"` | all stages |
 | `cell_dino_checkpoint` | *(required)* | `EMBED_CELLS` |
 | `experiments` | `[]` (required non-empty) | `BUILD_CELL_IMAGES` (always), `BUILD_DATASET`, and `BUILD_CP_FEATURES` for any entry setting `cp_features: true` (list of per-experiment maps, each requiring `batch_stem`; see above) |
 | `window` | `224` | `BUILD_DATASET` (global default for any `experiments` entry that omits `window`; an entry's own `window` wins) |
@@ -134,6 +142,19 @@ ones (`QC_FILTER`, `FILTER_EMBEDDINGS`, etc.) -- simpler to build/publish/
 version as a single artifact than a GPU image plus a slimmer CPU image, at
 the cost of a larger pull for CPU-only processes. Worth splitting into two
 images later if that pull cost matters in practice; not required for v1.
+
+That same image also bakes in `starcall-workflow`'s own dependency stack
+(tensorflow/stardist/cellpose/snakemake) as a second, isolated conda env
+(`ops`), used only by `BUILD_CELL_IMAGES`' own `snakemake` invocation --
+rather than publishing that as yet another separate image. This grows the
+image meaningfully (two full ML stacks in one artifact, so every pull,
+even for CPU-only stages, is bigger than it would be with the two split
+apart) and means every build now also runs the `ops` env's install chain
+(conda/pip installs, a `starcall-workflow` git clone) -- worth knowing if a
+build ever gets noticeably slower or larger, but not something to work
+around: this is the direct cost of one image over two, chosen so
+`starcall-workflow`'s own environment gets the same CI build coverage as
+everything else (it previously had none at all).
 
 ## `BUILD_DATASET` shard sizing
 

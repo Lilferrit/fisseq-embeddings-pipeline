@@ -11,15 +11,6 @@
 # ── Required, no default (fail fast if unset) ──────────────────────────────
 pipeline_dir: null
 container_image: "fisseq-embeddings-pipeline:latest"
-# starcall_container_image is a SEPARATE image from container_image above --
-# BUILD_CELL_IMAGES is the only stage that invokes Snakemake against
-# starcall-workflow's own stack (tensorflow/stardist/cellpose/snakemake),
-# which is very likely incompatible with this repo's own torch/Cell-DINO
-# image. Required once any experiment is present. See
-# docker/starcall.Dockerfile -- built- and import-verified, but real
-# snakemake rule execution against real starcall-workflow data hasn't been
-# tested; smoke-test that specifically before first production use.
-starcall_container_image: null
 cell_dino_checkpoint: null
 experiments: []
 
@@ -34,7 +25,25 @@ experiments: []
 #   starcall-workflow's tree or invokes Snakemake -- see
 #   docs/architecture.md's Data contracts section. `starcall_workflow_dir`
 #   is per-experiment (not a shared global path) since Snakemake keeps
-#   invocation-scoped lock/log state in its own working directory.
+#   invocation-scoped lock/log state in its own working directory --
+#   nothing requires it to be named "starcall-workflow" or nested under a
+#   separate per-experiment folder of its own: it can just BE your
+#   experiment's root directory (e.g. `starcall_workflow_dir:
+#   /data/experiment1`, not `/data/experiment1/starcall-workflow`) --
+#   `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` default under
+#   whatever you point it at.
+#   `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` are all OPTIONAL
+#   -- each is auto-resolved when omitted: if `starcall_workflow_dir` has
+#   its own `config.yaml` (or `default-config.yaml`), that project's own
+#   value for the key is used (reading the actual config that governs
+#   where Snakemake writes/reads these trees -- correct even if a project
+#   remaps them to nonstandard names); otherwise it falls back to a
+#   subdirectory of `starcall_workflow_dir` (`phenotyping`/`segmentation`/
+#   `sequencing`), matching starcall-workflow's own documented default.
+#   Set one explicitly only when that tree isn't colocated under
+#   `starcall_workflow_dir` at all for your lab (e.g. `sequencing_dir` on
+#   separate storage) -- an explicit value always wins over both. See
+#   docs/architecture.md and the example below.
 #   `cell_images_hard_copy` (below) is this stage's one GLOBAL-only field
 #   -- not settable per experiment; see its own comment for why.
 # - BuildDatasetConfig (BUILD_DATASET): window, shard_maxcount,
@@ -51,8 +60,8 @@ experiments: []
 # back to the matching global default in "Shared per-experiment defaults"
 # below (`window`, `cellprofiler_pipeline`, `cellprofiler_cycle`), or
 # failing that, the relevant stage's own Hydra default (or raises an error
-# if that field has none, e.g. phenotyping_dir). `cell_images_hard_copy` is
-# the one exception -- it's global-only, ignored if set on an individual
+# if that field has none, e.g. starcall_workflow_dir). `cell_images_hard_copy`
+# is the one exception -- it's global-only, ignored if set on an individual
 # entry (see its own comment below).
 #
 # `grid_size` is optional -- when omitted, it's auto-detected per well by
@@ -84,20 +93,20 @@ experiments: []
 #
 # experiments:
 #   - batch_stem: experiment1
-#     starcall_workflow_dir: /data/experiment1/starcall-workflow
-#     phenotyping_dir: /data/experiment1/phenotyping
-#     segmentation_dir: /data/experiment1/segmentation
-#     sequencing_dir: /data/experiment1/sequencing
+#     starcall_workflow_dir: /data/experiment1   # IS this experiment's root -- no separate folder needed
+#     # phenotyping_dir/segmentation_dir/sequencing_dir omitted -- default
+#     # to /data/experiment1/{phenotyping,segmentation,sequencing}
 #     wells: [well1, well2]        # grid_size omitted -- auto-detected per well
 #     # window omitted -- falls back to the global `window` default below
 #     cp_features: true            # also run the CellProfiler-feature track for this experiment
 #     # cellprofiler_pipeline/cellprofiler_cycle omitted -- fall back to
 #     # the global defaults below
 #   - batch_stem: experiment2
-#     starcall_workflow_dir: /data/experiment2/starcall-workflow
-#     phenotyping_dir: /data/experiment2/phenotyping
-#     segmentation_dir: /data/experiment2/segmentation
-#     sequencing_dir: /data/experiment2/sequencing
+#     starcall_workflow_dir: /data/experiment2
+#     # sequencing data lives on separate storage for this experiment --
+#     # phenotyping_dir/segmentation_dir still default under
+#     # starcall_workflow_dir, only sequencing_dir is overridden
+#     sequencing_dir: /mnt/sequencer-storage/experiment2/sequencing
 #     wells: [well3]
 #     grid_size: 8                 # explicit override
 #     window: 180                  # per-experiment override of the global default
@@ -129,6 +138,14 @@ cell_images_hard_copy: false   # false = symlink BUILD_CELL_IMAGES' collected ti
 
 # ── Snakemake invocation (BUILD_CELL_IMAGES) ─────────────────────────────────
 snakemake_cores: 4             # --cores passed to snakemake within one BUILD_CELL_IMAGES task -- local parallelism inside that one invocation, distinct from Nextflow's own executor parallelism across experiments
+# The ops conda env's snakemake binary is NOT a params.yaml value -- it's
+# process.ext.snakemake_bin (nextflow.config), a process-config directive
+# rather than a pipeline param, specifically so -profile local can
+# actually override it back to bare `snakemake`. (-params-file params.yaml
+# -- this file -- outranks a profile's own `params.*` assignments in
+# Nextflow's config precedence, the same reason docker.enabled/
+# process.container, not params.*, are what -profile local flips below.)
+# See nextflow.config's process{} block and build_cell_images.nf.
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
 random_seed: 0

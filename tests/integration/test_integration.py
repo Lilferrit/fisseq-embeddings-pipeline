@@ -29,10 +29,15 @@ target is already up to date". This exercises BUILD_CELL_IMAGES' own real
 tile-enumeration, symlink-collection, and cell_table.parquet-building logic
 end to end through the real Nextflow/Hydra plumbing -- only the external
 `snakemake`/starcall-workflow dependency itself (unavailable in CI, and
-this repo's own docker/starcall.Dockerfile is unvalidated -- see
-docs/architecture.md) is faked, matching the same "fake the expensive/
-external dependency, exercise real control flow elsewhere" precedent
-EMBED_CELLS' checkpoint fixture already sets.
+the root Dockerfile's own `ops` conda env -- which real rule execution
+would run in -- is unvalidated -- see docs/architecture.md) is faked,
+matching the same "fake the expensive/external dependency, exercise real
+control flow elsewhere" precedent EMBED_CELLS' checkpoint fixture already
+sets. `-profile local` (which this test uses) has no `ops` env to point
+at at all, so `nextflow.config` overrides `process.ext.snakemake_bin`
+back to bare `snakemake`, resolved via the stub prepended onto PATH here
+-- the same override that lets every other stage run directly against
+this repo's own venv instead of a built image.
 """
 
 from __future__ import annotations
@@ -148,7 +153,7 @@ def _write_starcall_tile(
     aaChanges, matching `rule merge_final_tables`) are deliberately kept
     separate -- matching the real starcall-workflow data flow this
     pipeline now correctly follows (see dataset.py's module docstring, and
-    build_cell_images_glue.py's index-value join)."""
+    build_cell_images_table.py's index-value join)."""
     grid_dir = f"{well}_grid{grid_size}"
     pheno_tile_dir = phenotyping_dir / grid_dir / tile
     seq_tile_dir = sequencing_dir / grid_dir / tile
@@ -190,7 +195,7 @@ def _write_starcall_tile(
         # Row-position matched to the cell table (cell_ids here are already
         # 0..N-1 in the same order the cell table itself is written in, so
         # row position and cell_id value coincide -- see
-        # build_cell_images_glue.py's module docstring on the row-position
+        # build_cell_images_table.py's module docstring on the row-position
         # join for CellProfiler specifically).
         cp_table = pd.DataFrame(
             {"Cells_AreaShape_Area": [float(100 + cid) for cid in cell_ids]},
@@ -199,7 +204,12 @@ def _write_starcall_tile(
         cp_table.to_csv(pheno_tile_dir / f"cellprofiler_{_CELLPROFILER_PIPELINE}.csv")
 
 
-def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -> Path:
+def _write_synthetic_experiment(
+    exp_dir: Path,
+    include_grid_size: bool = True,
+    omit_data_dirs: bool = False,
+    project_config_dir_names: dict | None = None,
+) -> Path:
     """Write a tiny synthetic starcall-workflow-shaped tree (phenotyping_dir
     + sequencing_dir) under exp_dir, a stub `snakemake` executable, and a
     params.yaml (repo defaults + a single `experiments:` entry for this
@@ -211,18 +221,54 @@ def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -
     exercising BUILD_CELL_IMAGES' auto-detection of it from
     phenotyping_dir's own `well1_grid1` directory naming instead.
 
+    omit_data_dirs=True places phenotyping_dir/segmentation_dir/
+    sequencing_dir directly under starcall_workflow_dir (as
+    `starcall_workflow_dir/{phenotyping,segmentation,sequencing}`, matching
+    starcall-workflow's own default-config.yaml naming) and omits all
+    three keys from the experiment entry, exercising build_cell_images.nf's
+    default-to-subdirectory-of-starcall_workflow_dir behavior through the
+    real Nextflow/Groovy plumbing, not just by construction.
+
+    project_config_dir_names, e.g. {"phenotyping_dir": "custom_pheno"},
+    writes a starcall-workflow-shaped `config.yaml` under
+    starcall_workflow_dir mapping those keys to those (nonstandard)
+    subdirectory names, places the actual tile tree under them instead of
+    the plain defaults, and (like omit_data_dirs) omits the corresponding
+    keys from the experiment entry -- exercising
+    build_cell_images_enumerate.py's resolve_data_dir reading a project's
+    own config.yaml through the real Nextflow/Hydra plumbing, not just a
+    bare subdirectory-name default. Implies omit_data_dirs semantics for
+    any key it sets; segmentation_dir (unused by the stub) is left at its
+    plain default either way.
+
     The entry sets neither `window` nor `cellprofiler_pipeline` itself --
     both are set only via this params.yaml's top-level `window`/
     `cellprofiler_pipeline` globals instead, exercising
     workflows/embeddings.nf's per-experiment fallback-to-global-default
     wiring end to end (an entry's own value, if present, would still win
     -- see workflows/embeddings.nf)."""
-    phenotyping_dir = exp_dir / "phenotyping"
-    segmentation_dir = exp_dir / "segmentation"  # unused by the stub, created for realism
-    sequencing_dir = exp_dir / "sequencing"
+    project_config_dir_names = project_config_dir_names or {}
     starcall_workflow_dir = exp_dir / "starcall-workflow"
+
+    def _resolved_dir(key: str, plain_default: Path) -> Path:
+        if key in project_config_dir_names:
+            return starcall_workflow_dir / project_config_dir_names[key]
+        if omit_data_dirs:
+            return starcall_workflow_dir / plain_default.name
+        return plain_default
+
+    phenotyping_dir = _resolved_dir("phenotyping_dir", exp_dir / "phenotyping")
+    segmentation_dir = _resolved_dir("segmentation_dir", exp_dir / "segmentation")
+    sequencing_dir = _resolved_dir("sequencing_dir", exp_dir / "sequencing")
+
     (starcall_workflow_dir / "workflow").mkdir(parents=True, exist_ok=True)
     (starcall_workflow_dir / "workflow" / "Snakefile").write_text("# stub, never read\n")
+    if project_config_dir_names:
+        (starcall_workflow_dir / "config.yaml").write_text(
+            yaml.safe_dump(
+                {k: f"{v}/" for k, v in project_config_dir_names.items()}
+            )
+        )
     segmentation_dir.mkdir(parents=True, exist_ok=True)
     _write_stub_snakemake(exp_dir / "stub_bin")
 
@@ -257,18 +303,21 @@ def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -
 
     batch_config = {
         "starcall_workflow_dir": str(starcall_workflow_dir),
-        "phenotyping_dir": str(phenotyping_dir),
-        "segmentation_dir": str(segmentation_dir),
-        "sequencing_dir": str(sequencing_dir),
         "wells": ["well1"],
         "cp_features": True,
     }
+    for key, value in (
+        ("phenotyping_dir", phenotyping_dir),
+        ("segmentation_dir", segmentation_dir),
+        ("sequencing_dir", sequencing_dir),
+    ):
+        if not omit_data_dirs and key not in project_config_dir_names:
+            batch_config[key] = str(value)
     if include_grid_size:
         batch_config["grid_size"] = 1
     params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
     params["window"] = _WINDOW
     params["cellprofiler_pipeline"] = _CELLPROFILER_PIPELINE
-    params["starcall_container_image"] = "unused-under-profile-local"
     params["snakemake_cores"] = 1
     params["experiments"] = [{"batch_stem": "batch1", **batch_config}]
     with open(exp_dir / "params.yaml", "w") as f:
@@ -403,8 +452,9 @@ def test_aggregate_and_ovwt_outputs_exist(pipeline_outputs):
 def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
     """grid_size can be omitted from an experiment entry entirely -- proves
     auto-detection works through the real Nextflow/Hydra override
-    plumbing, not just in-process (see tests/unit/test_build_cell_images_glue.py
-    for the in-process coverage of the detection logic itself)."""
+    plumbing, not just in-process (see
+    tests/unit/test_build_cell_images_enumerate.py for the in-process
+    coverage of the detection logic itself)."""
     if shutil.which("nextflow") is None:
         pytest.skip("nextflow not on PATH -- see this module's docstring")
 
@@ -419,6 +469,62 @@ def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
 
     metadata = pl.read_parquet(exp_dir / "dataset" / "batch1" / "metadata.parquet")
     assert metadata.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
+
+
+def test_pipeline_defaults_data_dirs_under_starcall_workflow_dir_when_omitted(
+    tmp_path_factory,
+):
+    """phenotyping_dir/segmentation_dir/sequencing_dir can be omitted from
+    an experiment entry entirely -- proves build_cell_images_enumerate.py's
+    resolve_data_dir default to a subdirectory of starcall_workflow_dir
+    (matching starcall-workflow's own default-config.yaml naming, when no
+    project config.yaml exists to say otherwise) works through the real
+    Nextflow/Hydra plumbing, not just by construction."""
+    if shutil.which("nextflow") is None:
+        pytest.skip("nextflow not on PATH -- see this module's docstring")
+
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_default_dirs")
+    _write_synthetic_experiment(exp_dir, omit_data_dirs=True)
+
+    checkpoint_path = tmp_path_factory.mktemp("weights_default_dirs") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    result = _run_nextflow(exp_dir, checkpoint_path)
+    assert result.returncode == 0, result.stderr
+
+
+def test_pipeline_reads_data_dirs_from_project_config_yaml_when_nonstandard(
+    tmp_path_factory,
+):
+    """A starcall-workflow project's own config.yaml can remap
+    phenotyping_dir/sequencing_dir to nonstandard subdirectory names --
+    proves resolve_data_dir reads that real project config (not just a
+    fixed 'phenotyping'/'sequencing' guess) through the real Nextflow/Hydra
+    plumbing, the actual case this behavior exists for ("handle cases
+    where the output looks different for whatever reason")."""
+    if shutil.which("nextflow") is None:
+        pytest.skip("nextflow not on PATH -- see this module's docstring")
+
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_custom_dirs")
+    _write_synthetic_experiment(
+        exp_dir,
+        project_config_dir_names={
+            "phenotyping_dir": "custom_pheno",
+            "sequencing_dir": "custom_seq",
+        },
+    )
+
+    checkpoint_path = tmp_path_factory.mktemp("weights_custom_dirs") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    result = _run_nextflow(exp_dir, checkpoint_path)
+    assert result.returncode == 0, result.stderr
+
+    cell_table = pl.read_parquet(exp_dir / "cell_images" / "batch1" / "cell_table.parquet")
+    assert cell_table.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
+
+    cell_table = pl.read_parquet(exp_dir / "cell_images" / "batch1" / "cell_table.parquet")
+    assert cell_table.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
 
 
 def test_fails_fast_when_pipeline_dir_missing(tmp_path):

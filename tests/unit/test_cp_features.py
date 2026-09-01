@@ -4,8 +4,9 @@ Covers build_cp_features() -- a flat read + column-select against
 BUILD_CELL_IMAGES' cell_table.parquet (cp_*-prefixed CellProfiler columns
 stripped back to their bare names), empty-table handling, and the Hydra
 main() CLI end-to-end. No tile/image/CSV handling at this layer any more --
-that all now lives in BUILD_CELL_IMAGES (modules/local/
-build_cell_images_glue.py), covered by tests/unit/test_build_cell_images_glue.py.
+that all now lives in BUILD_CELL_IMAGES
+(src/fisseq_embeddings_pipeline/build_cell_images_table.py), covered by
+tests/unit/test_build_cell_images_table.py.
 """
 
 from __future__ import annotations

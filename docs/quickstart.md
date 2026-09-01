@@ -10,15 +10,20 @@ a `--pipeline_dir` directory holding that experiment's raw data:
 window: 224   # must match your Cell-DINO checkpoint's crop size -- global
               # default, used by every experiment below that doesn't set
               # its own `window`
-starcall_container_image: "starcall-workflow:latest"  # required once any
-                                                        # experiment is present
 
 experiments:
   - batch_stem: experiment1
-    starcall_workflow_dir: /data/experiment1/starcall-workflow  # a checkout Snakemake can run against
-    phenotyping_dir: /data/experiment1/phenotyping   # starcall-workflow output root
-    segmentation_dir: /data/experiment1/segmentation
-    sequencing_dir: /data/experiment1/sequencing
+    starcall_workflow_dir: /data/experiment1   # a checkout Snakemake can run against --
+                                                # IS this experiment's root, no separate
+                                                # folder needed (nothing requires it to be
+                                                # named "starcall-workflow")
+    # phenotyping_dir/segmentation_dir/sequencing_dir omitted -- each is
+    # auto-resolved: starcall_workflow_dir's own config.yaml (or
+    # default-config.yaml) is consulted first if present, else it falls
+    # back to a subdirectory of starcall_workflow_dir
+    # (phenotyping/segmentation/sequencing); set one explicitly only if
+    # your lab's data for that tree isn't colocated under
+    # starcall_workflow_dir at all.
     wells: [well1, well2]
     # grid_size omitted -- auto-detected per well from phenotyping_dir's
     # own {well}_grid<N> directory naming; set it explicitly to override.

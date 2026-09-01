@@ -193,8 +193,8 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     table's own index into the reads table unchanged, per-tile.
     CellProfiler's own CSV is still joined by row position, same
     convention as before, just relocated into `BUILD_CELL_IMAGES`'
-    `build_cell_images_glue.py` and prefixed `cp_*` on the way in (stripped
-    back off by `BUILD_CP_FEATURES` on the way out).
+    `build_cell_images_table.py` and prefixed `cp_*` on the way in
+    (stripped back off by `BUILD_CP_FEATURES` on the way out).
 17. **`BUILD_CELL_IMAGES` does NOT force `rule make_cell_images`'s
     pre-cropped output to exist**, even though that would have been the
     more literal reading of "collect this experiment's cell images."
@@ -214,19 +214,17 @@ fisseq-embeddings-pipeline/
   main.nf
   nextflow.config                 # executor/profile/container settings only
   params.yaml                     # every default pipeline parameter
-  Dockerfile                      # this repo's own image (torch/Cell-DINO/polars)
-  docker/
-    starcall.Dockerfile           # SEPARATE image BUILD_CELL_IMAGES runs in
-                                   # (starcall-workflow's own Snakemake/
-                                   # tensorflow/stardist/cellpose stack) --
+  Dockerfile                      # this repo's own image (torch/Cell-DINO/polars),
+                                   # plus starcall-workflow's own Snakemake/
+                                   # tensorflow/stardist/cellpose stack as a
+                                   # second, isolated `ops` conda env --
                                    # build- and import-verified, real rule
-                                   # execution not yet tested, see its own
-                                   # header comment
+                                   # execution not yet tested, see the
+                                   # Dockerfile's own comments
   workflows/
     embeddings.nf                 # the one pipeline_mode this repo has
   modules/local/
     build_cell_images.nf          # the only stage touching starcall-workflow's tree
-    build_cell_images_glue.py     # standalone glue (no fisseq_embeddings_pipeline import)
     build_dataset.nf
     qc_filter.nf
     embed_cells.nf
@@ -246,6 +244,8 @@ fisseq-embeddings-pipeline/
       app.py                      # AppConfig -- vendored, + random_seed
       input.py                    # InputConfig, LabeledInputConfig -- vendored
     dataset.py                    # BUILD_DATASET
+    build_cell_images_enumerate.py # BUILD_CELL_IMAGES phase 1 (grid/tile discovery)
+    build_cell_images_table.py    # BUILD_CELL_IMAGES phase 3 (cell_table.parquet join)
     qcfilter.py                   # QC_FILTER -- vendored, ~unchanged
     embed.py                      # EMBED_CELLS -- Cell-DINO wrapper
     filter.py                     # FILTER_EMBEDDINGS
@@ -300,7 +300,7 @@ This pipeline tracks `starcall-workflow`'s `origin/devel` branch, not
 ### Cell Images (`BUILD_CELL_IMAGES` output, from `starcall-workflow`)
 
 `BUILD_CELL_IMAGES` (`modules/local/build_cell_images.nf`,
-`build_cell_images_glue.py`) is the only stage that reads
+`build_cell_images_enumerate.py`, `build_cell_images_table.py`) is the only stage that reads
 `starcall-workflow`'s tree directly or invokes Snakemake. For every tile of
 every configured well, it forces three real `starcall-workflow` outputs to
 exist (via one `snakemake <targets>` invocation per experiment against the
@@ -344,7 +344,7 @@ see architecture decision 17 above. `BUILD_DATASET` still does its own
 per-cell windowed cropping from the whole-tile image (`_crop_cell`, ported
 from `make_cell_images`'s own algorithm).
 
-`build_cell_images_glue.py` then joins, per tile: the segmentation table
+`build_cell_images_table.py` then joins, per tile: the segmentation table
 to the sequencing table **by index value** (both are the same
 `RangeIndex`, restarting at 1 per tile -- verified via
 `combine_cell_reads`/`merge_final_tables`'s source; see architecture
@@ -401,7 +401,7 @@ names are unchanged: one column per CellProfiler measurement, no `meta_*`
 prefix). The row-position join between each tile's cell table and its
 CellProfiler CSV -- CellProfiler's own `ObjectNumber` numbering has no
 shared index with the segmentation table's `orig_index`/`RangeIndex` --
-now happens once, inside `BUILD_CELL_IMAGES`' `build_cell_images_glue.py`,
+now happens once, inside `BUILD_CELL_IMAGES`' `build_cell_images_table.py`,
 not per-consumer.
 
 ## `EMBED_CELLS` / Cell-DINO inference internals

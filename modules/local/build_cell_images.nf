@@ -15,6 +15,20 @@
 // starcall-workflow checkout risks lock contention / metadata races. Each
 // experiment must have (or be given) its own checkout/working directory.
 //
+// phenotyping_dir/segmentation_dir/sequencing_dir are all OPTIONAL, and
+// their resolution is entirely phase 1's job now (see
+// build_cell_images_enumerate.py's resolve_data_dir): an explicit value
+// always wins; otherwise starcall_workflow_dir's own project config
+// (config.yaml, or default-config.yaml if that's absent -- the same file
+// workflow/Snakefile itself would load) is consulted for that key, so a
+// project that remaps these paths still resolves correctly; only then does
+// it fall back to a subdirectory of starcall_workflow_dir
+// ('phenotyping'/'segmentation'/'sequencing', starcall-workflow's own
+// documented default). This script: block does none of that resolution
+// itself any more -- it reads phase 1's resolved_dirs.env (below) instead,
+// so there's exactly one place (Python, unit-tested) that knows how to
+// find these three directories.
+//
 // Does NOT force rule make_cell_images's pre-cropped output to exist --
 // dataset.py's own _crop_cell already ports that rule's crop algorithm and
 // deliberately avoids depending on make_cell_images itself, because that
@@ -26,41 +40,53 @@
 // columns dataset.py currently reads from the wrong file. See
 // docs/architecture.md's Data contracts section for the full rationale.
 //
-// Three-phase script, delegating everything but the Snakemake invocation
-// and the plain-file collection loop to build_cell_images_glue.py (a
-// standalone script alongside this module -- deliberately not importing
-// fisseq_embeddings_pipeline, since this is the one stage whose Python
-// runs inside params.starcall_container_image, not this repo's own image):
-//   1. `glue.py enumerate` -- resolves each well's grid size, enumerates
-//      existing tiles (mirrors dataset.py's discover_tiles glob -- tile
-//      existence can't be known before Snakemake runs, but the *grid*
-//      already exists on disk today, the same precondition discover_tiles
-//      already assumed before this stage existed), and writes targets.txt
-//      (Snakemake target paths), tiles_manifest.csv (drives step 3), and
-//      symlinks.txt (drives step 2's collection loop).
-//   2. A single `snakemake <targets>` invocation against the REAL,
-//      unredirected phenotyping_dir/segmentation_dir/sequencing_dir (so
-//      Snakemake's own mtime caching reuses whatever's already computed --
-//      see decision 3 in the implementation plan for why this stage
-//      doesn't instead redirect phenotyping_dir to force a from-scratch
-//      rebuild every run), then a plain symlink loop over symlinks.txt to
-//      collect just the two per-tile image files (pt_tif, mask_tif -- not
-//      the CSVs, which step 3 reads directly from their real locations)
-//      into this task's own working directory, preserving the
-//      {well}_grid{N}/tile{x}x{y}y/ substructure. publishDir's own `mode:`
-//      (below) then decides whether these become real copies or another
-//      layer of symlinks when published.
-//   3. `glue.py build-table` -- joins each tile's segmentation-side
-//      {segtype}.csv to sequencing_dir's {segtype}_reads{params}.csv (by
-//      index value -- both are provably the same RangeIndex per tile, see
-//      the module docstring on combine_cell_reads/merge_final_tables) and,
-//      if cp_features, the tile's CellProfiler CSV (by row position,
-//      renamed cp_<name>), into one cell_table.parquet covering the whole
+// Three-phase script. Phases 1 and 3 run in this repo's own installed
+// package (`params.container_image` -- the same one every other process
+// uses, since the root Dockerfile now bakes in starcall-workflow's own
+// `ops` conda env as a second, isolated environment rather than as a
+// separate image; see that Dockerfile's own comments). Phase 2 -- the one
+// step that actually needs `ops` (tensorflow/stardist/cellpose/snakemake)
+// -- invokes that env's snakemake via `task.ext.snakemake_bin` (its
+// absolute path by default, nextflow.config) rather than via PATH, so
+// bare `python` here always resolves to this repo's own venv, never
+// ambiguously to `ops`' Python 3.10 (`-profile local` overrides
+// `ext.snakemake_bin` back to bare `snakemake`, since that profile has no
+// `ops` env at all -- see nextflow.config):
+//   1. `python -m fisseq_embeddings_pipeline.build_cell_images_enumerate`
+//      -- resolves phenotyping_dir/segmentation_dir/sequencing_dir
+//      (writing resolved_dirs.env), resolves each well's grid size,
+//      enumerates existing tiles (mirrors dataset.py's discover_tiles
+//      glob -- tile existence can't be known before Snakemake runs, but
+//      the *grid* already exists on disk today, the same precondition
+//      discover_tiles already assumed before this stage existed), and
+//      writes targets.txt (Snakemake target paths), tiles_manifest.csv
+//      (drives phase 3), and symlinks.txt (drives phase 2's collection
+//      loop).
+//   2. A single `snakemake <targets>` invocation (via
+//      task.ext.snakemake_bin) against the REAL, unredirected
+//      phenotyping_dir/segmentation_dir/sequencing_dir resolved_dirs.env
+//      names (so Snakemake's own mtime caching reuses whatever's already
+//      computed -- see decision 3 in the implementation plan for why this
+//      stage doesn't instead redirect phenotyping_dir to force a
+//      from-scratch rebuild every run), then a plain symlink loop over
+//      symlinks.txt to collect just the two per-tile image files (pt_tif,
+//      mask_tif -- not the CSVs, which phase 3 reads directly from their
+//      real locations) into this task's own working directory, preserving
+//      the {well}_grid{N}/tile{x}x{y}y/ substructure. publishDir's own
+//      `mode:` (below) then decides whether these become real copies or
+//      another layer of symlinks when published.
+//   3. `python -m fisseq_embeddings_pipeline.build_cell_images_table` --
+//      joins each tile's segmentation-side {segtype}.csv to
+//      sequencing_dir's {segtype}_reads{params}.csv (by index value --
+//      both are provably the same RangeIndex per tile, see the module
+//      docstring on combine_cell_reads/merge_final_tables) and, if
+//      cp_features, the tile's CellProfiler CSV (by row position, renamed
+//      cp_<name>), into one cell_table.parquet covering the whole
 //      experiment -- the ONE complete, self-sufficient cell table
 //      BUILD_DATASET/BUILD_CP_FEATURES need; neither reads starcall-
 //      workflow's tree directly any more.
 //
-// An alternative was considered and rejected for step 2: overriding
+// An alternative was considered and rejected for phase 2: overriding
 // `--config phenotyping_dir=<this task's own directory>` would make
 // Snakemake regenerate the whole chain (including make_cell_images'
 // upstream temp intermediates) fresh, directly into this task's own
@@ -74,7 +100,7 @@
 
 process BUILD_CELL_IMAGES {
     errorStrategy 'ignore'
-    container "${params.starcall_container_image}"
+    container "${params.container_image}"
     // symlink, not copy -- the one deliberate default deviation from every
     // other module's `mode: 'copy'` convention. Governed by the GLOBAL
     // params.cell_images_hard_copy only (params.yaml's "Shared per-
@@ -99,47 +125,49 @@ process BUILD_CELL_IMAGES {
     tuple val(batch_stem), path("cell_table.parquet"), path("*_grid*", type: 'dir')
 
     script:
-    def wells = batch_config.wells.join(',')
-    def phenotyping_dir = batch_config.phenotyping_dir
-    def segmentation_dir = batch_config.segmentation_dir
-    def sequencing_dir = batch_config.sequencing_dir
+    // starcall_workflow_dir is the one field phase 2's --snakefile/
+    // --directory flags need as a literal Groovy value (it's not written
+    // to resolved_dirs.env -- only the three *_dir fields it defaults
+    // are). Everything else (including phenotyping_dir/segmentation_dir/
+    // sequencing_dir themselves, when an entry sets them explicitly) is
+    // threaded straight through to phase 1 via the same List-vs-scalar
+    // Hydra-override idiom as build_dataset.nf/build_cp_features.nf --
+    // no per-key exclusion needed any more, since
+    // BuildCellImagesEnumerateConfig now has a field for every key
+    // batch_config can carry.
     def starcall_workflow_dir = batch_config.starcall_workflow_dir
-    def grid_size_arg = (batch_config.grid_size != null) ? "--grid-size ${batch_config.grid_size}" : ''
-    def segmentation_type = batch_config.segmentation_type ?: 'cells'
-    def use_corrected_arg = batch_config.use_corrected ? '--use-corrected' : ''
-    def reads_params = batch_config.sequencing_reads_params ?: ''
-    def cp_features = batch_config.cp_features ?: false
-    def cp_features_arg = cp_features ? '--cp-features' : ''
-    def cellprofiler_cycle = batch_config.cellprofiler_cycle ?: ''
-    def cellprofiler_pipeline = batch_config.cellprofiler_pipeline ?: ''
+    def enumerate_overrides = batch_config.collect { key, value ->
+        (value instanceof List) ? "'${key}=[${value.join(",")}]'" : "${key}=${value}"
+    }.join(' \\\n        ')
     """
     set -euo pipefail
 
-    python3 "${moduleDir}/build_cell_images_glue.py" enumerate \\
-        --phenotyping-dir "${phenotyping_dir}" \\
-        --sequencing-dir "${sequencing_dir}" \\
-        --wells "${wells}" \\
-        ${grid_size_arg} \\
-        --segmentation-type "${segmentation_type}" \\
-        ${use_corrected_arg} \\
-        --sequencing-reads-params "${reads_params}" \\
-        ${cp_features_arg} \\
-        --cellprofiler-cycle "${cellprofiler_cycle}" \\
-        --cellprofiler-pipeline "${cellprofiler_pipeline}" \\
-        --targets-out targets.txt \\
-        --manifest-out tiles_manifest.csv \\
-        --symlinks-out symlinks.txt
+    python -m fisseq_embeddings_pipeline.build_cell_images_enumerate \\
+        output_dir=. \\
+        ${enumerate_overrides} \\
+        random_seed=${params.random_seed}
+
+    # phenotyping_dir/segmentation_dir/sequencing_dir, fully resolved by
+    # phase 1 above (resolve_data_dir) -- not recomputed here.
+    source resolved_dirs.env
 
     # Snakemake resolves stitch_tile_pt/stitch_tile_segmentation's temp-
     # wrapped intermediates within this one invocation; only the requested,
     # non-temp final targets persist under phenotyping_dir/sequencing_dir.
-    snakemake \\
+    # task.ext.snakemake_bin (nextflow.config): the ops conda env's
+    # absolute path by default (not bare `snakemake` -- that env is
+    # deliberately NOT on PATH, see the root Dockerfile, so bare
+    # `python`/`snakemake` never ambiguously resolves into it); -profile
+    # local overrides this back to bare `snakemake`, since that profile
+    # has no ops env at all to point at. A process directive (`ext`), not
+    # params.yaml -- see that file's own comment on why.
+    ${task.ext.snakemake_bin} \\
         --snakefile "${starcall_workflow_dir}/workflow/Snakefile" \\
         --directory "${starcall_workflow_dir}" \\
         --cores ${params.snakemake_cores} \\
         --use-conda --conda-frontend conda \\
         --rerun-triggers mtime \\
-        --config phenotyping_dir="${phenotyping_dir}" segmentation_dir="${segmentation_dir}" sequencing_dir="${sequencing_dir}" \\
+        --config phenotyping_dir="\$phenotyping_dir" segmentation_dir="\$segmentation_dir" sequencing_dir="\$sequencing_dir" \\
         \$(cat targets.txt)
 
     while IFS=\$'\\t' read -r rel_path abs_path; do
@@ -147,8 +175,8 @@ process BUILD_CELL_IMAGES {
         ln -s "\$abs_path" "\$rel_path"
     done < symlinks.txt
 
-    python3 "${moduleDir}/build_cell_images_glue.py" build-table \\
-        --manifest tiles_manifest.csv \\
-        --output cell_table.parquet
+    python -m fisseq_embeddings_pipeline.build_cell_images_table \\
+        output_dir=. \\
+        random_seed=${params.random_seed}
     """
 }
