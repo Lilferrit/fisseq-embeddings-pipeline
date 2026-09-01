@@ -39,8 +39,8 @@ curl -s https://get.nextflow.io | bash
 
 ## Docker
 
-Every Nextflow process runs inside a single container image, built from
-the repo-root `Dockerfile`:
+Every Nextflow process, including `BUILD_CELL_IMAGES`, runs inside a
+single container image, built from the repo-root `Dockerfile`:
 
 ```bash
 docker build -t fisseq-embeddings-pipeline:latest .
@@ -52,6 +52,17 @@ override) at wherever you publish it -- see
 the registry/tagging convention this repo's CI uses. A `-profile local`
 run (see [Nextflow Workflow](nextflow.md#profiles)) needs no Docker image
 at all -- every process runs directly against your own `uv`-managed venv.
+
+`BUILD_CELL_IMAGES` invokes `starcall-workflow`'s own Snakemake pipeline,
+whose dependency stack (tensorflow/stardist/cellpose) is kept isolated
+from this repo's own torch/Cell-DINO/polars stack via a second, dedicated
+conda env (`ops`) baked into this same image, rather than a separate
+container -- see the `Dockerfile`'s own comments for how. That env has
+been built and its dependencies confirmed importable at the pinned
+versions (see the `Dockerfile`'s own comments for exactly what that
+build-verified) -- but **no real `snakemake` rule execution against real
+starcall-workflow data has been tested**; smoke-test that specifically
+before relying on it in production.
 
 ## Development environment
 

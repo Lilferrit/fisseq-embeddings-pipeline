@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Sequence, Tuple
 
 import numpy as np
-import pandas as pd
 import polars as pl
 import pytest
 import tifffile
@@ -17,7 +16,6 @@ import webdataset as wds
 from fisseq_embeddings_pipeline.dataset import (
     BuildDatasetConfig,
     _crop_cell,
-    _resolve_grid_size,
     discover_tiles,
     main,
     write_dataset_shards,
@@ -32,26 +30,48 @@ from fisseq_embeddings_pipeline.utils.constants import (
 # discover_tiles
 # ---------------------------------------------------------------------------
 
-
-def _make_tile_dir(
-    phenotyping_dir: Path, well: str, grid_size: int, x: int, y: int
-) -> Path:
-    tile_dir = phenotyping_dir / f"{well}_grid{grid_size}" / f"tile{x}x{y}y"
-    tile_dir.mkdir(parents=True)
-    return tile_dir
+NUM_CHANNELS = 3
+TILE_SIZE = 20
+WINDOW = 8
 
 
-def _cfg(
-    phenotyping_dir: Path, wells: list[str], grid_size: int = 4
-) -> BuildDatasetConfig:
-    return BuildDatasetConfig(
+def _cfg(cell_images_dir: Path, **overrides) -> BuildDatasetConfig:
+    defaults = dict(
         output_dir="/tmp/out",
-        phenotyping_dir=str(phenotyping_dir),
-        wells=wells,
-        grid_size=grid_size,
-        window=16,
+        cell_images_dir=str(cell_images_dir),
+        window=WINDOW,
         batch_stem="test_batch",
     )
+    defaults.update(overrides)
+    return BuildDatasetConfig(**defaults)
+
+
+def _make_tile_dir(
+    cell_images_dir: Path,
+    well: str,
+    grid_size: int,
+    x: int,
+    y: int,
+    use_corrected: bool = False,
+    segmentation_type: str = "cells",
+    size: int = TILE_SIZE,
+) -> Path:
+    """A tile directory shaped like BUILD_CELL_IMAGES' own output: just the
+    two whole-tile image files (no CSV -- metadata now lives in a shared
+    cell_table.parquet, written separately -- see _write_cell_table)."""
+    tile_dir = cell_images_dir / f"{well}_grid{grid_size}" / f"tile{x}x{y}y"
+    tile_dir.mkdir(parents=True)
+    pt_name = "corrected_pt.tif" if use_corrected else "raw_pt.tif"
+    tifffile.imwrite(
+        tile_dir / pt_name,
+        np.zeros((NUM_CHANNELS, size, size), dtype=np.int32),
+        photometric="minisblack",
+    )
+    tifffile.imwrite(
+        tile_dir / f"{segmentation_type}_mask.tif",
+        np.zeros((size, size), dtype=np.int32),
+    )
+    return tile_dir
 
 
 def test_discover_tiles_finds_every_tile_across_wells(tmp_path: Path):
@@ -59,7 +79,7 @@ def test_discover_tiles_finds_every_tile_across_wells(tmp_path: Path):
     _make_tile_dir(tmp_path, "well1", 4, 0, 1)
     _make_tile_dir(tmp_path, "well2", 4, 0, 0)
 
-    cfg = _cfg(tmp_path, ["well1", "well2"])
+    cfg = _cfg(tmp_path)
     manifest = discover_tiles(cfg)
 
     assert len(manifest) == 3
@@ -69,30 +89,19 @@ def test_discover_tiles_finds_every_tile_across_wells(tmp_path: Path):
 
 def test_discover_tiles_builds_expected_file_paths(tmp_path: Path):
     tile_dir = _make_tile_dir(tmp_path, "well1", 4, 2, 3)
-    cfg = _cfg(tmp_path, ["well1"])
-    row = discover_tiles(cfg).iloc[0]
+    cfg = _cfg(tmp_path)
+    row = discover_tiles(cfg).row(0, named=True)
 
-    assert row["cell_table_csv"] == f"{tile_dir}/cells.csv"
     assert row["pt_tif"] == f"{tile_dir}/raw_pt.tif"
     assert row["mask_tif"] == f"{tile_dir}/cells_mask.tif"
 
 
-def test_discover_tiles_uses_corrected_pt_when_configured(tmp_path: Path):
-    tile_dir = _make_tile_dir(tmp_path, "well1", 4, 2, 3)
-    cfg = _cfg(tmp_path, ["well1"])
-    cfg.use_corrected = True
-    row = discover_tiles(cfg).iloc[0]
+def test_discover_tiles_finds_corrected_pt_when_present(tmp_path: Path):
+    tile_dir = _make_tile_dir(tmp_path, "well1", 4, 2, 3, use_corrected=True)
+    cfg = _cfg(tmp_path)
+    row = discover_tiles(cfg).row(0, named=True)
 
     assert row["pt_tif"] == f"{tile_dir}/corrected_pt.tif"
-
-
-def test_discover_tiles_ignores_wells_with_no_tiles(tmp_path: Path):
-    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
-    cfg = _cfg(tmp_path, ["well1", "well_missing"])
-    manifest = discover_tiles(cfg)
-
-    assert len(manifest) == 1
-    assert manifest.iloc[0]["well"] == "well1"
 
 
 def test_discover_tiles_sorted_deterministically_numeric_not_lexical(tmp_path: Path):
@@ -101,10 +110,10 @@ def test_discover_tiles_sorted_deterministically_numeric_not_lexical(tmp_path: P
     for x in [0, 1, 2, 10, 11, 3]:
         _make_tile_dir(tmp_path, "well1", 4, x, 0)
 
-    cfg = _cfg(tmp_path, ["well1"])
+    cfg = _cfg(tmp_path)
     manifest = discover_tiles(cfg)
 
-    assert manifest["tile"].tolist() == [
+    assert manifest["tile"].to_list() == [
         "tile0x0y",
         "tile1x0y",
         "tile2x0y",
@@ -119,7 +128,7 @@ def test_discover_tiles_sorted_by_well_then_tile(tmp_path: Path):
     _make_tile_dir(tmp_path, "well_a", 4, 1, 0)
     _make_tile_dir(tmp_path, "well_a", 4, 0, 0)
 
-    cfg = _cfg(tmp_path, ["well_a", "well_b"])
+    cfg = _cfg(tmp_path)
     manifest = discover_tiles(cfg)
 
     assert list(zip(manifest["well"], manifest["tile"])) == [
@@ -129,87 +138,36 @@ def test_discover_tiles_sorted_by_well_then_tile(tmp_path: Path):
     ]
 
 
-def test_discover_tiles_empty_when_phenotyping_dir_has_no_matching_tiles(
-    tmp_path: Path,
-):
-    cfg = _cfg(tmp_path, ["well1"])
+def test_discover_tiles_empty_when_cell_images_dir_has_no_tiles(tmp_path: Path):
+    cfg = _cfg(tmp_path)
     manifest = discover_tiles(cfg)
     assert len(manifest) == 0
-    assert list(manifest.columns) == [
-        "well",
-        "tile",
-        "cell_table_csv",
-        "pt_tif",
-        "mask_tif",
-    ]
+    assert manifest.columns == ["well", "tile", "pt_tif", "mask_tif"]
 
 
-# ---------------------------------------------------------------------------
-# grid_size auto-detection
-# ---------------------------------------------------------------------------
+def test_discover_tiles_skips_tile_dir_missing_pt_or_mask(tmp_path: Path):
+    """A tile directory that exists but is missing one of the two expected
+    image files (e.g. a partially-published BUILD_CELL_IMAGES task) is
+    skipped rather than raising -- errorStrategy 'ignore' upstream already
+    means a whole experiment can be missing; a half-written tile shouldn't
+    crash discovery either."""
+    incomplete = tmp_path / "well1_grid4" / "tile0x0y"
+    incomplete.mkdir(parents=True)
+    tifffile.imwrite(
+        incomplete / "raw_pt.tif",
+        np.zeros((3, 4, 4), dtype=np.int32),
+        photometric="minisblack",
+    )
+    # No *_mask.tif written.
 
-
-def test_resolve_grid_size_returns_explicit_value_without_scanning(tmp_path: Path):
-    """An explicit grid_size is used as-is, even if it disagrees with (or no
-    {well}_grid<N> directory exists to confirm) the filesystem."""
-    assert _resolve_grid_size(str(tmp_path), "well1", 4) == 4
-
-
-def test_resolve_grid_size_auto_detects_single_matching_directory(tmp_path: Path):
-    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
-    assert _resolve_grid_size(str(tmp_path), "well1", None) == 4
-
-
-def test_resolve_grid_size_raises_when_no_matching_directory(tmp_path: Path):
-    with pytest.raises(ValueError, match="Could not auto-detect grid_size"):
-        _resolve_grid_size(str(tmp_path), "well1", None)
-
-
-def test_resolve_grid_size_raises_when_multiple_grid_sizes_found(tmp_path: Path):
-    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
-    _make_tile_dir(tmp_path, "well1", 8, 0, 0)
-    with pytest.raises(ValueError, match="multiple candidate directories"):
-        _resolve_grid_size(str(tmp_path), "well1", None)
-
-
-def test_discover_tiles_auto_detects_grid_size_when_omitted(tmp_path: Path):
-    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
-    cfg = _cfg(tmp_path, ["well1"], grid_size=None)
+    cfg = _cfg(tmp_path)
     manifest = discover_tiles(cfg)
-
-    assert len(manifest) == 1
-    assert manifest.iloc[0]["tile"] == "tile0x0y"
-
-
-def test_discover_tiles_auto_detects_different_grid_size_per_well(tmp_path: Path):
-    """Wells resolve their grid size independently -- one experiment can
-    mix wells with genuinely different grid sizes when auto-detecting."""
-    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
-    _make_tile_dir(tmp_path, "well2", 8, 0, 0)
-    cfg = _cfg(tmp_path, ["well1", "well2"], grid_size=None)
-    manifest = discover_tiles(cfg)
-
-    assert len(manifest) == 2
-    assert set(manifest["well"]) == {"well1", "well2"}
-
-
-def test_discover_tiles_explicit_grid_size_overrides_auto_detection(tmp_path: Path):
-    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
-    _make_tile_dir(tmp_path, "well1", 8, 1, 1)
-    cfg = _cfg(tmp_path, ["well1"], grid_size=8)
-    manifest = discover_tiles(cfg)
-
-    assert len(manifest) == 1
-    assert manifest.iloc[0]["tile"] == "tile1x1y"
+    assert len(manifest) == 0
 
 
 # ---------------------------------------------------------------------------
 # _crop_cell -- the ported make_cell_images crop-window algorithm
 # ---------------------------------------------------------------------------
-
-NUM_CHANNELS = 3
-TILE_SIZE = 20
-WINDOW = 8
 
 
 def _make_deterministic_image(cycles: int, channels: int, size: int) -> np.ndarray:
@@ -284,50 +242,66 @@ def test_crop_cell_matches_independent_pad_based_oracle(cx: int, cy: int):
 # ---------------------------------------------------------------------------
 
 
+def _write_cell_table(cell_images_dir: Path, rows: list[dict]) -> None:
+    """cell_table.parquet, shaped like BUILD_CELL_IMAGES' own output --
+    tile_cell_index/well/tile/crop_index plus bbox_x1/y1/x2/y2 and whatever
+    genotype columns each row carries."""
+    pl.DataFrame(rows).write_parquet(cell_images_dir / "cell_table.parquet")
+
+
+def _row(
+    well: str,
+    tile: str,
+    tile_cell_index: int,
+    crop_index: int,
+    cx: int,
+    cy: int,
+    barcode: str = "bc",
+    aa_changes: str = "WT",
+    edit_distance: int = 0,
+) -> dict:
+    return {
+        "well": well,
+        "tile": tile,
+        "tile_cell_index": tile_cell_index,
+        "crop_index": crop_index,
+        "bbox_x1": cx,
+        "bbox_x2": cx,
+        "bbox_y1": cy,
+        "bbox_y2": cy,
+        "upBarcode": barcode,
+        "aaChanges": aa_changes,
+        "editDistance": edit_distance,
+    }
+
+
 def _write_populated_tile(
-    tile_dir: Path,
-    cell_ids: Sequence[int],
+    cell_images_dir: Path,
+    well: str,
+    grid_size: int,
+    x: int,
+    y: int,
+    cell_table_rows: Sequence[dict],
     centers: Sequence[Tuple[int, int]],
-    barcodes: Sequence[str],
-    aa_changes: Sequence[str],
-    edit_distances: Sequence[int],
-    segmentation_type: str = "cells",
     cycles: int = 1,
     channels: int = NUM_CHANNELS,
     size: int = TILE_SIZE,
     use_corrected: bool = False,
     squeeze_single_cycle: bool = False,
-) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
-    """Write a synthetic tile's cell table + stitched phenotype image +
-    segmentation mask, matching starcall-workflow's real stitch_tile_pt /
-    stitch_tile_from_well_segmentation / tabulate_cells output shapes
-    closely enough for write_dataset_shards() to ingest without
-    special-casing.
+    segmentation_type: str = "cells",
+) -> Tuple[np.ndarray, np.ndarray, str]:
+    """Write one tile's whole-tile image + mask (matching BUILD_CELL_IMAGES'
+    own output shape) -- cell_table.parquet is written separately (once per
+    experiment, via _write_cell_table), matching the real data flow.
 
     Each cell's mask footprint is a single pixel at its center, painted
-    with its *positional* label (1-based row order, i + 1) -- deliberately
-    using cell_ids that are not 1, 2, 3, ... so a test can tell "used
-    positional label" apart from "used cell_index as the label" (the
-    make_cell_images quirk write_dataset_shards() ports on purpose).
+    with its *positional* label (1-based row order, i + 1) -- matching the
+    make_cell_images convention write_dataset_shards() ports on purpose.
 
-    Returns (image, mask, table) -- the full synthetic arrays/table, for
-    independent-oracle comparison in tests.
+    Returns (image, mask, tile_name).
     """
+    tile_dir = cell_images_dir / f"{well}_grid{grid_size}" / f"tile{x}x{y}y"
     tile_dir.mkdir(parents=True, exist_ok=True)
-
-    table = pd.DataFrame(
-        {
-            "bbox_x1": [cx for cx, _ in centers],
-            "bbox_y1": [cy for _, cy in centers],
-            "bbox_x2": [cx for cx, _ in centers],
-            "bbox_y2": [cy for _, cy in centers],
-            "upBarcode": list(barcodes),
-            "aaChanges": list(aa_changes),
-            "editDistance": list(edit_distances),
-        },
-        index=list(cell_ids),
-    )
-    table.to_csv(tile_dir / f"{segmentation_type}.csv")
 
     image = _make_deterministic_image(cycles, channels, size)
     mask = np.zeros((size, size), dtype=np.int32)
@@ -336,47 +310,27 @@ def _write_populated_tile(
 
     pt_name = "corrected_pt.tif" if use_corrected else "raw_pt.tif"
     on_disk_image = image[0] if squeeze_single_cycle else image
-    # photometric="minisblack" -- these are multi-channel fluorescence
-    # images, not RGB; without it tifffile's heuristics can misinterpret
-    # a 3-channel array as RGB.
     tifffile.imwrite(tile_dir / pt_name, on_disk_image, photometric="minisblack")
     tifffile.imwrite(tile_dir / f"{segmentation_type}_mask.tif", mask)
 
-    return image, mask, table
-
-
-def _write_empty_tile(
-    tile_dir: Path, segmentation_type: str = "cells", size: int = TILE_SIZE
-) -> None:
-    """An empty tile, matching what starcall-workflow's real rules produce
-    for zero cells: tabulate_cells still writes a header-only CSV (plain
-    DataFrame.to_csv, never a 0-byte file), and stitch_tile_pt /
-    stitch_tile_from_well_segmentation still write well-formed tile-level
-    outputs regardless of cell count."""
-    _write_populated_tile(
-        tile_dir,
-        cell_ids=[],
-        centers=[],
-        barcodes=[],
-        aa_changes=[],
-        edit_distances=[],
-        segmentation_type=segmentation_type,
-        size=size,
-    )
+    return image, mask, f"tile{x}x{y}y"
 
 
 def test_write_dataset_shards_skips_empty_tile_without_erroring(tmp_path: Path):
-    phenotyping_dir = tmp_path / "phenotyping"
+    cell_images_dir = tmp_path / "cell_images"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
 
-    empty_tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
-    _write_empty_tile(empty_tile_dir)
-    populated_tile_dir = phenotyping_dir / "well1_grid4" / "tile0x1y"
-    _write_populated_tile(populated_tile_dir, [1], [(10, 10)], ["bc1"], ["A1B"], [0])
+    _write_populated_tile(cell_images_dir, "well1", 4, 0, 0, [], [])
+    _write_populated_tile(
+        cell_images_dir, "well1", 4, 0, 1, [], [(10, 10)]
+    )
+    _write_cell_table(
+        cell_images_dir,
+        [_row("well1", "tile0x1y", 1, 0, 10, 10)],
+    )
 
-    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
-    cfg.window = WINDOW
+    cfg = _cfg(cell_images_dir)
     write_dataset_shards(output_dir, cfg)
 
     metadata = pl.read_parquet(output_dir / "metadata.parquet")
@@ -385,11 +339,10 @@ def test_write_dataset_shards_skips_empty_tile_without_erroring(tmp_path: Path):
 
 
 def test_write_dataset_shards_round_trips_crops_masks_and_metadata(tmp_path: Path):
-    phenotyping_dir = tmp_path / "phenotyping"
+    cell_images_dir = tmp_path / "cell_images"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
 
-    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
     cell_ids = [10, 11, 12]
     # Interior, low-edge, and high-edge centers -- exercises both the
     # centered and the edge-clipped/zero-padded crop paths in one tile.
@@ -397,13 +350,20 @@ def test_write_dataset_shards_round_trips_crops_masks_and_metadata(tmp_path: Pat
     barcodes = ["bcA", "bcB", "bcC"]
     aa_changes = ["A1A", "A1B", "WT"]
     edit_distances = [0, 1, -1]
-    image, mask, _table = _write_populated_tile(
-        tile_dir, cell_ids, centers, barcodes, aa_changes, edit_distances
+    image, mask, tile = _write_populated_tile(
+        cell_images_dir, "well1", 4, 0, 0, [], centers
+    )
+    _write_cell_table(
+        cell_images_dir,
+        [
+            _row("well1", tile, cid, i, cx, cy, bc, aac, ed)
+            for i, (cid, (cx, cy), bc, aac, ed) in enumerate(
+                zip(cell_ids, centers, barcodes, aa_changes, edit_distances)
+            )
+        ],
     )
 
-    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
-    cfg.window = WINDOW
-    cfg.batch_stem = "batchA"
+    cfg = _cfg(cell_images_dir, batch_stem="batchA")
     write_dataset_shards(output_dir, cfg)
 
     # metadata.parquet
@@ -447,25 +407,25 @@ def test_write_dataset_shards_round_trips_crops_masks_and_metadata(tmp_path: Pat
 def test_write_dataset_shards_flattens_multi_cycle_multi_channel_in_cycle_major_order(
     tmp_path: Path,
 ):
-    phenotyping_dir = tmp_path / "phenotyping"
+    cell_images_dir = tmp_path / "cell_images"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
 
-    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
     cycles, channels = 2, 3
-    image, _mask, _table = _write_populated_tile(
-        tile_dir,
-        cell_ids=[1],
-        centers=[(10, 10)],
-        barcodes=["bc1"],
-        aa_changes=["A1A"],
-        edit_distances=[0],
+    image, _mask, tile = _write_populated_tile(
+        cell_images_dir,
+        "well1",
+        4,
+        0,
+        0,
+        [],
+        [(10, 10)],
         cycles=cycles,
         channels=channels,
     )
+    _write_cell_table(cell_images_dir, [_row("well1", tile, 1, 0, 10, 10)])
 
-    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
-    cfg.window = WINDOW
+    cfg = _cfg(cell_images_dir)
     write_dataset_shards(output_dir, cfg)
 
     shard_files = sorted(output_dir.glob("dataset-*.tar"))
@@ -481,27 +441,27 @@ def test_write_dataset_shards_flattens_multi_cycle_multi_channel_in_cycle_major_
 def test_write_dataset_shards_handles_squeezed_3d_single_cycle_pt_tif(
     tmp_path: Path,
 ):
-    """A (1, C, H, W) stitch_tile_pt output can round-trip through
-    tifffile as a squeezed (C, H, W) 3D array -- write_dataset_shards()
-    must produce the same crop either way."""
-    phenotyping_dir = tmp_path / "phenotyping"
+    """A (1, C, H, W) whole-tile image can round-trip through tifffile as a
+    squeezed (C, H, W) 3D array -- write_dataset_shards() must produce the
+    same crop either way."""
+    cell_images_dir = tmp_path / "cell_images"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
 
-    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
-    image, _mask, _table = _write_populated_tile(
-        tile_dir,
-        cell_ids=[1],
-        centers=[(10, 10)],
-        barcodes=["bc1"],
-        aa_changes=["A1A"],
-        edit_distances=[0],
+    image, _mask, tile = _write_populated_tile(
+        cell_images_dir,
+        "well1",
+        4,
+        0,
+        0,
+        [],
+        [(10, 10)],
         squeeze_single_cycle=True,
     )
-    assert tifffile.imread(tile_dir / "raw_pt.tif").ndim == 3
+    _write_cell_table(cell_images_dir, [_row("well1", tile, 1, 0, 10, 10)])
+    assert tifffile.imread(cell_images_dir / "well1_grid4" / tile / "raw_pt.tif").ndim == 3
 
-    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
-    cfg.window = WINDOW
+    cfg = _cfg(cell_images_dir)
     write_dataset_shards(output_dir, cfg)
 
     shard_files = sorted(output_dir.glob("dataset-*.tar"))
@@ -510,123 +470,51 @@ def test_write_dataset_shards_handles_squeezed_3d_single_cycle_pt_tif(
     np.testing.assert_array_equal(crop, _expected_crop(image[0], 10, 10, WINDOW))
 
 
-# ---------------------------------------------------------------------------
-# csv_schema_scan_rows
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("csv_schema_scan_rows", [None, 100, 5])
-def test_write_dataset_shards_forwards_csv_schema_scan_rows_to_polars(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_schema_scan_rows
-):
-    phenotyping_dir = tmp_path / "phenotyping"
+def test_write_dataset_shards_uses_crop_index_order_not_table_row_order(tmp_path: Path):
+    """crop_index (not cell_table.parquet's own on-disk row order) decides
+    which mask label (i + 1) pairs with which cell -- a regression guard
+    against accidentally relying on read order."""
+    cell_images_dir = tmp_path / "cell_images"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
 
-    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
-    _write_populated_tile(tile_dir, [1], [(10, 10)], ["bc1"], ["A1A"], [0])
-
-    seen_infer_schema_length = []
-    original_scan_csv = pl.scan_csv
-
-    def _spy_scan_csv(path, *, infer_schema_length=None, **kwargs):
-        seen_infer_schema_length.append(infer_schema_length)
-        return original_scan_csv(
-            path, infer_schema_length=infer_schema_length, **kwargs
-        )
-
-    # pl is the same polars module object dataset.py's own `import polars as
-    # pl` refers to, so patching it here reaches dataset.py's calls too.
-    monkeypatch.setattr(pl, "scan_csv", _spy_scan_csv)
-
-    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
-    cfg.window = WINDOW
-    cfg.csv_schema_scan_rows = csv_schema_scan_rows
-    write_dataset_shards(output_dir, cfg)
-
-    assert seen_infer_schema_length == [csv_schema_scan_rows]
-
-
-def test_write_dataset_shards_correct_with_scan_rows_smaller_than_table(
-    tmp_path: Path,
-):
-    """csv_schema_scan_rows smaller than the actual row count must still
-    read every row correctly, as long as dtypes are consistent throughout
-    (the common case) -- only the *inferred dtype*, not the row count read,
-    is limited by infer_schema_length."""
-    phenotyping_dir = tmp_path / "phenotyping"
-    output_dir = tmp_path / "out"
-    output_dir.mkdir()
-
-    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
-    cell_ids = [1, 2, 3]
-    centers = [(10, 10), (2, 2), (17, 17)]
-    barcodes = ["bcA", "bcB", "bcC"]
-    aa_changes = ["A1A", "A1B", "WT"]
-    edit_distances = [0, 1, -1]
-    _write_populated_tile(
-        tile_dir, cell_ids, centers, barcodes, aa_changes, edit_distances
+    centers = [(5, 5), (15, 15)]
+    _image, mask, tile = _write_populated_tile(
+        cell_images_dir, "well1", 4, 0, 0, [], centers
+    )
+    # cell_table.parquet rows written in reverse crop_index order on disk.
+    _write_cell_table(
+        cell_images_dir,
+        [
+            _row("well1", tile, 200, 1, centers[1][0], centers[1][1]),
+            _row("well1", tile, 100, 0, centers[0][0], centers[0][1]),
+        ],
     )
 
-    cfg = _cfg(phenotyping_dir, ["well1"], grid_size=4)
-    cfg.window = WINDOW
-    cfg.csv_schema_scan_rows = 1
+    cfg = _cfg(cell_images_dir)
     write_dataset_shards(output_dir, cfg)
 
     metadata = pl.read_parquet(output_dir / "metadata.parquet").sort("meta_cell_index")
-    assert metadata["meta_cell_index"].to_list() == cell_ids
-    assert metadata[META_BARCODE_COL].to_list() == barcodes
-    assert metadata[META_EDIT_DISTANCE_COL].to_list() == edit_distances
+    assert metadata["meta_cell_index"].to_list() == [100, 200]
 
 
-def test_main_runs_end_to_end_via_cli_without_grid_size_override(tmp_path: Path):
-    """grid_size is optional on the CLI too -- omitting it falls back to
-    auto-detection from phenotyping_dir's own directory naming."""
-    phenotyping_dir = tmp_path / "phenotyping"
-    output_dir = tmp_path / "out"
-    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
-    _write_populated_tile(
-        tile_dir,
-        [1, 2],
-        [(8, 8), (12, 12)],
-        ["bc1", "bc2"],
-        ["A1A", "A1B"],
-        [0, 0],
-    )
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "fisseq_embeddings_pipeline.dataset",
-            f"output_dir={output_dir}",
-            f"phenotyping_dir={phenotyping_dir}",
-            "wells=[well1]",
-            f"window={WINDOW}",
-            "batch_stem=cli_batch",
-            "random_seed=0",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=tmp_path,
-    )
-
-    assert result.returncode == 0, result.stderr
-    metadata = pl.read_parquet(output_dir / "metadata.parquet")
-    assert metadata.height == 2
+# ---------------------------------------------------------------------------
+# main() -- CLI end-to-end
+# ---------------------------------------------------------------------------
 
 
 def test_main_runs_end_to_end_via_cli(tmp_path: Path):
-    phenotyping_dir = tmp_path / "phenotyping"
+    cell_images_dir = tmp_path / "cell_images"
     output_dir = tmp_path / "out"
-    tile_dir = phenotyping_dir / "well1_grid4" / "tile0x0y"
-    _write_populated_tile(
-        tile_dir,
-        [1, 2],
-        [(8, 8), (12, 12)],
-        ["bc1", "bc2"],
-        ["A1A", "A1B"],
-        [0, 0],
+    _, _, tile = _write_populated_tile(
+        cell_images_dir, "well1", 4, 0, 0, [], [(8, 8), (12, 12)]
+    )
+    _write_cell_table(
+        cell_images_dir,
+        [
+            _row("well1", tile, 1, 0, 8, 8, "bc1", "A1A", 0),
+            _row("well1", tile, 2, 1, 12, 12, "bc2", "A1B", 0),
+        ],
     )
 
     result = subprocess.run(
@@ -635,9 +523,7 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path):
             "-m",
             "fisseq_embeddings_pipeline.dataset",
             f"output_dir={output_dir}",
-            f"phenotyping_dir={phenotyping_dir}",
-            "wells=[well1]",
-            "grid_size=4",
+            f"cell_images_dir={cell_images_dir}",
             f"window={WINDOW}",
             "batch_stem=cli_batch",
             "random_seed=0",
@@ -646,8 +532,8 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path):
         text=True,
         # Hydra's own (unrelated to --output_dir) working-directory
         # management writes an outputs/<date>/<time>/ dir under the process
-        # cwd -- run from tmp_path so that lands there, not in the repo
-        # (in real usage this is always Nextflow's per-task work dir).
+        # cwd -- run from tmp_path so that lands there, not in the repo (in
+        # real usage this is always Nextflow's per-task work dir).
         cwd=tmp_path,
     )
 

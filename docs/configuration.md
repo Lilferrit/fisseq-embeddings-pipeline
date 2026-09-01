@@ -24,36 +24,62 @@ two:
 (see [Nextflow Workflow](nextflow.md)), rather than letting Nextflow's own
 less-specific "no such property" error surface first.
 
-`BUILD_DATASET`'s own fields (`phenotyping_dir`, `wells`, `grid_size`,
-`window`, ...) are per-experiment, not pipeline-wide -- instead each
-experiment supplies its own map of these fields as one entry of
-`params.yaml`'s `experiments:` list (see
-[Nextflow Workflow](nextflow.md#per-experiment-configs)).
-`BUILD_CP_FEATURES`' fields (`phenotyping_dir`, `wells`, `grid_size`,
-`cellprofiler_cycle`, `cellprofiler_pipeline`, ...) work the same way, but
-there's no separate list -- an `experiments:` entry opts itself into the
-CellProfiler-feature track by setting `cp_features: true`, reusing that
-same entry's fields -- see
-[Nextflow Workflow](nextflow.md#cellprofiler-feature-track). Three fields
-that are logically per-experiment but in practice are almost always the
-same across every experiment in a run -- `window`, `cellprofiler_pipeline`,
-`cellprofiler_cycle` -- are the exception: each has its own pipeline-wide
-default below (`window`, `cellprofiler_pipeline`, `cellprofiler_cycle` in
-the Fields table), used for any experiment entry that doesn't set its own
-value for that key; an entry's own value always wins over the global
-default.
+Each experiment supplies its own map of per-experiment fields as one entry
+of `params.yaml`'s `experiments:` list (see
+[Nextflow Workflow](nextflow.md#per-experiment-configs)), split across up
+to three stages:
+
+- **`BUILD_CELL_IMAGES`** (starcall-workflow-facing, always runs):
+  `starcall_workflow_dir`, `phenotyping_dir`, `segmentation_dir`,
+  `sequencing_dir`, `wells`, `grid_size`, `segmentation_type`,
+  `use_corrected`, `sequencing_reads_params`. This is the ONLY stage that
+  touches `starcall-workflow`'s tree or invokes Snakemake -- see
+  [Architecture](architecture.md#cell-images-buildcellimages-output-from-starcall-workflow).
+  `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` are all optional,
+  each auto-resolved when omitted: `starcall_workflow_dir`'s own
+  `config.yaml` (or `default-config.yaml`) is read for that key if
+  present -- the same project config `starcall-workflow`'s own
+  `workflow/Snakefile` would load -- else it falls back to a subdirectory
+  of `starcall_workflow_dir` (`phenotyping`/`segmentation`/`sequencing`,
+  matching `starcall-workflow`'s own documented default). Set one
+  explicitly only when that tree isn't colocated under
+  `starcall_workflow_dir` at all.
+- **`BUILD_DATASET`**: `window`, `shard_maxcount`, `barcode_col_name`/
+  `aa_changes_col_name`/`edit_distance_col_name`. `cell_images_dir` (which
+  directory to read) is injected automatically from `BUILD_CELL_IMAGES`'
+  own output -- never set it yourself.
+- **`BUILD_CP_FEATURES`** (only for `cp_features: true` entries):
+  the same three `*_col_name` fields, shared with `BUILD_DATASET` since
+  both read the same `cell_table.parquet`. `cell_images_dir` is injected
+  the same way. There's no separate list to keep in sync with
+  `experiments:` -- an entry opts itself in by setting `cp_features: true`,
+  which also makes `BUILD_CELL_IMAGES` force + fold in that experiment's
+  CellProfiler CSV -- see
+  [Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
+
+Four fields that are logically per-experiment but in practice are almost
+always the same across every experiment in a run -- `window`,
+`cellprofiler_pipeline`, `cellprofiler_cycle` -- are the exception: each
+has its own pipeline-wide default below, used for any experiment entry
+that doesn't set its own value for that key; an entry's own value always
+wins over the global default. `cell_images_hard_copy` is a *further*
+exception -- it's global-only, with no per-experiment override at all
+(Nextflow's `publishDir` mode must be a static value at process-definition
+time; see `params.yaml`'s own comment on this).
 
 ### Fields
 
 | Key | Default | Stage(s) |
 | --- | --- | --- |
 | `pipeline_dir` | *(required)* | all |
-| `container_image` | `"fisseq-embeddings-pipeline:latest"` | all |
+| `container_image` | `"fisseq-embeddings-pipeline:latest"` | all stages |
 | `cell_dino_checkpoint` | *(required)* | `EMBED_CELLS` |
-| `experiments` | `[]` (required non-empty) | `BUILD_DATASET`, and `BUILD_CP_FEATURES` for any entry setting `cp_features: true` (list of per-experiment maps, each requiring `batch_stem`; see above) |
+| `experiments` | `[]` (required non-empty) | `BUILD_CELL_IMAGES` (always), `BUILD_DATASET`, and `BUILD_CP_FEATURES` for any entry setting `cp_features: true` (list of per-experiment maps, each requiring `batch_stem`; see above) |
 | `window` | `224` | `BUILD_DATASET` (global default for any `experiments` entry that omits `window`; an entry's own `window` wins) |
-| `cellprofiler_pipeline` | `null` (required, here or per `cp_features: true` entry, once any experiment sets `cp_features: true`) | `BUILD_CP_FEATURES` (global default for any `cp_features: true` entry that omits `cellprofiler_pipeline`) |
-| `cellprofiler_cycle` | `""` | `BUILD_CP_FEATURES` (global default for any `cp_features: true` entry that omits `cellprofiler_cycle`) |
+| `cellprofiler_pipeline` | `null` (required, here or per `cp_features: true` entry, once any experiment sets `cp_features: true`) | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_pipeline`) |
+| `cellprofiler_cycle` | `""` | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_cycle`) |
+| `cell_images_hard_copy` | `false` | `BUILD_CELL_IMAGES` (global-only, see above -- `false` symlinks collected tile images from their real `starcall-workflow` location, `true` hard-copies them) |
+| `snakemake_cores` | `4` | `BUILD_CELL_IMAGES` (`--cores` for its own `snakemake` invocation, distinct from Nextflow's own executor parallelism across experiments) |
 | `random_seed` | `0` | every stochastic stage |
 | `barcode_count_threshold` | `10` | `QC_FILTER` |
 | `variant_barcode_count_threshold` | `4` | `QC_FILTER` |
@@ -116,6 +142,19 @@ ones (`QC_FILTER`, `FILTER_EMBEDDINGS`, etc.) -- simpler to build/publish/
 version as a single artifact than a GPU image plus a slimmer CPU image, at
 the cost of a larger pull for CPU-only processes. Worth splitting into two
 images later if that pull cost matters in practice; not required for v1.
+
+That same image also bakes in `starcall-workflow`'s own dependency stack
+(tensorflow/stardist/cellpose/snakemake) as a second, isolated conda env
+(`ops`), used only by `BUILD_CELL_IMAGES`' own `snakemake` invocation --
+rather than publishing that as yet another separate image. This grows the
+image meaningfully (two full ML stacks in one artifact, so every pull,
+even for CPU-only stages, is bigger than it would be with the two split
+apart) and means every build now also runs the `ops` env's install chain
+(conda/pip installs, a `starcall-workflow` git clone) -- worth knowing if a
+build ever gets noticeably slower or larger, but not something to work
+around: this is the direct cost of one image over two, chosen so
+`starcall-workflow`'s own environment gets the same CI build coverage as
+everything else (it previously had none at all).
 
 ## `BUILD_DATASET` shard sizing
 

@@ -15,11 +15,11 @@ High-level shape:
 
 ```text
 Batch Aggregates And Variant Scores          (per experiment, runs independently)
-  Cell Info Table ─┬─► Cell Dataset ─► Cell Embeddings (Cell DINO) ─┐
-  Cell Images     ─┘                                                 ├─► Filter Embeddings
-  Cell Info Table ─────► QC Filtering ───────────────────────────────┘         │
-                                                                     ┌──────────┴──────────┐
-                                                                     ▼                      ▼
+  starcall-workflow ─► Cell Images ─┬─► Cell Dataset ─► Cell Embeddings (Cell DINO) ─┐
+    (raw tree)                      └─► QC Filtering ───────────────────────────────┤
+                                                                                      ├─► Filter Embeddings
+                                                                     ┌────────────────┴──────┐
+                                                                     ▼                        ▼
                                                     Aggregation (Synonymous        OVWT Distinguish-ability
                                                     STD Corrected)                  Scores (Synonymous STD
                                                           │                          Corrected)
@@ -35,6 +35,13 @@ Global Variant Distinguish-ability Scores    (once, across all experiments)
                                                                                   Distinguish-ability Scores
 ```
 
+"Cell Images" here is `BUILD_CELL_IMAGES` (`modules/local/build_cell_images.nf`)
+-- the only stage that reads `starcall-workflow`'s tree or invokes Snakemake;
+see [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow)
+below. "Cell Info Table" no longer appears as its own node: the genotype/
+metadata columns it used to name are now part of `BUILD_CELL_IMAGES`'
+`cell_table.parquet`, alongside the image references, not a separate input.
+
 ### CellProfiler-feature track (optional second track)
 
 A second, parallel track processes the same experiments' hand-engineered
@@ -46,11 +53,12 @@ second time.
 
 ```text
 Batch Aggregates And Variant Scores (CellProfiler)  (per experiment, runs independently)
-  starcall-workflow's CellProfiler   ─► CellProfiler Feature Dataset ─┐
-    output (per tile)                                                 ├─► Filter CP Features
-  Cell Info Table ─────► QC Filtering (shared with the embeddings ─────┘         │
-                                        track above -- not rerun)       ┌────────┴────────┐
-                                                                        ▼                  ▼
+  Cell Images (BUILD_CELL_IMAGES,  ─► CellProfiler Feature Dataset ─┐
+    same cell_table.parquet as                                      ├─► Filter CP Features
+    the embeddings track above)                                     │         │
+                    └─► QC Filtering (shared with the embeddings ────┘         │
+                                       track above -- not rerun)      ┌────────┴────────┐
+                                                                       ▼                  ▼
                                                        Aggregation (Synonymous    OVWT Distinguish-ability
                                                        STD Corrected)              Scores (Synonymous STD
                                                              │                      Corrected)
@@ -70,9 +78,8 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
 
 | Diagram node | This pipeline's stage | Reuses / adapts from `fisseq-data-pipeline` |
 | --- | --- | --- |
-| Cell Info Table | upstream input, unchanged | `starcall-workflow`'s cell table -- same `upBarcode`/`aaChanges`/`editDistance` columns `qcfilter.py` already expects |
-| Cell Images | upstream input, unchanged | `starcall-workflow`'s stitched tile image + mask -- **on the `origin/devel` branch** |
-| Cell Dataset | `BUILD_DATASET` (new) | crops a whole experiment's cells from stitched tile images into a WebDataset, porting `make_cell_images`'s crop-window algorithm |
+| Cell Images | `BUILD_CELL_IMAGES` (new) | the ONLY stage that touches `starcall-workflow`'s tree (`phenotyping_dir`/`segmentation_dir`/`sequencing_dir`) or invokes Snakemake -- **on the `origin/devel` branch**. Forces each tile's stitched phenotype image + segmentation mask to exist and collects them, and joins the segmentation-side cell table to the sequencing-side genotype table into one self-sufficient `cell_table.parquet` -- see [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow) |
+| Cell Dataset | `BUILD_DATASET` (new) | crops a whole experiment's cells from `BUILD_CELL_IMAGES`' collected stitched tile images into a WebDataset, porting `make_cell_images`'s crop-window algorithm |
 | QC Filtering | `QC_FILTER` (vendored, ~unchanged) | `qcfilter.py` directly |
 | Cell Embeddings (Cell DINO) | `EMBED_CELLS` (new) | none -- wraps Meta's `dinov2` Cell-DINO |
 | Filter Embeddings | `FILTER_EMBEDDINGS` (adapted) | `normalize.py`'s `Normalizer`, retargeted to a synonymous control query -- publishes a join key + fitted stats, not a normalized copy of the embeddings |
@@ -81,7 +88,7 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
 | Variant-wise median pooling (embeddings branch) | `GLOBAL_VARIANT_EMBEDDINGS` -- median step | `globalfeatureselect.py`'s `median_across_batches` |
 | PCA | `GLOBAL_VARIANT_EMBEDDINGS` -- PCA step | `utils/dimreduction.py`'s `compute_pca` |
 | Variant-wise median pooling (scores branch) | `GLOBAL_VARIANT_DISTINGUISHABILITY` | per-experiment synonymous z-score then a `median_across_batches`-style pool, adapted for two scalar (AUROC) columns instead of a feature matrix |
-| CellProfiler Feature Dataset | `BUILD_CP_FEATURES` (new) | reads starcall-workflow's already-computed per-tile CellProfiler CSV alongside the same per-tile cell table `BUILD_DATASET` reads -- see [Data contracts](#cellprofiler-feature-csv-input-from-starcall-workflow) |
+| CellProfiler Feature Dataset | `BUILD_CP_FEATURES` (new) | selects `cp_*`-prefixed CellProfiler columns straight out of `BUILD_CELL_IMAGES`' `cell_table.parquet` (that stage already folded in each tile's CellProfiler CSV, by row position) -- see [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow) |
 | Filter CP Features | `FILTER_CP_FEATURES` (thin wrapper) | reuses `filter.py`'s `filter_and_fit_normalizer`/`load_filtered_embeddings` directly (already feature-agnostic) -- joins against `QC_FILTER`'s existing output, not a second QC run |
 | Aggregation (CellProfiler track) | `AGGREGATE_CP_FEATURES` (thin wrapper) | reuses `aggregate.py`'s `aggregate_embeddings` with `feature_selector=FEATURE_SELECTOR` |
 | OVWT Distinguish-ability Scores (CellProfiler track) | `OVWT_BATCHWISE_CP_FEATURES` (thin wrapper) | reuses `ovwt.py`'s `ovwt_batchwise` with `feature_selector=FEATURE_SELECTOR` |
@@ -162,14 +169,43 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     -- never the feature space -- so `FILTER_CP_FEATURES` joins directly
     against `QC_FILTER`'s existing `filtered_cells.parquet` rather than
     running a second `QC_FILTER` process.
-16. **`BUILD_CP_FEATURES` discovers tiles the same way `BUILD_DATASET`
-    does** (`phenotyping_dir`/`wells`/`grid_size` auto-detection, reusing
-    `dataset.discover_tiles` directly) rather than taking a hand-specified
-    merged input file, since `starcall-workflow` already writes each
-    tile's CellProfiler output at a deterministic path alongside its cell
-    table. It pairs each tile's cell table and CellProfiler CSV **by row
-    position, not by index value** -- see
-    [Data contracts](#cellprofiler-feature-csv-input-from-starcall-workflow).
+16. **`BUILD_CELL_IMAGES` is the only stage that touches `starcall-workflow`'s
+    tree or invokes Snakemake.** Earlier, `BUILD_DATASET` and
+    `BUILD_CP_FEATURES` each independently rediscovered
+    `starcall-workflow`'s tile layout (`phenotyping_dir`/`wells`/
+    `grid_size` auto-detection) and read its per-tile CSVs directly -- this
+    both duplicated discovery logic across two stages and (a real bug, not
+    just a duplication concern) treated the segmentation-side per-tile
+    `{segmentation_type}.csv` as if it already carried genotype columns
+    (`upBarcode`/`aaChanges`/`editDistance`) that only ever exist in a
+    *different* directory tree (`sequencing_dir`'s
+    `{segmentation_type}_reads{params}.csv`, via `rule merge_final_tables`).
+    `BUILD_CELL_IMAGES` now owns all of this: it forces the whole-tile
+    phenotype image/mask and both per-tile tables (plus, for
+    `cp_features: true` experiments, the CellProfiler CSV) to exist, joins
+    them into one `cell_table.parquet`, and publishes that alongside the
+    collected tile images. `BUILD_DATASET`/`BUILD_CP_FEATURES` consume that
+    output directory exclusively -- see
+    [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow).
+    The genotype join is by **index value**, not row position (the
+    opposite of the CellProfiler join, below) -- verified that
+    `combine_cell_reads`/`merge_final_tables` preserve the segmentation
+    table's own index into the reads table unchanged, per-tile.
+    CellProfiler's own CSV is still joined by row position, same
+    convention as before, just relocated into `BUILD_CELL_IMAGES`'
+    `build_cell_images_table.py` and prefixed `cp_*` on the way in
+    (stripped back off by `BUILD_CP_FEATURES` on the way out).
+17. **`BUILD_CELL_IMAGES` does NOT force `rule make_cell_images`'s
+    pre-cropped output to exist**, even though that would have been the
+    more literal reading of "collect this experiment's cell images."
+    `dataset.py`'s own `_crop_cell` already ports that rule's crop
+    algorithm and deliberately avoids depending on the rule itself, because
+    it reads `xpos`/`ypos` columns that don't exist in the real cell table
+    schema (only `bbox_x1/y1/x2/y2` -- see the Cell Info Table note below).
+    `BUILD_DATASET` still does its own per-cell windowed cropping from the
+    whole-tile image, unchanged; `BUILD_CELL_IMAGES` only forces the
+    whole-tile image + mask (which `stitch_tile_pt`/`stitch_tile_segmentation`
+    reliably produce) to exist, not the crop stacks.
 
 ## Repository layout
 
@@ -178,10 +214,17 @@ fisseq-embeddings-pipeline/
   main.nf
   nextflow.config                 # executor/profile/container settings only
   params.yaml                     # every default pipeline parameter
-  Dockerfile                      # single image every process runs in
+  Dockerfile                      # this repo's own image (torch/Cell-DINO/polars),
+                                   # plus starcall-workflow's own Snakemake/
+                                   # tensorflow/stardist/cellpose stack as a
+                                   # second, isolated `ops` conda env --
+                                   # build- and import-verified, real rule
+                                   # execution not yet tested, see the
+                                   # Dockerfile's own comments
   workflows/
     embeddings.nf                 # the one pipeline_mode this repo has
   modules/local/
+    build_cell_images.nf          # the only stage touching starcall-workflow's tree
     build_dataset.nf
     qc_filter.nf
     embed_cells.nf
@@ -201,6 +244,8 @@ fisseq-embeddings-pipeline/
       app.py                      # AppConfig -- vendored, + random_seed
       input.py                    # InputConfig, LabeledInputConfig -- vendored
     dataset.py                    # BUILD_DATASET
+    build_cell_images_enumerate.py # BUILD_CELL_IMAGES phase 1 (grid/tile discovery)
+    build_cell_images_table.py    # BUILD_CELL_IMAGES phase 3 (cell_table.parquet join)
     qcfilter.py                   # QC_FILTER -- vendored, ~unchanged
     embed.py                      # EMBED_CELLS -- Cell-DINO wrapper
     filter.py                     # FILTER_EMBEDDINGS
@@ -252,79 +297,112 @@ This pipeline tracks `starcall-workflow`'s `origin/devel` branch, not
 `master`, which has a differently-shaped `make_cell_images` and no
 `extract_embeddings` rule at all.
 
-### Cell Info Table (input, from `starcall-workflow`)
+### Cell Images (`BUILD_CELL_IMAGES` output, from `starcall-workflow`)
 
-One row per segmented cell. Columns `qcfilter.py` reads (unchanged, per
-its config defaults):
-
-| Column | Meaning |
-| --- | --- |
-| `upBarcode` | sequenced/matched barcode string |
-| `aaChanges` | variant label (renamed to `meta_aa_changes` on ingest) |
-| `editDistance` | base changes needed to match the barcode; `-1` = unmatched |
-| `bbox_x1/y1/x2/y2` | cell bounding box, in phenotype-image scale |
-
-Written by `starcall-workflow`'s `rule tabulate_cells`. The real schema has
-no `xpos`/`ypos` columns -- only `bbox_x1/y1/x2/y2`. `BUILD_DATASET`
-computes each cell's crop center as the bbox midpoint,
-`((bbox_x1+bbox_x2)//2, (bbox_y1+bbox_y2)//2)`.
-
-### Cell Images (input, from `starcall-workflow`)
-
-`BUILD_DATASET` reads two per-tile outputs directly rather than depending
-on a pre-cropped per-cell file (which isn't reliably produced for every
-experiment):
+`BUILD_CELL_IMAGES` (`modules/local/build_cell_images.nf`,
+`build_cell_images_enumerate.py`, `build_cell_images_table.py`) is the only stage that reads
+`starcall-workflow`'s tree directly or invokes Snakemake. For every tile of
+every configured well, it forces three real `starcall-workflow` outputs to
+exist (via one `snakemake <targets>` invocation per experiment against the
+real, unredirected tree, so Snakemake's own mtime caching reuses whatever's
+already built) and reads/collects them:
 
 - **`rule stitch_tile_pt`** -- the entire stitched phenotype image for one
-  tile: `'{path}/{corrected|raw}_pt.tif'`,
-  `(num_phenotyping_cycles, num_channels, width, height)`.
-- **`rule stitch_tile_from_well_segmentation`** -- the tile's segmentation
-  label mask: `'{path}/{segmentation_type}_mask.tif'`.
+  tile: `phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{corrected|raw}_pt.tif`,
+  `(num_phenotyping_cycles, num_channels, width, height)`. Collected
+  (symlinked by default, or hard-copied if `cell_images_hard_copy: true`)
+  into this stage's own per-experiment output directory.
+- **`rule stitch_tile_segmentation`** -- the tile's segmentation label
+  mask: `phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}_mask.tif`.
+  Collected the same way. (Not `rule stitch_tile_from_well_segmentation` --
+  that rule name appears only inside a dead, commented-out block in the
+  currently-tracked `origin/devel` source; confirmed by reading it
+  directly. `stitch_tile_segmentation` is the live rule producing this
+  exact output pattern.)
+- **`rule split_grid_table`/`drop_duplicate_cells`** -- the tile's
+  segmentation-side cell table:
+  `phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}.csv`,
+  columns `orig_index`/`bbox_x1/y1/x2/y2`/`mask8` only -- **no**
+  `upBarcode`/`aaChanges`/`editDistance` (a real gap in what `BUILD_DATASET`
+  used to assume this file carried; see below).
+- **`rule merge_final_tables`** -- the tile's sequencing-side genotype
+  table, a *different* directory tree:
+  `sequencing_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}_reads{params}.csv`,
+  carrying `editDistance` and whatever aux-table genotype columns (e.g.
+  `upBarcode`/`aaChanges`-equivalents; names vary per experiment) got
+  joined in upstream. `{params}` (`sequencing_reads_params`) defaults to
+  `""` -- verify against a real run if your starcall-workflow config uses
+  a non-empty value there.
+- (only when `cp_features: true`) the tile's CellProfiler output,
+  `phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/cellprofiler{cycle}_{pipeline}.csv`
+  -- same path `BUILD_CP_FEATURES` used to read directly before this
+  refactor, now read here instead.
 
-`BUILD_DATASET` ports `rule make_cell_images`'s crop-window algorithm
-directly into Python (window-centered box, clipped and zero-padded at tile
-edges, mask label matched positionally as `i + 1`) rather than depending on
-that rule's own output.
+`BUILD_CELL_IMAGES` does **not** force `rule make_cell_images`'s
+pre-cropped output (`{segmentation_type}_crops_{window}.tif`) to exist --
+see architecture decision 17 above. `BUILD_DATASET` still does its own
+per-cell windowed cropping from the whole-tile image (`_crop_cell`, ported
+from `make_cell_images`'s own algorithm).
+
+`build_cell_images_table.py` then joins, per tile: the segmentation table
+to the sequencing table **by index value** (both are the same
+`RangeIndex`, restarting at 1 per tile -- verified via
+`combine_cell_reads`/`merge_final_tables`'s source; see architecture
+decision 16), and, if `cp_features`, the CellProfiler CSV **by row
+position** (renamed `cp_<name>`). Every tile's joined table is
+concatenated (`diagonal_relaxed` -- schema legitimately varies per
+experiment) into one `cell_table.parquet` per experiment, published
+alongside the collected tile images:
+
+```text
+{pipeline_dir}/cell_images/{batch_stem}/
+├── cell_table.parquet
+├── well1_grid12/tile0x0y/
+│   ├── raw_pt.tif          (or corrected_pt.tif)
+│   └── cells_mask.tif
+└── ...
+```
+
+`BUILD_DATASET`/`BUILD_CP_FEATURES` read only this directory -- neither
+touches `starcall-workflow`'s tree, and neither needs
+`phenotyping_dir`/`wells`/`grid_size`/`segmentation_type`/`use_corrected`
+any more.
+
+**A known `starcall-workflow` gotcha, not applicable here but worth
+knowing:** `rule merge_phenotype_genotype` (`sequencing.smk`) produces a
+*well-level* `{well}{possible_grid}.{phenotype_type}{segmentation_type}_full.csv`
+by joining tables on that same per-tile-restarting `RangeIndex` -- but at
+the well level (spanning multiple tiles) that index has cross-tile
+duplicates, and `pandas.DataFrame.join()` silently multiplies/misattributes
+rows when that happens (reproduced during this stage's design). This
+pipeline never reads that file -- `BUILD_CELL_IMAGES` joins strictly
+per-tile, where the index is genuinely unique -- but it's a landmine for
+anyone reaching for `.cells_full.csv` directly elsewhere.
 
 ### Cell Dataset (this pipeline's join)
 
 Per experiment: a **WebDataset** (sharded `.tar` archives, one sample per
 cell) built by cropping every tile's stitched phenotype image and
-segmentation mask around each cell's bbox-derived center, and repackaging
-each row as one sample keyed by a unique cell id, carrying the crop array,
-the mask array, and `meta_*` fields (barcode, variant label, edit
-distance, well/tile, cell index).
+segmentation mask (read from `BUILD_CELL_IMAGES`' output directory) around
+each cell's bbox-derived center, and repackaging each row as one sample
+keyed by a unique cell id, carrying the crop array, the mask array, and
+`meta_*` fields (barcode, variant label, edit distance, well/tile, cell
+index). The real schema has no `xpos`/`ypos` columns -- only
+`bbox_x1/y1/x2/y2`; `BUILD_DATASET` computes each cell's crop center as the
+bbox midpoint, `((bbox_x1+bbox_x2)//2, (bbox_y1+bbox_y2)//2)`.
 
-### CellProfiler feature CSV (input, from starcall-workflow)
+### CellProfiler feature columns (`BUILD_CP_FEATURES` input)
 
-`BUILD_CP_FEATURES` reads a second per-tile output `starcall-workflow`'s
-`origin/devel` `workflow/rules/phenotyping.smk` already produces (rules
-`run_cellprofiler`/`copy_cellprofiler_output`), alongside the same
-`{segmentation_type}.csv` cell table `BUILD_DATASET` reads:
-
-```text
-{tile_dir}/cellprofiler{cycle}_{pipeline}.csv
-```
-
-where `{tile_dir}` is the same `{well}_grid{N}/tile{x}x{y}y/` directory
-`discover_tiles` already resolves, `{cycle}` is `""` or `"cycle<N>"`
-(`CpFeaturesConfig.cellprofiler_cycle`), and `{pipeline}` is the
-CellProfiler `.cppipe` pipeline's basename
-(`CpFeaturesConfig.cellprofiler_pipeline`, required). One row per cell,
-one column per CellProfiler measurement -- no `meta_*` prefix, no
-identity columns (`upBarcode`/`aaChanges`/`editDistance` come from the
-cell table, not this file).
-
-**Row-position join, not index-value join.** `BUILD_CP_FEATURES` pairs the
-cell table's row `i` with the CellProfiler CSV's row `i` -- not by
-matching their first-column index *values*. This mirrors
-`BUILD_DATASET`'s own `_crop_cell(..., label=i + 1, ...)` convention
-(segmentation mask labels are the row *position*, `i + 1`, not the cell
-table's index *value* -- see `write_dataset_shards`), and CellProfiler's
-own `ObjectNumber` numbering is standardly derived from ascending
-mask-label order, i.e. that same row position. A tile whose cell table
-and CellProfiler CSV have different row counts raises rather than
-silently misaligning every downstream row.
+`BUILD_CP_FEATURES` no longer reads any CellProfiler CSV, or
+`starcall-workflow`'s tree, directly -- it selects `cp_*`-prefixed columns
+straight out of `BUILD_CELL_IMAGES`' `cell_table.parquet` (stripping the
+prefix back off on the way out, so `cp_features.parquet`'s own column
+names are unchanged: one column per CellProfiler measurement, no `meta_*`
+prefix). The row-position join between each tile's cell table and its
+CellProfiler CSV -- CellProfiler's own `ObjectNumber` numbering has no
+shared index with the segmentation table's `orig_index`/`RangeIndex` --
+now happens once, inside `BUILD_CELL_IMAGES`' `build_cell_images_table.py`,
+not per-consumer.
 
 ## `EMBED_CELLS` / Cell-DINO inference internals
 

@@ -10,8 +10,16 @@ One addition versus the vendored source: ``EMBEDDING_SELECTOR``, matching
 this pipeline's zero-padded ``emb_%04d`` embedding-dimension columns the
 same way ``FEATURE_SELECTOR`` matches CellProfiler's upper-case-plus-
 underscore columns in the source repo.
+
+Another addition: ``TILE_DIR_RE``, the one piece of the
+BUILD_CELL_IMAGES/BUILD_DATASET tile-naming convention (``tile<x>x<y>y``)
+both ``dataset.py`` and ``build_cell_images_enumerate.py`` need to stay in
+sync on -- shared here (rather than left as two independent
+``re.compile()`` copies, as it was before the two stages lived in the same
+package) so the one thing that must not drift can't.
 """
 
+import re
 from typing import Any
 
 import numpy as np
@@ -35,3 +43,4 @@ UMAP_COL_PREFIX: str = "meta_umap_"
 COMPONENT_IDX_COL: str = "meta_component_idx"
 VARIANCE_EXPLAINED_COL: str = "meta_variance_explained"
 CUMULATIVE_VARIANCE_EXPLAINED_COL: str = "meta_cumulative_variance_explained"
+TILE_DIR_RE = re.compile(r"^tile(\d+)x(\d+)y$")

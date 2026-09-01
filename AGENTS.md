@@ -60,8 +60,11 @@ depends on (`make_cell_images`, `extract_embeddings` in
   one shared `random_seed` field every stochastic stage reads from — never
   add a stage-local `random_state`/seed field.
 - **polars, not pandas**, for all tabular data except where the pipeline
-  explicitly uses pandas (`BUILD_DATASET`'s tile manifest — matching
-  `starcall-workflow`'s own CSV-reading convention there).
+  explicitly uses pandas (`build_cell_images_table.py`'s per-tile CSV
+  reads — matching `starcall-workflow`'s own CSV-reading convention there;
+  it still writes its final `cell_table.parquet` via polars, though, to
+  keep everything downstream of `BUILD_CELL_IMAGES` in the usual
+  convention).
 - **`meta_*` column convention**: metadata columns are prefixed `meta_*`;
   `FEATURE_SELECTOR` (`cs.exclude("^meta_.*$")`) and `EMBEDDING_SELECTOR`
   (`cs.matches(r"^emb_\d+$")`) key off this — see
@@ -134,6 +137,18 @@ flow (weight loading, forward pass, shape handling) — not Cell-DINO's
 actual pretrained-checkpoint output quality — at the cost of a few
 seconds of real (CPU) compute per run. No GPU or real checkpoint is
 needed to run `tests/integration` anywhere, including CI.
+
+`tests/integration/test_integration_real_starcall.py` is the one
+exception to all of the above: it invokes a **real** `snakemake` run
+against real starcall-workflow data (every other test fakes that step
+with a stub `snakemake` on PATH), through a real build of the root
+Dockerfile. Opt-in only — self-skips unless `testing_data/lmna_t3/` has
+been populated (`uv run python scripts/prepare_real_starcall_test_data.py`,
+downloads ~6.3GB) and `docker`/`nextflow` are on PATH; not run in CI.
+Needs a Docker daemon that can bind-mount this repo's own temp
+directories — Docker Desktop's file-sharing allowlist can silently block
+that on some local setups (see that test module's own docstring for the
+exact failure signature and how to tell it apart from a real bug).
 
 ## CI
 

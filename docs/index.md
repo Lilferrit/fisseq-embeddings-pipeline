@@ -15,13 +15,18 @@ variant's cell population differs from wildtype (WT) controls in that
 learned embedding space, both per experiment and pooled across experiments.
 
 ```text
-Cell Info Table + Cell Images (starcall-workflow)
+starcall-workflow's raw tree -> Cell Images (BUILD_CELL_IMAGES)
     -> Cell Dataset (WebDataset) -> Cell Embeddings (Cell-DINO)
     -> Filter Embeddings (QC-passed + synonymous-corrected)
     -> Aggregation -> Experiment Aggregates -> Global Variant Embeddings (PCA)
     -> OVWT Distinguish-ability Scores -> Experiment Scores -> Global Variant
        Distinguish-ability Scores
 ```
+
+`BUILD_CELL_IMAGES` is the only stage that reads `starcall-workflow`'s
+tree or invokes Snakemake -- it forces each tile's phenotype image, mask,
+and genotype columns to exist and joins them into one self-sufficient
+`cell_table.parquet` per experiment (see [Architecture](architecture.md)).
 
 A variant's identity is preserved throughout by its label column
 (`meta_aa_changes`); "synonymous" variants (same amino acid before/after)
@@ -31,11 +36,12 @@ serve as the in-experiment control population.
 
 Setting `cp_features: true` on one of `params.yaml`'s `experiments:`
 entries opts that experiment into a second, parallel track:
-`BUILD_CP_FEATURES` reads that experiment's already-computed CellProfiler
-measurements (from `starcall-workflow`) and the same downstream shape --
-filter, aggregate, OVWT, global pooling -- runs again, reusing
-`QC_FILTER`'s existing output rather than QC-filtering twice. See
-[Architecture](architecture.md) and
+`BUILD_CELL_IMAGES` additionally forces that experiment's already-computed
+CellProfiler measurements (from `starcall-workflow`) to exist and folds
+them into `cell_table.parquet`, `BUILD_CP_FEATURES` selects them back out,
+and the same downstream shape -- filter, aggregate, OVWT, global pooling
+-- runs again, reusing `QC_FILTER`'s existing output rather than
+QC-filtering twice. See [Architecture](architecture.md) and
 [Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
 
 ## Where to go next
@@ -44,9 +50,10 @@ filter, aggregate, OVWT, global pooling -- runs again, reusing
 - **[Quickstart](quickstart.md)** -- run the pipeline end to end.
 - **[Architecture](architecture.md)** -- design decisions, repository
   layout, data contracts, and the Cell-DINO inference internals.
-- **[Nextflow Workflow](nextflow.md)** -- how the fourteen pipeline stages
-  (eight cellDINO-track, six optional CellProfiler-track) are orchestrated,
-  and the output directory layout.
+- **[Nextflow Workflow](nextflow.md)** -- how the fifteen pipeline stages
+  (`BUILD_CELL_IMAGES` shared by both tracks, eight more cellDINO-track,
+  six optional CellProfiler-track) are orchestrated, and the output
+  directory layout.
 - **[Configuration](configuration.md)** -- `params.yaml` reference, Docker
   image versioning, and WebDataset shard sizing.
 - **Stage Reference** (sidebar) -- usage, config fields, and outputs for
@@ -60,5 +67,6 @@ filter, aggregate, OVWT, global pooling -- runs again, reusing
   including the CellProfiler-feature track above (see
   [Architecture](architecture.md)).
 - `starcall-workflow` -- the Snakemake pipeline whose `origin/devel` branch
-  produces this pipeline's two inputs (Cell Info Table, Cell Images); see
+  produces this pipeline's raw input tree; `BUILD_CELL_IMAGES` is the only
+  stage that reads it or invokes Snakemake -- see
   [Architecture](architecture.md#data-contracts).

@@ -7,6 +7,8 @@ nav:
   - Nextflow Workflow: nextflow.md
   - Configuration: configuration.md
   - Stage Reference:
+      - "Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)": cli/build_cell_images_enumerate.md
+      - "Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)": cli/build_cell_images_table.md
       - Cell Dataset (BUILD_DATASET): cli/dataset.md
       - QC Filtering (QC_FILTER): cli/qcfilter.md
       - Cell Embeddings (EMBED_CELLS): cli/embed.md
@@ -22,6 +24,8 @@ nav:
       - Global Variant CP Features: cli/global_variant_cp_features.md
       - Global Variant Distinguish-ability, CP Track: cli/global_variant_distinguishability_cp_features.md
   - API Reference:
+      - build_cell_images_enumerate: api/build_cell_images_enumerate.md
+      - build_cell_images_table: api/build_cell_images_table.md
       - dataset: api/dataset.md
       - qcfilter: api/qcfilter.md
       - embed: api/embed.md

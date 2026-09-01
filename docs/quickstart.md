@@ -13,15 +13,29 @@ window: 224   # must match your Cell-DINO checkpoint's crop size -- global
 
 experiments:
   - batch_stem: experiment1
-    phenotyping_dir: /data/experiment1/phenotyping   # starcall-workflow output root
+    starcall_workflow_dir: /data/experiment1   # a checkout Snakemake can run against --
+                                                # IS this experiment's root, no separate
+                                                # folder needed (nothing requires it to be
+                                                # named "starcall-workflow")
+    # phenotyping_dir/segmentation_dir/sequencing_dir omitted -- each is
+    # auto-resolved: starcall_workflow_dir's own config.yaml (or
+    # default-config.yaml) is consulted first if present, else it falls
+    # back to a subdirectory of starcall_workflow_dir
+    # (phenotyping/segmentation/sequencing); set one explicitly only if
+    # your lab's data for that tree isn't colocated under
+    # starcall_workflow_dir at all.
     wells: [well1, well2]
     # grid_size omitted -- auto-detected per well from phenotyping_dir's
     # own {well}_grid<N> directory naming; set it explicitly to override.
     # window omitted -- falls back to the global `window` default above.
 ```
 
-See [`BUILD_DATASET`'s stage reference](cli/dataset.md) for every field
-`BuildDatasetConfig` accepts.
+These starcall-workflow-facing fields all belong to `BUILD_CELL_IMAGES`,
+the one stage that touches `starcall-workflow`'s tree -- see
+[`BUILD_CELL_IMAGES`' section of the Architecture doc](architecture.md#cell-images-buildcellimages-output-from-starcall-workflow)
+for every field it accepts, and
+[`BUILD_DATASET`'s stage reference](cli/dataset.md) for `BuildDatasetConfig`'s
+own remaining fields (`window`, `shard_maxcount`, ...).
 
 ## 2. Get a Cell-DINO checkpoint
 
@@ -60,8 +74,9 @@ nextflow run . \
 ## 4. Read the outputs
 
 Every stage's output lands under `<pipeline_dir>/`, one subdirectory per
-stage (`dataset/`, `qc_filter/`, `embeddings/`, `filter_embeddings/`,
-`feature_select_batchwise/`, `ovwt_batchwise/`, `global/`). See
+stage (`cell_images/`, `dataset/`, `qc_filter/`, `embeddings/`,
+`filter_embeddings/`, `feature_select_batchwise/`, `ovwt_batchwise/`,
+`global/`). See
 [Nextflow Workflow](nextflow.md#output-directory-layout) for the full tree
 and [Architecture](architecture.md#data-contracts) for what each Parquet
 file's columns mean.

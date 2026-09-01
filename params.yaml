@@ -14,20 +14,55 @@ container_image: "fisseq-embeddings-pipeline:latest"
 cell_dino_checkpoint: null
 experiments: []
 
-# ── Per-experiment configs (BUILD_DATASET / BUILD_CP_FEATURES) ──────────────
-# Every BuildDatasetConfig field (phenotyping_dir, wells, grid_size, window,
-# shard_maxcount, segmentation_type, use_corrected, batch_stem,
-# barcode_col_name/aa_changes_col_name/edit_distance_col_name,
-# csv_schema_scan_rows, ...) is per-experiment, not a pipeline-wide default
-# -- a single global value could never be right across every experiment's
-# own wells/grid/raw-CSV-column-name layout. Supply one map per experiment
-# in `experiments:` below; `batch_stem` is required on every map (there's
-# no filename to derive it from), must be unique across the list, and any
-# field a map omits falls back to the matching global default in "Shared
-# per-experiment defaults" below (`window`, `cellprofiler_pipeline`,
-# `cellprofiler_cycle`), or failing that, BuildDatasetConfig's own Hydra
-# default (or raises Hydra's own "missing mandatory value" error if that
-# field has none, e.g. phenotyping_dir).
+# ── Per-experiment configs (BUILD_CELL_IMAGES / BUILD_DATASET / BUILD_CP_FEATURES) ──
+# Each experiment map in `experiments:` below supplies fields for up to
+# three stages:
+#
+# - BUILD_CELL_IMAGES (starcall-workflow-facing, always runs):
+#   starcall_workflow_dir, phenotyping_dir, segmentation_dir,
+#   sequencing_dir, wells, grid_size, segmentation_type, use_corrected,
+#   sequencing_reads_params. This is the ONLY stage that touches
+#   starcall-workflow's tree or invokes Snakemake -- see
+#   docs/architecture.md's Data contracts section. `starcall_workflow_dir`
+#   is per-experiment (not a shared global path) since Snakemake keeps
+#   invocation-scoped lock/log state in its own working directory --
+#   nothing requires it to be named "starcall-workflow" or nested under a
+#   separate per-experiment folder of its own: it can just BE your
+#   experiment's root directory (e.g. `starcall_workflow_dir:
+#   /data/experiment1`, not `/data/experiment1/starcall-workflow`) --
+#   `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` default under
+#   whatever you point it at.
+#   `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` are all OPTIONAL
+#   -- each is auto-resolved when omitted: if `starcall_workflow_dir` has
+#   its own `config.yaml` (or `default-config.yaml`), that project's own
+#   value for the key is used (reading the actual config that governs
+#   where Snakemake writes/reads these trees -- correct even if a project
+#   remaps them to nonstandard names); otherwise it falls back to a
+#   subdirectory of `starcall_workflow_dir` (`phenotyping`/`segmentation`/
+#   `sequencing`), matching starcall-workflow's own documented default.
+#   Set one explicitly only when that tree isn't colocated under
+#   `starcall_workflow_dir` at all for your lab (e.g. `sequencing_dir` on
+#   separate storage) -- an explicit value always wins over both. See
+#   docs/architecture.md and the example below.
+#   `cell_images_hard_copy` (below) is this stage's one GLOBAL-only field
+#   -- not settable per experiment; see its own comment for why.
+# - BuildDatasetConfig (BUILD_DATASET): window, shard_maxcount,
+#   barcode_col_name/aa_changes_col_name/edit_distance_col_name.
+#   `cell_images_dir` is injected automatically from BUILD_CELL_IMAGES'
+#   own output -- never set it yourself.
+# - CpFeaturesConfig (BUILD_CP_FEATURES, only for `cp_features: true`
+#   entries): barcode_col_name/aa_changes_col_name/edit_distance_col_name
+#   (same three fields, shared with BuildDatasetConfig since both read the
+#   same cell_table.parquet). `cell_images_dir` is injected the same way.
+#
+# `batch_stem` is required on every map (there's no filename to derive it
+# from), must be unique across the list, and any field a map omits falls
+# back to the matching global default in "Shared per-experiment defaults"
+# below (`window`, `cellprofiler_pipeline`, `cellprofiler_cycle`), or
+# failing that, the relevant stage's own Hydra default (or raises an error
+# if that field has none, e.g. starcall_workflow_dir). `cell_images_hard_copy`
+# is the one exception -- it's global-only, ignored if set on an individual
+# entry (see its own comment below).
 #
 # `grid_size` is optional -- when omitted, it's auto-detected per well by
 # scanning phenotyping_dir for that well's `{well}_grid<N>` directory
@@ -35,18 +70,21 @@ experiments: []
 # you only need to set it explicitly if a well has more than one such
 # directory and detection can't disambiguate.
 #
+# `sequencing_reads_params` (default "") is the `{params}` wildcard
+# component of starcall-workflow's `{segmentation_type}_reads{params}.csv`
+# output filename -- almost always empty; set it explicitly only if your
+# starcall-workflow config uses a non-empty value there (verify against a
+# real run -- see docs/architecture.md's flagged risks).
+#
 # Set `cp_features: true` on an entry to also run that experiment through
 # the CellProfiler-feature track (see docs/architecture.md):
-# BUILD_CP_FEATURES onward, reusing this SAME entry's phenotyping_dir/
-# wells/grid_size/segmentation_type/etc. -- there's no separate list to
-# keep in sync with `experiments:`. `window`/`shard_maxcount` are
-# BuildDatasetConfig-only and ignored for that track; conversely
-# `cellprofiler_pipeline`/`cellprofiler_cycle` (CpFeaturesConfig-only) can
-# be set directly on a `cp_features: true` entry to override this
-# experiment's CellProfiler filename components, falling back to the
-# global defaults below when omitted. Omit `cp_features` (or leave it
-# `false`) for a cellDINO-only experiment -- the default, so existing runs
-# work unchanged.
+# BUILD_CP_FEATURES onward, and BUILD_CELL_IMAGES additionally forces +
+# folds in that experiment's CellProfiler CSV. `cellprofiler_pipeline`/
+# `cellprofiler_cycle` can be set directly on a `cp_features: true` entry
+# to override this experiment's CellProfiler filename components, falling
+# back to the global defaults below when omitted. Omit `cp_features` (or
+# leave it `false`) for a cellDINO-only experiment -- the default, so
+# existing runs work unchanged.
 #
 # The empty list below is deliberate -- every real run supplies its own
 # `experiments:` list by editing this file (or a full copy of it; Nextflow
@@ -55,32 +93,59 @@ experiments: []
 #
 # experiments:
 #   - batch_stem: experiment1
-#     phenotyping_dir: /data/experiment1/phenotyping
+#     starcall_workflow_dir: /data/experiment1   # IS this experiment's root -- no separate folder needed
+#     # phenotyping_dir/segmentation_dir/sequencing_dir omitted -- default
+#     # to /data/experiment1/{phenotyping,segmentation,sequencing}
 #     wells: [well1, well2]        # grid_size omitted -- auto-detected per well
 #     # window omitted -- falls back to the global `window` default below
 #     cp_features: true            # also run the CellProfiler-feature track for this experiment
 #     # cellprofiler_pipeline/cellprofiler_cycle omitted -- fall back to
 #     # the global defaults below
 #   - batch_stem: experiment2
-#     phenotyping_dir: /data/experiment2/phenotyping
+#     starcall_workflow_dir: /data/experiment2
+#     # sequencing data lives on separate storage for this experiment --
+#     # phenotyping_dir/segmentation_dir still default under
+#     # starcall_workflow_dir, only sequencing_dir is overridden
+#     sequencing_dir: /mnt/sequencer-storage/experiment2/sequencing
 #     wells: [well3]
 #     grid_size: 8                 # explicit override
 #     window: 180                  # per-experiment override of the global default
 #     # cp_features omitted -- cellDINO-only for this experiment
 
 # ── Shared per-experiment defaults (window / cellprofiler_pipeline / cellprofiler_cycle) ──
-# `window` (BuildDatasetConfig), `cellprofiler_pipeline` and
-# `cellprofiler_cycle` (CpFeaturesConfig) are logically per-experiment
-# fields (see "Per-experiment configs" above), but in practice are almost
-# always the same value across every experiment in a run -- one crop size
-# per Cell-DINO checkpoint, one CellProfiler pipeline per run. Set the
-# shared value once here; `workflows/embeddings.nf` fills it in for any
-# `experiments:` entry that doesn't set its own value for that key, and an
-# entry that *does* set its own value always wins over the global default
-# here.
+# `window` (BuildDatasetConfig) and `cellprofiler_pipeline`/
+# `cellprofiler_cycle` (CpFeaturesConfig-facing, consumed by
+# BUILD_CELL_IMAGES) are logically per-experiment fields (see "Per-
+# experiment configs" above), but in practice are almost always the same
+# value across every experiment in a run -- one crop size per Cell-DINO
+# checkpoint, one CellProfiler pipeline per run. Set the shared value once
+# here; `workflows/embeddings.nf` fills it in for any `experiments:` entry
+# that doesn't set its own value for that key, and an entry that *does* set
+# its own value always wins over the global default here.
 window: 224                    # crop size in pixels -- must match cell_dino_crop_size below
 cellprofiler_pipeline: null    # the CellProfiler .cppipe pipeline's basename -- required (here, or per `cp_features: true` entry) once any experiment sets cp_features: true
 cellprofiler_cycle: ""         # "" (no cycle) unless starcall-workflow ran cellprofiler per-cycle
+
+# cell_images_hard_copy is GLOBAL ONLY -- unlike window/cellprofiler_pipeline/
+# cellprofiler_cycle above, an experiments: entry can't override this one.
+# Nextflow's publishDir `mode:` (which this drives, in
+# modules/local/build_cell_images.nf) must be a static value at process-
+# definition time -- it doesn't accept a per-task closure the way `path:`
+# does (confirmed against a real Nextflow 26.04.6 run). A genuine per-
+# experiment override would need two separate processes with experiments
+# routed between them; not implemented.
+cell_images_hard_copy: false   # false = symlink BUILD_CELL_IMAGES' collected tif files from their real starcall-workflow location (default, no duplication); true = real copies (self-contained, no dependency on phenotyping_dir staying mounted)
+
+# ── Snakemake invocation (BUILD_CELL_IMAGES) ─────────────────────────────────
+snakemake_cores: 4             # --cores passed to snakemake within one BUILD_CELL_IMAGES task -- local parallelism inside that one invocation, distinct from Nextflow's own executor parallelism across experiments
+# The ops conda env's snakemake binary is NOT a params.yaml value -- it's
+# process.ext.snakemake_bin (nextflow.config), a process-config directive
+# rather than a pipeline param, specifically so -profile local can
+# actually override it back to bare `snakemake`. (-params-file params.yaml
+# -- this file -- outranks a profile's own `params.*` assignments in
+# Nextflow's config precedence, the same reason docker.enabled/
+# process.container, not params.*, are what -profile local flips below.)
+# See nextflow.config's process{} block and build_cell_images.nf.
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
 random_seed: 0
