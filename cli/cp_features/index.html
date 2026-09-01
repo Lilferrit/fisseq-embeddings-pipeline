@@ -327,7 +327,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../dataset/" class="md-tabs__link">
+        <a href="../build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -347,7 +347,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../api/dataset/" class="md-tabs__link">
+        <a href="../../api/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -610,6 +610,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1160,6 +1216,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_enumerate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/dataset/" class="md-nav__link">
         
   
@@ -1697,30 +1809,17 @@
 
 <h1 id="cellprofiler-feature-dataset-build_cp_features">CellProfiler Feature Dataset (<code>BUILD_CP_FEATURES</code>)<a class="headerlink" href="#cellprofiler-feature-dataset-build_cp_features" title="Permanent link">&para;</a></h1>
 <p><code>python -m fisseq_embeddings_pipeline.cp_features</code> (Nextflow process
-<code>BUILD_CP_FEATURES</code>) combines every discovered tile's cell table with that
-tile's already-computed CellProfiler measurement CSV into one
-per-experiment <code>cp_features.parquet</code> -- the CellProfiler-feature analog of
-<code>EMBED_CELLS</code>' <code>embeddings.parquet</code>.</p>
-<p>Tile discovery reuses <code>BUILD_DATASET</code>'s own <code>discover_tiles()</code> directly
-(same <code>phenotyping_dir</code>/<code>wells</code>/<code>grid_size</code>/<code>segmentation_type</code>
-resolution, same <code>{well}_grid{N}/tile{x}x{y}y/</code> glob), since
-<code>starcall-workflow</code>'s <code>origin/devel</code> <code>workflow/rules/phenotyping.smk</code>
-already writes each tile's CellProfiler output at a deterministic path
-alongside its cell table:
-<code>{tile_dir}/cellprofiler{cellprofiler_cycle}_{cellprofiler_pipeline}.csv</code>.
-No hand-specified merged input file or per-run join-key column mapping is
-needed.</p>
-<p><strong>Row-position join, not index-value join.</strong> Each tile's cell table row
-<code>i</code> is paired with its CellProfiler CSV's row <code>i</code> -- not by matching their
-first-column index values. This mirrors <code>BUILD_DATASET</code>'s own
-<code>_crop_cell(..., label=i + 1, ...)</code> convention. A tile whose cell table
-and CellProfiler CSV have different row counts raises, rather than
-silently misaligning every downstream row -- see
-<a href="../../architecture/#cellprofiler-feature-csv-input-from-starcall-workflow">Architecture</a>.</p>
-<p>A tile whose CellProfiler CSV is missing or empty is skipped with a
-logged warning (CellProfiler's own failure path can leave an empty
-output); a tile whose cell table is empty is skipped silently, same as
-<code>BUILD_DATASET</code>.</p>
+<code>BUILD_CP_FEATURES</code>) selects <code>BUILD_CELL_IMAGES</code>' <code>cp_*</code>-prefixed
+CellProfiler feature columns out of its <code>cell_table.parquet</code>, stripping
+the prefix back off, into one per-experiment <code>cp_features.parquet</code> -- the
+CellProfiler-feature analog of <code>EMBED_CELLS</code>' <code>embeddings.parquet</code>.</p>
+<p>This stage no longer discovers tiles, reads any CSV, or touches
+<code>starcall-workflow</code>'s tree at all -- <code>BUILD_CELL_IMAGES</code> is the only stage
+that does, and it already joined each tile's CellProfiler CSV into
+<code>cell_table.parquet</code> (by row position -- CellProfiler's own <code>ObjectNumber</code>
+numbering has no shared index with the segmentation table) before this
+stage ever runs. See
+<a href="../../architecture/#cell-images-buildcellimages-output-from-starcall-workflow">Architecture</a>.</p>
 <h2 id="config-fields">Config fields<a class="headerlink" href="#config-fields" title="Permanent link">&para;</a></h2>
 <p>Extends the <a href="#common-config-fields">common config fields</a> below.</p>
 <table>
@@ -1733,39 +1832,9 @@ output); a tile whose cell table is empty is skipped silently, same as
 </thead>
 <tbody>
 <tr>
-<td><code>phenotyping_dir</code></td>
+<td><code>cell_images_dir</code></td>
 <td><strong>required</strong></td>
-<td><code>starcall-workflow</code>'s phenotyping output root -- same directory as this experiment's <code>BUILD_DATASET</code> entry.</td>
-</tr>
-<tr>
-<td><code>wells</code></td>
-<td><strong>required</strong></td>
-<td>Wells belonging to this experiment.</td>
-</tr>
-<tr>
-<td><code>grid_size</code></td>
-<td><code>null</code></td>
-<td>Tile grid size; auto-detected per well when unset, same convention as <code>BUILD_DATASET</code>.</td>
-</tr>
-<tr>
-<td><code>segmentation_type</code></td>
-<td><code>"cells"</code></td>
-<td>Which segmentation output's cell table to read (<code>{segmentation_type}.csv</code>).</td>
-</tr>
-<tr>
-<td><code>use_corrected</code></td>
-<td><code>false</code></td>
-<td><strong>Unused by this stage's own logic</strong> -- present only because <code>discover_tiles()</code> (reused for tile discovery) reads it to populate an image-path column this stage never reads.</td>
-</tr>
-<tr>
-<td><code>cellprofiler_cycle</code></td>
-<td><code>""</code></td>
-<td>The <code>{cycle}</code> component of the CellProfiler output filename -- <code>""</code> (no cycle) or <code>"cycle&lt;N&gt;"</code>. When run via <code>BUILD_CP_FEATURES</code>, a <code>cp_features: true</code> <code>experiments:</code> entry omitting this falls back to <code>params.yaml</code>'s pipeline-wide <code>cellprofiler_cycle</code> default (see <a href="../../configuration/">Configuration</a>).</td>
-</tr>
-<tr>
-<td><code>cellprofiler_pipeline</code></td>
-<td><strong>required</strong></td>
-<td>The <code>{pipeline}</code> component of that filename -- the CellProfiler <code>.cppipe</code> pipeline's basename. When run via <code>BUILD_CP_FEATURES</code>, a <code>cp_features: true</code> <code>experiments:</code> entry omitting this falls back to <code>params.yaml</code>'s pipeline-wide <code>cellprofiler_pipeline</code> default; required here only when invoking this module's CLI directly (or when neither the entry nor the global default sets it).</td>
+<td><code>BUILD_CELL_IMAGES</code>' per-experiment output directory (holds <code>cell_table.parquet</code>, already carrying this experiment's <code>cp_*</code>-prefixed CellProfiler columns). Injected automatically by <code>workflows/embeddings.nf</code> when run through the pipeline; set explicitly only when invoking this module's CLI directly against a <code>BUILD_CELL_IMAGES</code> output you already have.</td>
 </tr>
 <tr>
 <td><code>batch_stem</code></td>
@@ -1775,25 +1844,25 @@ output); a tile whose cell table is empty is skipped silently, same as
 <tr>
 <td><code>barcode_col_name</code></td>
 <td><code>"upBarcode"</code></td>
-<td>Input column name for cell barcodes, read from the cell table.</td>
+<td>Column name for cell barcodes in <code>cell_table.parquet</code>.</td>
 </tr>
 <tr>
 <td><code>aa_changes_col_name</code></td>
 <td><code>"aaChanges"</code></td>
-<td>Input column name for amino-acid change labels.</td>
+<td>Column name for amino-acid change labels in <code>cell_table.parquet</code>.</td>
 </tr>
 <tr>
 <td><code>edit_distance_col_name</code></td>
 <td><code>"editDistance"</code></td>
-<td>Input column name for edit distances.</td>
-</tr>
-<tr>
-<td><code>csv_schema_scan_rows</code></td>
-<td><code>100</code></td>
-<td>Rows scanned from each tile's cell table CSV and CellProfiler CSV to infer column dtypes. <code>null</code> scans every row.</td>
+<td>Column name for edit distances in <code>cell_table.parquet</code>.</td>
 </tr>
 </tbody>
 </table>
+<p><code>phenotyping_dir</code>/<code>wells</code>/<code>grid_size</code>/<code>segmentation_type</code>/<code>use_corrected</code>/
+<code>cellprofiler_cycle</code>/<code>cellprofiler_pipeline</code>/<code>csv_schema_scan_rows</code> are no
+longer fields on this stage -- they're <code>BUILD_CELL_IMAGES</code>-only now
+(starcall-workflow-discovery concerns, including which CellProfiler CSV to
+force and fold in).</p>
 <h2 id="output-file">Output file<a class="headerlink" href="#output-file" title="Permanent link">&para;</a></h2>
 <p>Written to <code>output_dir</code>:</p>
 <ul>
@@ -1805,11 +1874,9 @@ output); a tile whose cell table is empty is skipped silently, same as
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.cp_features<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="nv">output_dir</span><span class="o">=</span>./out<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">phenotyping_dir</span><span class="o">=</span>/data/experiment1/phenotyping<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="s1">'wells=[well1,well2]'</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">cellprofiler_pipeline</span><span class="o">=</span>my_pipeline<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">batch_stem</span><span class="o">=</span>experiment1<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">cell_images_dir</span><span class="o">=</span>/pipeline/cell_images/experiment1<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">batch_stem</span><span class="o">=</span>experiment1<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
 </code></pre></div>
 <h2 id="common-config-fields">Common config fields<a class="headerlink" href="#common-config-fields" title="Permanent link">&para;</a></h2>
 <p>Every CLI tool's config extends <code>AppConfig</code>, which supplies:</p>

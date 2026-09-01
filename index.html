@@ -325,7 +325,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="cli/dataset/" class="md-tabs__link">
+        <a href="cli/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -345,7 +345,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="api/dataset/" class="md-tabs__link">
+        <a href="api/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -683,6 +683,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1134,6 +1190,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="api/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_enumerate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="api/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1679,24 +1791,29 @@ the same cells, for direct comparison against the embedding-space results.</p>
 with a pretrained Cell-DINO vision transformer and measures how each
 variant's cell population differs from wildtype (WT) controls in that
 learned embedding space, both per experiment and pooled across experiments.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Cell Info Table + Cell Images (starcall-workflow)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>starcall-workflow's raw tree -&gt; Cell Images (BUILD_CELL_IMAGES)
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    -&gt; Cell Dataset (WebDataset) -&gt; Cell Embeddings (Cell-DINO)
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    -&gt; Filter Embeddings (QC-passed + synonymous-corrected)
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    -&gt; Aggregation -&gt; Experiment Aggregates -&gt; Global Variant Embeddings (PCA)
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    -&gt; OVWT Distinguish-ability Scores -&gt; Experiment Scores -&gt; Global Variant
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>       Distinguish-ability Scores
 </code></pre></div>
+<p><code>BUILD_CELL_IMAGES</code> is the only stage that reads <code>starcall-workflow</code>'s
+tree or invokes Snakemake -- it forces each tile's phenotype image, mask,
+and genotype columns to exist and joins them into one self-sufficient
+<code>cell_table.parquet</code> per experiment (see <a href="architecture/">Architecture</a>).</p>
 <p>A variant's identity is preserved throughout by its label column
 (<code>meta_aa_changes</code>); "synonymous" variants (same amino acid before/after)
 serve as the in-experiment control population.</p>
 <h3 id="cellprofiler-feature-track-optional">CellProfiler-feature track (optional)<a class="headerlink" href="#cellprofiler-feature-track-optional" title="Permanent link">&para;</a></h3>
 <p>Setting <code>cp_features: true</code> on one of <code>params.yaml</code>'s <code>experiments:</code>
 entries opts that experiment into a second, parallel track:
-<code>BUILD_CP_FEATURES</code> reads that experiment's already-computed CellProfiler
-measurements (from <code>starcall-workflow</code>) and the same downstream shape --
-filter, aggregate, OVWT, global pooling -- runs again, reusing
-<code>QC_FILTER</code>'s existing output rather than QC-filtering twice. See
-<a href="architecture/">Architecture</a> and
+<code>BUILD_CELL_IMAGES</code> additionally forces that experiment's already-computed
+CellProfiler measurements (from <code>starcall-workflow</code>) to exist and folds
+them into <code>cell_table.parquet</code>, <code>BUILD_CP_FEATURES</code> selects them back out,
+and the same downstream shape -- filter, aggregate, OVWT, global pooling
+-- runs again, reusing <code>QC_FILTER</code>'s existing output rather than
+QC-filtering twice. See <a href="architecture/">Architecture</a> and
 <a href="nextflow/#cellprofiler-feature-track">Nextflow Workflow</a>.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1704,9 +1821,10 @@ filter, aggregate, OVWT, global pooling -- runs again, reusing
 <li><strong><a href="quickstart/">Quickstart</a></strong> -- run the pipeline end to end.</li>
 <li><strong><a href="architecture/">Architecture</a></strong> -- design decisions, repository
   layout, data contracts, and the Cell-DINO inference internals.</li>
-<li><strong><a href="nextflow/">Nextflow Workflow</a></strong> -- how the fourteen pipeline stages
-  (eight cellDINO-track, six optional CellProfiler-track) are orchestrated,
-  and the output directory layout.</li>
+<li><strong><a href="nextflow/">Nextflow Workflow</a></strong> -- how the fifteen pipeline stages
+  (<code>BUILD_CELL_IMAGES</code> shared by both tracks, eight more cellDINO-track,
+  six optional CellProfiler-track) are orchestrated, and the output
+  directory layout.</li>
 <li><strong><a href="configuration/">Configuration</a></strong> -- <code>params.yaml</code> reference, Docker
   image versioning, and WebDataset shard sizing.</li>
 <li><strong>Stage Reference</strong> (sidebar) -- usage, config fields, and outputs for
@@ -1720,7 +1838,8 @@ filter, aggregate, OVWT, global pooling -- runs again, reusing
   including the CellProfiler-feature track above (see
   <a href="architecture/">Architecture</a>).</li>
 <li><code>starcall-workflow</code> -- the Snakemake pipeline whose <code>origin/devel</code> branch
-  produces this pipeline's two inputs (Cell Info Table, Cell Images); see
+  produces this pipeline's raw input tree; <code>BUILD_CELL_IMAGES</code> is the only
+  stage that reads it or invokes Snakemake -- see
   <a href="architecture/#data-contracts">Architecture</a>.</li>
 </ul>
 

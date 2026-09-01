@@ -327,7 +327,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../cli/dataset/" class="md-tabs__link">
+        <a href="../cli/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -347,7 +347,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/dataset/" class="md-tabs__link">
+        <a href="../api/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -707,6 +707,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1158,6 +1214,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_enumerate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1723,14 +1835,28 @@ a <code>--pipeline_dir</code> directory holding that experiment's raw data:</p>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nt">experiments</span><span class="p">:</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">batch_stem</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">experiment1</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">phenotyping_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/experiment1/phenotyping</span><span class="w">   </span><span class="c1"># starcall-workflow output root</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="nt">wells</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">well1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">well2</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">    </span><span class="c1"># grid_size omitted -- auto-detected per well from phenotyping_dir's</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="c1"># own {well}_grid&lt;N&gt; directory naming; set it explicitly to override.</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">    </span><span class="c1"># window omitted -- falls back to the global `window` default above.</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">starcall_workflow_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/experiment1</span><span class="w">   </span><span class="c1"># a checkout Snakemake can run against --</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">                                                </span><span class="c1"># IS this experiment's root, no separate</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">                                                </span><span class="c1"># folder needed (nothing requires it to be</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">                                                </span><span class="c1"># named "starcall-workflow")</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">    </span><span class="c1"># phenotyping_dir/segmentation_dir/sequencing_dir omitted -- each is</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">    </span><span class="c1"># auto-resolved: starcall_workflow_dir's own config.yaml (or</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">    </span><span class="c1"># default-config.yaml) is consulted first if present, else it falls</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">    </span><span class="c1"># back to a subdirectory of starcall_workflow_dir</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">    </span><span class="c1"># (phenotyping/segmentation/sequencing); set one explicitly only if</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">    </span><span class="c1"># your lab's data for that tree isn't colocated under</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">    </span><span class="c1"># starcall_workflow_dir at all.</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">    </span><span class="nt">wells</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">well1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">well2</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="c1"># grid_size omitted -- auto-detected per well from phenotyping_dir's</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">    </span><span class="c1"># own {well}_grid&lt;N&gt; directory naming; set it explicitly to override.</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">    </span><span class="c1"># window omitted -- falls back to the global `window` default above.</span>
 </code></pre></div>
-<p>See <a href="../cli/dataset/"><code>BUILD_DATASET</code>'s stage reference</a> for every field
-<code>BuildDatasetConfig</code> accepts.</p>
+<p>These starcall-workflow-facing fields all belong to <code>BUILD_CELL_IMAGES</code>,
+the one stage that touches <code>starcall-workflow</code>'s tree -- see
+<a href="../architecture/#cell-images-buildcellimages-output-from-starcall-workflow"><code>BUILD_CELL_IMAGES</code>' section of the Architecture doc</a>
+for every field it accepts, and
+<a href="../cli/dataset/"><code>BUILD_DATASET</code>'s stage reference</a> for <code>BuildDatasetConfig</code>'s
+own remaining fields (<code>window</code>, <code>shard_maxcount</code>, ...).</p>
 <h2 id="2-get-a-cell-dino-checkpoint">2. Get a Cell-DINO checkpoint<a class="headerlink" href="#2-get-a-cell-dino-checkpoint" title="Permanent link">&para;</a></h2>
 <p><code>--cell_dino_checkpoint</code> is required, with no default (a checkpoint path is
 inherently deployment-specific). Point it at a real <code>.pth</code> file; see
@@ -1758,8 +1884,9 @@ add <code>-profile local</code>:</p>
 </code></pre></div>
 <h2 id="4-read-the-outputs">4. Read the outputs<a class="headerlink" href="#4-read-the-outputs" title="Permanent link">&para;</a></h2>
 <p>Every stage's output lands under <code>&lt;pipeline_dir&gt;/</code>, one subdirectory per
-stage (<code>dataset/</code>, <code>qc_filter/</code>, <code>embeddings/</code>, <code>filter_embeddings/</code>,
-<code>feature_select_batchwise/</code>, <code>ovwt_batchwise/</code>, <code>global/</code>). See
+stage (<code>cell_images/</code>, <code>dataset/</code>, <code>qc_filter/</code>, <code>embeddings/</code>,
+<code>filter_embeddings/</code>, <code>feature_select_batchwise/</code>, <code>ovwt_batchwise/</code>,
+<code>global/</code>). See
 <a href="../nextflow/#output-directory-layout">Nextflow Workflow</a> for the full tree
 and <a href="../architecture/#data-contracts">Architecture</a> for what each Parquet
 file's columns mean.</p>

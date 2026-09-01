@@ -9,7 +9,7 @@
       
       
       
-        <link rel="prev" href="../../configuration/">
+        <link rel="prev" href="../build_cell_images_table/">
       
       
         <link rel="next" href="../qcfilter/">
@@ -327,7 +327,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+        <a href="../build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -347,7 +347,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../api/dataset/" class="md-tabs__link">
+        <a href="../../api/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -610,6 +610,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1152,6 +1208,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_enumerate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1708,11 +1820,13 @@ Dataset is so that changing a QC threshold never re-triggers the
 expensive GPU embedding pass -- you pay for embedding every cell once, up
 front.</p>
 <p>No hand-authored tile manifest is needed: <code>BUILD_DATASET</code> derives the
-tile list directly from <code>starcall-workflow</code>'s own directory convention
-(<code>{well}_grid{grid_size}/tile{x}x{y}y/</code>), given just a well list -- and,
-unless overridden, its own grid size too: when <code>grid_size</code> is left unset,
-each well's grid size is auto-detected by scanning <code>phenotyping_dir</code> for
-that well's <code>{well}_grid&lt;N&gt;</code> directory.</p>
+tile list directly from <code>BUILD_CELL_IMAGES</code>' own output directory (see
+<a href="../../architecture/#cell-images-buildcellimages-output-from-starcall-workflow">Architecture</a>),
+not from <code>starcall-workflow</code>'s tree directly -- <code>BUILD_CELL_IMAGES</code> is the
+only stage that touches <code>starcall-workflow</code>'s tree or invokes Snakemake.
+<code>BUILD_DATASET</code> itself no longer does any well/grid-size discovery of its
+own; it just globs <code>cell_images_dir</code>'s already-resolved
+<code>{well}_grid&lt;N&gt;/tile&lt;x&gt;x&lt;y&gt;y/</code> directories.</p>
 <h2 id="config-fields">Config fields<a class="headerlink" href="#config-fields" title="Permanent link">&para;</a></h2>
 <p>Extends the <a href="#common-config-fields">common config fields</a> below.</p>
 <table>
@@ -1725,19 +1839,9 @@ that well's <code>{well}_grid&lt;N&gt;</code> directory.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>phenotyping_dir</code></td>
+<td><code>cell_images_dir</code></td>
 <td><strong>required</strong></td>
-<td><code>starcall-workflow</code>'s phenotyping output root.</td>
-</tr>
-<tr>
-<td><code>wells</code></td>
-<td><strong>required</strong></td>
-<td>Wells belonging to this experiment, e.g. <code>["well1", "well2"]</code>.</td>
-</tr>
-<tr>
-<td><code>grid_size</code></td>
-<td><code>null</code></td>
-<td>Tile grid size, matching <code>starcall-workflow</code>'s own directory convention. When unset, auto-detected per well from <code>phenotyping_dir</code>'s <code>{well}_grid&lt;N&gt;</code> directory name; set explicitly to skip detection (e.g. if a well has more than one such directory).</td>
+<td><code>BUILD_CELL_IMAGES</code>' per-experiment output directory (holds <code>cell_table.parquet</code> plus each tile's collected <code>*_pt.tif</code>/<code>*_mask.tif</code>). Injected automatically by <code>workflows/embeddings.nf</code> when run through the pipeline; set explicitly only when invoking this module's CLI directly against a <code>BUILD_CELL_IMAGES</code> output you already have.</td>
 </tr>
 <tr>
 <td><code>window</code></td>
@@ -1750,16 +1854,6 @@ that well's <code>{well}_grid&lt;N&gt;</code> directory.</p>
 <td>This experiment's identifier, written into every sample's <code>meta.json</code> as <code>meta_batch</code>.</td>
 </tr>
 <tr>
-<td><code>segmentation_type</code></td>
-<td><code>"cells"</code></td>
-<td>Which segmentation output to use (<code>{segmentation_type}.csv</code> / <code>{segmentation_type}_mask.tif</code>).</td>
-</tr>
-<tr>
-<td><code>use_corrected</code></td>
-<td><code>false</code></td>
-<td>Whether to read <code>corrected_pt.tif</code> or <code>raw_pt.tif</code>.</td>
-</tr>
-<tr>
 <td><code>shard_maxcount</code></td>
 <td><code>2000</code></td>
 <td>Max samples per WebDataset shard. See <a href="../../configuration/#build_dataset-shard-sizing">shard sizing</a>.</td>
@@ -1767,25 +1861,25 @@ that well's <code>{well}_grid&lt;N&gt;</code> directory.</p>
 <tr>
 <td><code>barcode_col_name</code></td>
 <td><code>"upBarcode"</code></td>
-<td>Input column name for cell barcodes.</td>
+<td>Column name for cell barcodes in <code>cell_table.parquet</code>.</td>
 </tr>
 <tr>
 <td><code>aa_changes_col_name</code></td>
 <td><code>"aaChanges"</code></td>
-<td>Input column name for amino-acid change labels.</td>
+<td>Column name for amino-acid change labels in <code>cell_table.parquet</code>.</td>
 </tr>
 <tr>
 <td><code>edit_distance_col_name</code></td>
 <td><code>"editDistance"</code></td>
-<td>Input column name for edit distances.</td>
-</tr>
-<tr>
-<td><code>csv_schema_scan_rows</code></td>
-<td><code>100</code></td>
-<td>Rows scanned from each tile's cell table CSV to infer column dtypes (polars <code>scan_csv</code>'s <code>infer_schema_length</code>). <code>null</code> scans every row.</td>
+<td>Column name for edit distances in <code>cell_table.parquet</code>.</td>
 </tr>
 </tbody>
 </table>
+<p><code>phenotyping_dir</code>/<code>wells</code>/<code>grid_size</code>/<code>segmentation_type</code>/<code>use_corrected</code>/
+<code>csv_schema_scan_rows</code> are no longer fields on this stage -- they're
+<code>BUILD_CELL_IMAGES</code>-only now (starcall-workflow-discovery concerns), and
+there's no CSV left for this stage to scan-infer dtypes for
+(<code>cell_table.parquet</code> is already typed).</p>
 <h2 id="output-files">Output files<a class="headerlink" href="#output-files" title="Permanent link">&para;</a></h2>
 <p>Written to <code>output_dir</code>:</p>
 <ul>
@@ -1802,15 +1896,11 @@ that well's <code>{well}_grid&lt;N&gt;</code> directory.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.dataset<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="nv">output_dir</span><span class="o">=</span>./out<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">phenotyping_dir</span><span class="o">=</span>/data/experiment1/phenotyping<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="s1">'wells=[well1,well2]'</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">window</span><span class="o">=</span><span class="m">224</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">batch_stem</span><span class="o">=</span>experiment1<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">cell_images_dir</span><span class="o">=</span>/pipeline/cell_images/experiment1<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">window</span><span class="o">=</span><span class="m">224</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">batch_stem</span><span class="o">=</span>experiment1<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
 </code></pre></div>
-<p><code>grid_size</code> is omitted above -- it's auto-detected per well from
-<code>phenotyping_dir</code>'s directory naming. Pass <code>grid_size=12</code> explicitly to
-override detection.</p>
 <h2 id="common-config-fields">Common config fields<a class="headerlink" href="#common-config-fields" title="Permanent link">&para;</a></h2>
 <p>Every CLI tool's config extends <code>AppConfig</code>, which supplies:</p>
 <table>

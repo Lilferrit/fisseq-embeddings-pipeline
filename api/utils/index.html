@@ -323,7 +323,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../cli/dataset/" class="md-tabs__link">
+        <a href="../../cli/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -345,7 +345,7 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../dataset/" class="md-tabs__link">
+        <a href="../build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -603,6 +603,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1059,6 +1115,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_enumerate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -2535,6 +2647,12 @@ plus the floating-point epsilon used for near-zero-variance checks.</p>
 this pipeline's zero-padded <code>emb_%04d</code> embedding-dimension columns the
 same way <code>FEATURE_SELECTOR</code> matches CellProfiler's upper-case-plus-
 underscore columns in the source repo.</p>
+<p>Another addition: <code>TILE_DIR_RE</code>, the one piece of the
+BUILD_CELL_IMAGES/BUILD_DATASET tile-naming convention (<code>tile&lt;x&gt;x&lt;y&gt;y</code>)
+both <code>dataset.py</code> and <code>build_cell_images_enumerate.py</code> need to stay in
+sync on -- shared here (rather than left as two independent
+<code>re.compile()</code> copies, as it was before the two stages lived in the same
+package) so the one thing that must not drift can't.</p>
 
 
 

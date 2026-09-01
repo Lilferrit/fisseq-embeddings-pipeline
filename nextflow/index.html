@@ -327,7 +327,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../cli/dataset/" class="md-tabs__link">
+        <a href="../cli/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -347,7 +347,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/dataset/" class="md-tabs__link">
+        <a href="../api/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -619,6 +619,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Profiles">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#singularityapptainer-and-arbitrary-host-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Singularity/Apptainer and arbitrary host paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -729,6 +746,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1180,6 +1253,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_enumerate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1715,6 +1844,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Profiles">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#singularityapptainer-and-arbitrary-host-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Singularity/Apptainer and arbitrary host paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1770,40 +1916,53 @@ param (<code>pipeline_dir</code>, <code>cell_dino_checkpoint</code>, or an empty
 <code>experiments</code> list) is unset, rather than letting Nextflow's generic "no
 such property" error surface first.</p>
 <h2 id="per-experiment-configs">Per-experiment configs<a class="headerlink" href="#per-experiment-configs" title="Permanent link">&para;</a></h2>
-<p>Every entry in <code>params.yaml</code>'s <code>experiments:</code> list supplies
-<code>BUILD_DATASET</code>'s per-experiment fields (<code>phenotyping_dir</code>, <code>wells</code>,
-<code>grid_size</code>, <code>window</code>, ...) directly -- <code>batch_stem</code> is a required key
-inside each entry (there's no filename to derive it from), and must be
-unique across the list. <code>workflows/embeddings.nf</code> validates <code>params.experiments</code>
-(non-empty list, every entry a map with a non-blank <code>batch_stem</code>, no
-duplicate <code>batch_stem</code>s) and pairs each entry's remaining keys with its
-<code>batch_stem</code>, so <code>BUILD_DATASET</code>'s <code>-resume</code> cache key is the actual
-scalar values. <code>modules/local/build_dataset.nf</code> threads every key in that
-map through as an individual Hydra CLI override.</p>
-<p><code>window</code> is the one field with its own pipeline-wide default
-(<code>params.window</code>, see <a href="../configuration/">Configuration</a>):
-<code>workflows/embeddings.nf</code> fills it into an entry's overrides only when
-that entry doesn't already set <code>window</code> itself, so a single value covers
-every experiment sharing a crop size while any experiment needing a
-different one can still override it locally.</p>
+<p>Every entry in <code>params.yaml</code>'s <code>experiments:</code> list supplies fields for up
+to three stages -- <code>BUILD_CELL_IMAGES</code> (starcall-workflow-facing:
+<code>starcall_workflow_dir</code>, <code>phenotyping_dir</code>, <code>segmentation_dir</code>,
+<code>sequencing_dir</code>, <code>wells</code>, <code>grid_size</code>, ...), <code>BUILD_DATASET</code> (<code>window</code>,
+<code>shard_maxcount</code>, ...), and <code>BUILD_CP_FEATURES</code> (for <code>cp_features: true</code>
+entries) -- <code>batch_stem</code> is a required key inside each entry (there's no
+filename to derive it from), and must be unique across the list.
+<code>workflows/embeddings.nf</code> validates <code>params.experiments</code> (non-empty list,
+every entry a map with a non-blank <code>batch_stem</code>, no duplicate
+<code>batch_stem</code>s), routes each key to the stage(s) that own it via three
+disjoint <code>*_field_includes</code>/<code>*_field_excludes</code> sets, and pairs each
+stage's remaining keys with its <code>batch_stem</code>, so every stage's <code>-resume</code>
+cache key is the actual scalar values. Each <code>modules/local/*.nf</code> threads
+its own keys through as individual Hydra CLI overrides.</p>
+<p><code>window</code> is one field with its own pipeline-wide default (<code>params.window</code>,
+see <a href="../configuration/">Configuration</a>): <code>workflows/embeddings.nf</code> fills it
+into an entry's <code>BUILD_DATASET</code>-bound overrides only when that entry
+doesn't already set <code>window</code> itself, so a single value covers every
+experiment sharing a crop size while any experiment needing a different
+one can still override it locally.</p>
 <h2 id="stage-graph">Stage graph<a class="headerlink" href="#stage-graph" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>config_ch (params.experiments)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cell_images_config_ch (params.experiments -- starcall-workflow-facing fields)
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    │
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    ▼
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>BUILD_DATASET ──┬──► QC_FILTER
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                └──► EMBED_CELLS
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                          │
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>          QC_FILTER ──┐  │
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>                       ▼  ▼
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>                 FILTER_EMBEDDINGS
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>                       │
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        ┌──────────────┴──────────────┐
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        ▼                              ▼
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>AGGREGATE_EMBEDDINGS            OVWT_BATCHWISE
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        │                              │
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>        ▼ (collected, all experiments) ▼ (collected, all experiments)
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>GLOBAL_VARIANT_EMBEDDINGS   GLOBAL_VARIANT_DISTINGUISHABILITY
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>BUILD_CELL_IMAGES  (cell_table.parquet + collected tile images per experiment)
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    │
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    ▼ (cell_images_dir injected into both config_ch and cp_config_ch below)
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>config_ch (params.experiments -- BuildDatasetConfig fields)
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    │
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    ▼
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>BUILD_DATASET ──┬──► QC_FILTER
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>                └──► EMBED_CELLS
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>                          │
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>          QC_FILTER ──┐  │
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>                       ▼  ▼
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>                 FILTER_EMBEDDINGS
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>                       │
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>        ┌──────────────┴──────────────┐
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>        ▼                              ▼
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>AGGREGATE_EMBEDDINGS            OVWT_BATCHWISE
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>        │                              │
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>        ▼ (collected, all experiments) ▼ (collected, all experiments)
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>GLOBAL_VARIANT_EMBEDDINGS   GLOBAL_VARIANT_DISTINGUISHABILITY
 </code></pre></div>
+<p><code>BUILD_CELL_IMAGES</code> runs unconditionally for every experiment (not gated
+on <code>cp_features</code>) -- both the cellDINO track above and the CellProfiler
+track below depend on its output.</p>
 <p><code>EMBED_CELLS</code> streams <code>BUILD_DATASET</code>'s WebDataset shards directly and has
 no dependency on <code>QC_FILTER</code> -- the whole point of building the WebDataset
 up front is that this expensive GPU pass runs once per experiment
@@ -1829,43 +1988,50 @@ disambiguate; <code>reconstruct_staged_paths()</code> handles both cases.</p>
 <p>An optional, parallel second track processes the same experiments'
 hand-engineered CellProfiler measurements. There's no separate list to
 keep in sync with <code>experiments:</code> -- an entry opts itself in by setting
-<code>cp_features: true</code>, and that same entry's <code>phenotyping_dir</code>/<code>wells</code>/
-<code>grid_size</code>/<code>segmentation_type</code>/etc. (plus any <code>cellprofiler_pipeline</code>/
-<code>cellprofiler_cycle</code> it sets) feed <code>CpFeaturesConfig</code> directly. No entry
-setting <code>cp_features: true</code> -- the default -- skips <code>BUILD_CP_FEATURES</code>
-onward entirely, so a run with no CellProfiler data works exactly as
-before. Because the opted-in entries are a subset of <code>params.experiments</code>
-itself, <code>batch_stem</code> existence/uniqueness are already guaranteed by that
-list's own validation, and this track's own filter stage reuses that same
-experiment's <code>QC_FILTER</code> output rather than running QC a second time.</p>
+<code>cp_features: true</code>, which does two things: <code>BUILD_CELL_IMAGES</code> (always
+run, for every experiment) additionally forces that experiment's
+CellProfiler CSV to exist and folds its columns into <code>cell_table.parquet</code>,
+and <code>BUILD_CP_FEATURES</code> runs against that same output, selecting them back
+out. No entry setting <code>cp_features: true</code> -- the default -- skips
+<code>BUILD_CP_FEATURES</code> onward entirely (though <code>BUILD_CELL_IMAGES</code> itself
+still runs for that experiment, just without the CellProfiler target), so
+a run with no CellProfiler data works exactly as before. Because the
+opted-in entries are a subset of <code>params.experiments</code> itself, <code>batch_stem</code>
+existence/uniqueness are already guaranteed by that list's own validation,
+and this track's own filter stage reuses that same experiment's
+<code>QC_FILTER</code> output rather than running QC a second time.</p>
 <p><code>cellprofiler_pipeline</code> and <code>cellprofiler_cycle</code> each have their own
 pipeline-wide default too (<code>params.cellprofiler_pipeline</code>,
 <code>params.cellprofiler_cycle</code> -- see <a href="../configuration/">Configuration</a>),
-filled into an entry's overrides the same way <code>window</code> is for
-<code>experiments:</code> above -- only when that entry doesn't set its own value:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cp_config_ch (params.experiments entries with cp_features: true)
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    │
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    ▼
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>BUILD_CP_FEATURES
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    │
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>QC_FILTER ──┐  (the SAME qc_ch used by FILTER_EMBEDDINGS above -- no
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>             │   second QC_FILTER process)
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>             ▼
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>      FILTER_CP_FEATURES
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>             │
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    ┌────────┴────────┐
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    ▼                  ▼
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>AGGREGATE_CP_FEATURES   OVWT_BATCHWISE_CP_FEATURES
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    │                              │
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    ▼ (collected, all experiments) ▼ (collected, all experiments)
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>GLOBAL_VARIANT_CP_FEATURES   GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES
+filled into an entry's <code>BUILD_CELL_IMAGES</code>-bound overrides the same way
+<code>window</code> is for <code>experiments:</code> above -- only when that entry doesn't set
+its own value:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cp_config_ch (params.experiments entries with cp_features: true --
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>              cell_images_dir injected from cell_images_ch, same as config_ch)
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    │
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    ▼
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>BUILD_CP_FEATURES
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    │
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>QC_FILTER ──┐  (the SAME qc_ch used by FILTER_EMBEDDINGS above -- no
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>             │   second QC_FILTER process)
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>             ▼
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>      FILTER_CP_FEATURES
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>             │
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    ┌────────┴────────┐
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    ▼                  ▼
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>AGGREGATE_CP_FEATURES   OVWT_BATCHWISE_CP_FEATURES
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    │                              │
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    ▼ (collected, all experiments) ▼ (collected, all experiments)
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>GLOBAL_VARIANT_CP_FEATURES   GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES
 </code></pre></div>
-<p>Every stage here is either genuinely new (<code>BUILD_CP_FEATURES</code>, which
-discovers tiles the same way <code>BUILD_DATASET</code> does -- see
-<a href="../architecture/#cellprofiler-feature-csv-input-from-starcall-workflow">Architecture</a>)
-or a thin wrapper reusing the cellDINO track's own function, unchanged,
-with <code>feature_selector=FEATURE_SELECTOR</code> where that parameter exists (see
-<a href="../architecture/#architecture-decisions">Architecture</a>, decision 14).</p>
+<p><code>BUILD_CP_FEATURES</code> is now a flat read + column-select against
+<code>BUILD_CELL_IMAGES</code>' <code>cell_table.parquet</code> (no tile discovery, no CSV
+reads of its own -- see
+<a href="../architecture/#cell-images-buildcellimages-output-from-starcall-workflow">Architecture</a>).
+Every other stage here is a thin wrapper reusing the cellDINO track's own
+function, unchanged, with <code>feature_selector=FEATURE_SELECTOR</code> where that
+parameter exists (see <a href="../architecture/#architecture-decisions">Architecture</a>,
+decision 14).</p>
 <h2 id="profiles">Profiles<a class="headerlink" href="#profiles" title="Permanent link">&para;</a></h2>
 <p><code>nextflow.config</code> declares one profile beyond the (containerized) default:</p>
 <ul>
@@ -1882,59 +2048,110 @@ with <code>feature_selector=FEATURE_SELECTOR</code> where that parameter exists 
 <code>containerOptions = '--gpus all'</code> to that label. Add executor-specific
 settings (SGE/Slurm queue, etc.) to that same <code>withLabel</code> block for your
 own deployment.</p>
+<h3 id="singularityapptainer-and-arbitrary-host-paths">Singularity/Apptainer and arbitrary host paths<a class="headerlink" href="#singularityapptainer-and-arbitrary-host-paths" title="Permanent link">&para;</a></h3>
+<p><code>phenotyping_dir</code>/<code>segmentation_dir</code>/<code>sequencing_dir</code>/<code>starcall_workflow_dir</code>
+(<code>BUILD_CELL_IMAGES</code> only now -- see
+<a href="../architecture/#cell-images-buildcellimages-output-from-starcall-workflow">Architecture</a>)
+and <code>cell_dino_checkpoint</code> (<code>EMBED_CELLS</code>) are threaded into each process
+as plain Hydra CLI-override strings when an experiment sets them itself
+(or, for <code>starcall_workflow_dir</code>, a Groovy-interpolated bash argument --
+see <code>modules/local/build_cell_images.nf</code>) -- when an entry omits one of
+the three data dirs, it's instead resolved inside the container/venv by
+<code>build_cell_images_enumerate.py</code>'s <code>resolve_data_dir</code>, reading
+<code>starcall_workflow_dir</code>'s own <code>config.yaml</code>/<code>default-config.yaml</code> if
+present. Either way, none of these are ever declared as Nextflow <code>path</code>
+process inputs, and the paths a project's own <code>config.yaml</code> names are just
+as host-filesystem-real as an explicit override. That means Nextflow
+itself never stages or binds any of them; under Docker (the default
+profile) this is invisible because the whole host filesystem is reachable
+inside the container anyway, but under a Singularity/Apptainer-based
+profile it isn't. Apptainer's own <code>autoMounts</code> only covers <code>$HOME</code>, <code>$PWD</code>
+(the task work dir), and system default binds -- a sibling data tree
+outside <code>pipeline_dir</code>'s own tree (e.g. an experiment's <code>phenotyping_dir</code>
+living under a different top-level project directory) simply isn't
+visible inside the container, even though it's plainly there on the host.</p>
+<p>The symptom is confusing because it surfaces deep inside Python as an
+ordinary-looking "file/directory not found" error (e.g.
+<code>build_cell_images_enumerate.py</code>'s grid-size auto-detection raising <code>"no
+'{well}_grid&lt;N&gt;' directory found"</code>) for a path that <code>ls</code> shows fine from
+the host shell -- the giveaway is that it's a container-visibility
+problem, not a real <code>phenotyping_dir</code>/<code>wells</code> misconfiguration.</p>
+<p>Any Singularity/Apptainer profile needs an explicit bind covering every
+host root your <code>params.yaml</code> paths can point into, via
+<code>singularity.runOptions = '-B &lt;path&gt;[,&lt;path&gt;...]'</code>. See
+<code>scratch/nextflow.config</code>'s <code>sge</code> profile (Fowler lab cluster; gitignored
+since it's a per-cluster local config, not shipped in the repo) for a
+worked example binding the lab's shared NFS root.</p>
 <h2 id="nextflow-modules">Nextflow modules<a class="headerlink" href="#nextflow-modules" title="Permanent link">&para;</a></h2>
 <p>Every <code>modules/local/*.nf</code> file follows the same shape: <code>errorStrategy
 'ignore'</code>, <code>container "${params.container_image}"</code>, <code>publishDir</code>, and a
 <code>python -m fisseq_embeddings_pipeline.&lt;module&gt;</code> script block ending in
 <code>random_seed=${params.random_seed}</code>. <code>EMBED_CELLS</code> additionally carries
-<code>label 'process_gpu'</code>, since it's the pipeline's only GPU-bound stage.</p>
+<code>label 'process_gpu'</code>, since it's the pipeline's only GPU-bound stage.
+<code>BUILD_CELL_IMAGES</code> (<code>modules/local/build_cell_images.nf</code>) is a partial
+exception to the shape above: its <code>publishDir</code> <code>mode:</code> is <code>'symlink'</code> or
+<code>'copy'</code> depending on <code>params.cell_images_hard_copy</code> (not the shared
+static <code>'copy'</code> every other module uses), and its script block is
+three phases rather than one -- <code>python -m
+fisseq_embeddings_pipeline.build_cell_images_enumerate</code>, then a
+<code>snakemake</code> invocation (the one step needing the <code>ops</code> conda env baked
+into the same image -- see the root <code>Dockerfile</code>), then <code>python -m
+fisseq_embeddings_pipeline.build_cell_images_table</code> -- but it uses the
+same <code>container "${params.container_image}"</code> as every other module, and
+two of its three phases do go through <code>python -m
+fisseq_embeddings_pipeline...</code> like everything else.</p>
 <h2 id="output-directory-layout">Output directory layout<a class="headerlink" href="#output-directory-layout" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&lt;pipeline_dir&gt;/
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  dataset/&lt;batch&gt;/
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    dataset-000000.tar, dataset-000001.tar, ...   # WebDataset shards -- all cells, unfiltered
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    metadata.parquet                              # same cells, meta_* only, no images
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  qc_filter/&lt;batch&gt;/
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    filtered_cells.parquet
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    barcode_counts.parquet
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    variants_per_barcode.parquet
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>  embeddings/&lt;batch&gt;/embeddings.parquet   # unfiltered, all cells
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>  filter_embeddings/&lt;batch&gt;/
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    filtered_keys.parquet                 # QC-passed join key + meta_is_control -- no emb_* columns
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    normalizer.parquet                    # fitted synonymous z-score stats
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>  feature_select_batchwise/&lt;batch&gt;/
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    aggregate.parquet                     # Experiment N Aggregates
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>  ovwt_batchwise/&lt;batch&gt;/
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    results.parquet                       # auroc_pooled, auroc_median_barcode
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    cell_scores.parquet                   # per-cell out-of-fold scores, one row per cell per variant scored against
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    models.pkl                            # dict[variant] -&gt; list[(model, calibrator)], one pair per CV fold
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>  global/
-<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>    embeddings/
-<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>      median_aggregate.parquet            # cross-experiment median, pre-PCA
-<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>      pca_scores.parquet                  # full retained rank
-<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>      pca_components.parquet              # loadings only
-<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>      pca_variance_explained.parquet      # per-component + cumulative variance explained
-<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>      pca_reduced.parquet                 # variance-thresholded PC scores + meta_is_control + meta_impact_score
-<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>    distinguishability/
-<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>      global_scores.parquet               # Global Variant Distinguish-ability Scores
-<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>  cp_features/&lt;batch&gt;/cp_features.parquet   # unfiltered, all cells -- CellProfiler feature columns
-<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>  filter_cp_features/&lt;batch&gt;/
-<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>    filtered_keys.parquet                 # QC-passed join key + meta_is_control -- no CellProfiler feature columns
-<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>    normalizer.parquet                    # fitted synonymous z-score stats
-<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>  feature_select_batchwise_cp_features/&lt;batch&gt;/
-<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>    aggregate.parquet                     # Experiment N CP Aggregates
-<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>  ovwt_batchwise_cp_features/&lt;batch&gt;/
-<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>    results.parquet
-<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>    cell_scores.parquet
-<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>    models.pkl
-<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>  global/
-<a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>    cp_features/
-<a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>      median_aggregate.parquet
-<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>      pca_scores.parquet
-<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>      pca_components.parquet
-<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>      pca_variance_explained.parquet
-<a id="__codelineno-3-44" name="__codelineno-3-44" href="#__codelineno-3-44"></a>      pca_reduced.parquet
-<a id="__codelineno-3-45" name="__codelineno-3-45" href="#__codelineno-3-45"></a>    distinguishability_cp_features/
-<a id="__codelineno-3-46" name="__codelineno-3-46" href="#__codelineno-3-46"></a>      global_scores.parquet
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  cell_images/&lt;batch&gt;/
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    cell_table.parquet                            # the ONE self-sufficient cell table -- genotype + (if cp_features) CellProfiler columns already joined in
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    &lt;well&gt;_grid&lt;N&gt;/tile&lt;x&gt;x&lt;y&gt;y/                   # symlinked (default) or hard-copied whole-tile images
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>      raw_pt.tif  (or corrected_pt.tif)
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>      &lt;segmentation_type&gt;_mask.tif
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>  dataset/&lt;batch&gt;/
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    dataset-000000.tar, dataset-000001.tar, ...   # WebDataset shards -- all cells, unfiltered
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    metadata.parquet                              # same cells, meta_* only, no images
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>  qc_filter/&lt;batch&gt;/
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    filtered_cells.parquet
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    barcode_counts.parquet
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    variants_per_barcode.parquet
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>  embeddings/&lt;batch&gt;/embeddings.parquet   # unfiltered, all cells
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>  filter_embeddings/&lt;batch&gt;/
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    filtered_keys.parquet                 # QC-passed join key + meta_is_control -- no emb_* columns
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    normalizer.parquet                    # fitted synonymous z-score stats
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>  feature_select_batchwise/&lt;batch&gt;/
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    aggregate.parquet                     # Experiment N Aggregates
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>  ovwt_batchwise/&lt;batch&gt;/
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>    results.parquet                       # auroc_pooled, auroc_median_barcode
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>    cell_scores.parquet                   # per-cell out-of-fold scores, one row per cell per variant scored against
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>    models.pkl                            # dict[variant] -&gt; list[(model, calibrator)], one pair per CV fold
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>  global/
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>    embeddings/
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>      median_aggregate.parquet            # cross-experiment median, pre-PCA
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>      pca_scores.parquet                  # full retained rank
+<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>      pca_components.parquet              # loadings only
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>      pca_variance_explained.parquet      # per-component + cumulative variance explained
+<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>      pca_reduced.parquet                 # variance-thresholded PC scores + meta_is_control + meta_impact_score
+<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>    distinguishability/
+<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>      global_scores.parquet               # Global Variant Distinguish-ability Scores
+<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>  cp_features/&lt;batch&gt;/cp_features.parquet   # unfiltered, all cells -- CellProfiler feature columns
+<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>  filter_cp_features/&lt;batch&gt;/
+<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>    filtered_keys.parquet                 # QC-passed join key + meta_is_control -- no CellProfiler feature columns
+<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>    normalizer.parquet                    # fitted synonymous z-score stats
+<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>  feature_select_batchwise_cp_features/&lt;batch&gt;/
+<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>    aggregate.parquet                     # Experiment N CP Aggregates
+<a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>  ovwt_batchwise_cp_features/&lt;batch&gt;/
+<a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>    results.parquet
+<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>    cell_scores.parquet
+<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>    models.pkl
+<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>  global/
+<a id="__codelineno-3-44" name="__codelineno-3-44" href="#__codelineno-3-44"></a>    cp_features/
+<a id="__codelineno-3-45" name="__codelineno-3-45" href="#__codelineno-3-45"></a>      median_aggregate.parquet
+<a id="__codelineno-3-46" name="__codelineno-3-46" href="#__codelineno-3-46"></a>      pca_scores.parquet
+<a id="__codelineno-3-47" name="__codelineno-3-47" href="#__codelineno-3-47"></a>      pca_components.parquet
+<a id="__codelineno-3-48" name="__codelineno-3-48" href="#__codelineno-3-48"></a>      pca_variance_explained.parquet
+<a id="__codelineno-3-49" name="__codelineno-3-49" href="#__codelineno-3-49"></a>      pca_reduced.parquet
+<a id="__codelineno-3-50" name="__codelineno-3-50" href="#__codelineno-3-50"></a>    distinguishability_cp_features/
+<a id="__codelineno-3-51" name="__codelineno-3-51" href="#__codelineno-3-51"></a>      global_scores.parquet
 </code></pre></div>
 <p>The <code>cp_features/</code>, <code>filter_cp_features/</code>, <code>feature_select_batchwise_cp_features/</code>,
 <code>ovwt_batchwise_cp_features/</code>, and <code>global/*_cp_features</code> directories only

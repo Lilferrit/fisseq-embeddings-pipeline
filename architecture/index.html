@@ -327,7 +327,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../cli/dataset/" class="md-tabs__link">
+        <a href="../cli/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -347,7 +347,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/dataset/" class="md-tabs__link">
+        <a href="../api/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -635,21 +635,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#cell-info-table-input-from-starcall-workflow" class="md-nav__link">
+  <a href="#cell-images-build_cell_images-output-from-starcall-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cell Info Table (input, from starcall-workflow)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#cell-images-input-from-starcall-workflow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cell Images (input, from starcall-workflow)
+        Cell Images (BUILD_CELL_IMAGES output, from starcall-workflow)
       
     </span>
   </a>
@@ -668,10 +657,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#cellprofiler-feature-csv-input-from-starcall-workflow" class="md-nav__link">
+  <a href="#cellprofiler-feature-columns-build_cp_features-input" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CellProfiler feature CSV (input, from starcall-workflow)
+        CellProfiler feature columns (BUILD_CP_FEATURES input)
       
     </span>
   </a>
@@ -879,6 +868,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1330,6 +1375,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_enumerate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1908,21 +2009,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#cell-info-table-input-from-starcall-workflow" class="md-nav__link">
+  <a href="#cell-images-build_cell_images-output-from-starcall-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cell Info Table (input, from starcall-workflow)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#cell-images-input-from-starcall-workflow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cell Images (input, from starcall-workflow)
+        Cell Images (BUILD_CELL_IMAGES output, from starcall-workflow)
       
     </span>
   </a>
@@ -1941,10 +2031,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#cellprofiler-feature-csv-input-from-starcall-workflow" class="md-nav__link">
+  <a href="#cellprofiler-feature-columns-build_cp_features-input" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CellProfiler feature CSV (input, from starcall-workflow)
+        CellProfiler feature columns (BUILD_CP_FEATURES input)
       
     </span>
   </a>
@@ -2068,11 +2158,11 @@ runs the same downstream variant-vs-wildtype analysis on the learned
 embedding space instead of a curated feature space.</p>
 <p>High-level shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Batch Aggregates And Variant Scores          (per experiment, runs independently)
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  Cell Info Table ─┬─► Cell Dataset ─► Cell Embeddings (Cell DINO) ─┐
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  Cell Images     ─┘                                                 ├─► Filter Embeddings
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  Cell Info Table ─────► QC Filtering ───────────────────────────────┘         │
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                                                                     ┌──────────┴──────────┐
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                                                                     ▼                      ▼
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  starcall-workflow ─► Cell Images ─┬─► Cell Dataset ─► Cell Embeddings (Cell DINO) ─┐
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    (raw tree)                      └─► QC Filtering ───────────────────────────────┤
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                                                                                      ├─► Filter Embeddings
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                                                                     ┌────────────────┴──────┐
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                                                                     ▼                        ▼
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                                                    Aggregation (Synonymous        OVWT Distinguish-ability
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                                                    STD Corrected)                  Scores (Synonymous STD
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                                                          │                          Corrected)
@@ -2087,6 +2177,12 @@ embedding space instead of a curated feature space.</p>
 <a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  Experiment {1..N} Distinguish-ability Scores ─► Variant-wise median pooling ─► Global Variant
 <a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>                                                                                  Distinguish-ability Scores
 </code></pre></div>
+<p>"Cell Images" here is <code>BUILD_CELL_IMAGES</code> (<code>modules/local/build_cell_images.nf</code>)
+-- the only stage that reads <code>starcall-workflow</code>'s tree or invokes Snakemake;
+see <a href="#cell-images-buildcellimages-output-from-starcall-workflow">Data contracts</a>
+below. "Cell Info Table" no longer appears as its own node: the genotype/
+metadata columns it used to name are now part of <code>BUILD_CELL_IMAGES</code>'
+<code>cell_table.parquet</code>, alongside the image references, not a separate input.</p>
 <h3 id="cellprofiler-feature-track-optional-second-track">CellProfiler-feature track (optional second track)<a class="headerlink" href="#cellprofiler-feature-track-optional-second-track" title="Permanent link">&para;</a></h3>
 <p>A second, parallel track processes the same experiments' hand-engineered
 CellProfiler measurements alongside the cellDINO-embedding track above --
@@ -2095,24 +2191,25 @@ same cells. QC filtering isn't duplicated: this track's own filter stage
 joins against <code>QC_FILTER</code>'s existing output instead of running QC a
 second time.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Batch Aggregates And Variant Scores (CellProfiler)  (per experiment, runs independently)
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  starcall-workflow's CellProfiler   ─► CellProfiler Feature Dataset ─┐
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    output (per tile)                                                 ├─► Filter CP Features
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  Cell Info Table ─────► QC Filtering (shared with the embeddings ─────┘         │
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                                        track above -- not rerun)       ┌────────┴────────┐
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                                                                        ▼                  ▼
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>                                                       Aggregation (Synonymous    OVWT Distinguish-ability
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>                                                       STD Corrected)              Scores (Synonymous STD
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>                                                             │                      Corrected)
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>                                                             ▼                            ▼
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>                                                 Experiment N CP Aggregates    Experiment N CP Distinguish-
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>                                                                                ability Scores
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>Global Variant CP Features                   (once, across all experiments)
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>  Experiment {1..N} CP Aggregates ─► Variant-wise median pooling ─► PCA ─► Global Variant CP Features
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>Global Variant CP Distinguish-ability Scores (once, across all experiments)
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>  Experiment {1..N} CP Distinguish-ability Scores ─► Variant-wise median pooling ─► Global Variant CP
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>                                                                                      Distinguish-ability Scores
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  Cell Images (BUILD_CELL_IMAGES,  ─► CellProfiler Feature Dataset ─┐
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    same cell_table.parquet as                                      ├─► Filter CP Features
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    the embeddings track above)                                     │         │
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>                    └─► QC Filtering (shared with the embeddings ────┘         │
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                                       track above -- not rerun)      ┌────────┴────────┐
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>                                                                       ▼                  ▼
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>                                                       Aggregation (Synonymous    OVWT Distinguish-ability
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>                                                       STD Corrected)              Scores (Synonymous STD
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>                                                             │                      Corrected)
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>                                                             ▼                            ▼
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>                                                 Experiment N CP Aggregates    Experiment N CP Distinguish-
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>                                                                                ability Scores
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>Global Variant CP Features                   (once, across all experiments)
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>  Experiment {1..N} CP Aggregates ─► Variant-wise median pooling ─► PCA ─► Global Variant CP Features
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>Global Variant CP Distinguish-ability Scores (once, across all experiments)
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>  Experiment {1..N} CP Distinguish-ability Scores ─► Variant-wise median pooling ─► Global Variant CP
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>                                                                                      Distinguish-ability Scores
 </code></pre></div>
 <h2 id="terminology-map">Terminology map<a class="headerlink" href="#terminology-map" title="Permanent link">&para;</a></h2>
 <table>
@@ -2125,19 +2222,14 @@ second time.</p>
 </thead>
 <tbody>
 <tr>
-<td>Cell Info Table</td>
-<td>upstream input, unchanged</td>
-<td><code>starcall-workflow</code>'s cell table -- same <code>upBarcode</code>/<code>aaChanges</code>/<code>editDistance</code> columns <code>qcfilter.py</code> already expects</td>
-</tr>
-<tr>
 <td>Cell Images</td>
-<td>upstream input, unchanged</td>
-<td><code>starcall-workflow</code>'s stitched tile image + mask -- <strong>on the <code>origin/devel</code> branch</strong></td>
+<td><code>BUILD_CELL_IMAGES</code> (new)</td>
+<td>the ONLY stage that touches <code>starcall-workflow</code>'s tree (<code>phenotyping_dir</code>/<code>segmentation_dir</code>/<code>sequencing_dir</code>) or invokes Snakemake -- <strong>on the <code>origin/devel</code> branch</strong>. Forces each tile's stitched phenotype image + segmentation mask to exist and collects them, and joins the segmentation-side cell table to the sequencing-side genotype table into one self-sufficient <code>cell_table.parquet</code> -- see <a href="#cell-images-buildcellimages-output-from-starcall-workflow">Data contracts</a></td>
 </tr>
 <tr>
 <td>Cell Dataset</td>
 <td><code>BUILD_DATASET</code> (new)</td>
-<td>crops a whole experiment's cells from stitched tile images into a WebDataset, porting <code>make_cell_images</code>'s crop-window algorithm</td>
+<td>crops a whole experiment's cells from <code>BUILD_CELL_IMAGES</code>' collected stitched tile images into a WebDataset, porting <code>make_cell_images</code>'s crop-window algorithm</td>
 </tr>
 <tr>
 <td>QC Filtering</td>
@@ -2182,7 +2274,7 @@ second time.</p>
 <tr>
 <td>CellProfiler Feature Dataset</td>
 <td><code>BUILD_CP_FEATURES</code> (new)</td>
-<td>reads starcall-workflow's already-computed per-tile CellProfiler CSV alongside the same per-tile cell table <code>BUILD_DATASET</code> reads -- see <a href="#cellprofiler-feature-csv-input-from-starcall-workflow">Data contracts</a></td>
+<td>selects <code>cp_*</code>-prefixed CellProfiler columns straight out of <code>BUILD_CELL_IMAGES</code>' <code>cell_table.parquet</code> (that stage already folded in each tile's CellProfiler CSV, by row position) -- see <a href="#cell-images-buildcellimages-output-from-starcall-workflow">Data contracts</a></td>
 </tr>
 <tr>
 <td>Filter CP Features</td>
@@ -2285,71 +2377,109 @@ second time.</p>
     -- never the feature space -- so <code>FILTER_CP_FEATURES</code> joins directly
     against <code>QC_FILTER</code>'s existing <code>filtered_cells.parquet</code> rather than
     running a second <code>QC_FILTER</code> process.</li>
-<li><strong><code>BUILD_CP_FEATURES</code> discovers tiles the same way <code>BUILD_DATASET</code>
-    does</strong> (<code>phenotyping_dir</code>/<code>wells</code>/<code>grid_size</code> auto-detection, reusing
-    <code>dataset.discover_tiles</code> directly) rather than taking a hand-specified
-    merged input file, since <code>starcall-workflow</code> already writes each
-    tile's CellProfiler output at a deterministic path alongside its cell
-    table. It pairs each tile's cell table and CellProfiler CSV <strong>by row
-    position, not by index value</strong> -- see
-    <a href="#cellprofiler-feature-csv-input-from-starcall-workflow">Data contracts</a>.</li>
+<li><strong><code>BUILD_CELL_IMAGES</code> is the only stage that touches <code>starcall-workflow</code>'s
+    tree or invokes Snakemake.</strong> Earlier, <code>BUILD_DATASET</code> and
+    <code>BUILD_CP_FEATURES</code> each independently rediscovered
+    <code>starcall-workflow</code>'s tile layout (<code>phenotyping_dir</code>/<code>wells</code>/
+    <code>grid_size</code> auto-detection) and read its per-tile CSVs directly -- this
+    both duplicated discovery logic across two stages and (a real bug, not
+    just a duplication concern) treated the segmentation-side per-tile
+    <code>{segmentation_type}.csv</code> as if it already carried genotype columns
+    (<code>upBarcode</code>/<code>aaChanges</code>/<code>editDistance</code>) that only ever exist in a
+    <em>different</em> directory tree (<code>sequencing_dir</code>'s
+    <code>{segmentation_type}_reads{params}.csv</code>, via <code>rule merge_final_tables</code>).
+    <code>BUILD_CELL_IMAGES</code> now owns all of this: it forces the whole-tile
+    phenotype image/mask and both per-tile tables (plus, for
+    <code>cp_features: true</code> experiments, the CellProfiler CSV) to exist, joins
+    them into one <code>cell_table.parquet</code>, and publishes that alongside the
+    collected tile images. <code>BUILD_DATASET</code>/<code>BUILD_CP_FEATURES</code> consume that
+    output directory exclusively -- see
+    <a href="#cell-images-buildcellimages-output-from-starcall-workflow">Data contracts</a>.
+    The genotype join is by <strong>index value</strong>, not row position (the
+    opposite of the CellProfiler join, below) -- verified that
+    <code>combine_cell_reads</code>/<code>merge_final_tables</code> preserve the segmentation
+    table's own index into the reads table unchanged, per-tile.
+    CellProfiler's own CSV is still joined by row position, same
+    convention as before, just relocated into <code>BUILD_CELL_IMAGES</code>'
+    <code>build_cell_images_table.py</code> and prefixed <code>cp_*</code> on the way in
+    (stripped back off by <code>BUILD_CP_FEATURES</code> on the way out).</li>
+<li><strong><code>BUILD_CELL_IMAGES</code> does NOT force <code>rule make_cell_images</code>'s
+    pre-cropped output to exist</strong>, even though that would have been the
+    more literal reading of "collect this experiment's cell images."
+    <code>dataset.py</code>'s own <code>_crop_cell</code> already ports that rule's crop
+    algorithm and deliberately avoids depending on the rule itself, because
+    it reads <code>xpos</code>/<code>ypos</code> columns that don't exist in the real cell table
+    schema (only <code>bbox_x1/y1/x2/y2</code> -- see the Cell Info Table note below).
+    <code>BUILD_DATASET</code> still does its own per-cell windowed cropping from the
+    whole-tile image, unchanged; <code>BUILD_CELL_IMAGES</code> only forces the
+    whole-tile image + mask (which <code>stitch_tile_pt</code>/<code>stitch_tile_segmentation</code>
+    reliably produce) to exist, not the crop stacks.</li>
 </ol>
 <h2 id="repository-layout">Repository layout<a class="headerlink" href="#repository-layout" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>fisseq-embeddings-pipeline/
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  main.nf
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  nextflow.config                 # executor/profile/container settings only
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  params.yaml                     # every default pipeline parameter
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  Dockerfile                      # single image every process runs in
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>  workflows/
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    embeddings.nf                 # the one pipeline_mode this repo has
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  modules/local/
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    build_dataset.nf
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    qc_filter.nf
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    embed_cells.nf
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    filter_embeddings.nf
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    aggregate_embeddings.nf
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    ovwt_batchwise.nf
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    global_variant_embeddings.nf
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    global_variant_distinguishability.nf
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    build_cp_features.nf
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    filter_cp_features.nf
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    aggregate_cp_features.nf
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    ovwt_batchwise_cp_features.nf
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    global_variant_cp_features.nf
-<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    global_variant_distinguishability_cp_features.nf
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>  src/fisseq_embeddings_pipeline/
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    config/
-<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>      app.py                      # AppConfig -- vendored, + random_seed
-<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>      input.py                    # InputConfig, LabeledInputConfig -- vendored
-<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>    dataset.py                    # BUILD_DATASET
-<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    qcfilter.py                   # QC_FILTER -- vendored, ~unchanged
-<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>    embed.py                      # EMBED_CELLS -- Cell-DINO wrapper
-<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>    filter.py                     # FILTER_EMBEDDINGS
-<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    aggregate.py                  # AGGREGATE_EMBEDDINGS
-<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>    ovwt.py                       # OVWT_BATCHWISE
-<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>    global_embeddings.py          # GLOBAL_VARIANT_EMBEDDINGS
-<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>    global_distinguishability.py  # GLOBAL_VARIANT_DISTINGUISHABILITY
-<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>    cp_features.py                     # BUILD_CP_FEATURES
-<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a>    filter_cp_features.py              # FILTER_CP_FEATURES (thin wrapper over filter.py)
-<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>    aggregate_cp_features.py           # AGGREGATE_CP_FEATURES (thin wrapper over aggregate.py)
-<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>    ovwt_cp_features.py                # OVWT_BATCHWISE_CP_FEATURES (thin wrapper over ovwt.py)
-<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>    global_variant_cp_features.py      # GLOBAL_VARIANT_CP_FEATURES (thin wrapper over global_embeddings.py)
-<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>    global_variant_distinguishability_cp_features.py  # GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES (thin wrapper over global_distinguishability.py)
-<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>    vendor/dinov2/                # minimal vendored dinov2 subset
-<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a>    utils/
-<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>      constants.py                # vendored
-<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a>      variant.py                  # vendored (classify_variant)
-<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a>      batches.py                  # vendored (load_batches)
-<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>      xgbparams.py                # vendored, one retargeted seed field
-<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>      dimreduction.py             # vendored (compute_pca), + random_state passthrough
-<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>      globalfeatureselect.py      # vendored (median_across_batches only)
-<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>      vectors.py                  # vendored (compute_impact_score/compute_cosine_distance)
-<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>      nextflow_staging.py         # stageAs-numbered-filename reconstruction helper
-<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>      log.py                      # vendored
-<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>  docs/
-<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a>  tests/
-<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a>    unit/
-<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a>    integration/                  # end-to-end nextflow run + output assertions
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  Dockerfile                      # this repo's own image (torch/Cell-DINO/polars),
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>                                   # plus starcall-workflow's own Snakemake/
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>                                   # tensorflow/stardist/cellpose stack as a
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>                                   # second, isolated `ops` conda env --
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>                                   # build- and import-verified, real rule
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>                                   # execution not yet tested, see the
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>                                   # Dockerfile's own comments
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>  workflows/
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    embeddings.nf                 # the one pipeline_mode this repo has
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>  modules/local/
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    build_cell_images.nf          # the only stage touching starcall-workflow's tree
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    build_dataset.nf
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    qc_filter.nf
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    embed_cells.nf
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    filter_embeddings.nf
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    aggregate_embeddings.nf
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    ovwt_batchwise.nf
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    global_variant_embeddings.nf
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    global_variant_distinguishability.nf
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    build_cp_features.nf
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>    filter_cp_features.nf
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>    aggregate_cp_features.nf
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>    ovwt_batchwise_cp_features.nf
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    global_variant_cp_features.nf
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>    global_variant_distinguishability_cp_features.nf
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>  src/fisseq_embeddings_pipeline/
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    config/
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>      app.py                      # AppConfig -- vendored, + random_seed
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>      input.py                    # InputConfig, LabeledInputConfig -- vendored
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>    dataset.py                    # BUILD_DATASET
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>    build_cell_images_enumerate.py # BUILD_CELL_IMAGES phase 1 (grid/tile discovery)
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a>    build_cell_images_table.py    # BUILD_CELL_IMAGES phase 3 (cell_table.parquet join)
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>    qcfilter.py                   # QC_FILTER -- vendored, ~unchanged
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>    embed.py                      # EMBED_CELLS -- Cell-DINO wrapper
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>    filter.py                     # FILTER_EMBEDDINGS
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>    aggregate.py                  # AGGREGATE_EMBEDDINGS
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>    ovwt.py                       # OVWT_BATCHWISE
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a>    global_embeddings.py          # GLOBAL_VARIANT_EMBEDDINGS
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>    global_distinguishability.py  # GLOBAL_VARIANT_DISTINGUISHABILITY
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a>    cp_features.py                     # BUILD_CP_FEATURES
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a>    filter_cp_features.py              # FILTER_CP_FEATURES (thin wrapper over filter.py)
+<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>    aggregate_cp_features.py           # AGGREGATE_CP_FEATURES (thin wrapper over aggregate.py)
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>    ovwt_cp_features.py                # OVWT_BATCHWISE_CP_FEATURES (thin wrapper over ovwt.py)
+<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>    global_variant_cp_features.py      # GLOBAL_VARIANT_CP_FEATURES (thin wrapper over global_embeddings.py)
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>    global_variant_distinguishability_cp_features.py  # GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES (thin wrapper over global_distinguishability.py)
+<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>    vendor/dinov2/                # minimal vendored dinov2 subset
+<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>    utils/
+<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>      constants.py                # vendored
+<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a>      variant.py                  # vendored (classify_variant)
+<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a>      batches.py                  # vendored (load_batches)
+<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a>      xgbparams.py                # vendored, one retargeted seed field
+<a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a>      dimreduction.py             # vendored (compute_pca), + random_state passthrough
+<a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a>      globalfeatureselect.py      # vendored (median_across_batches only)
+<a id="__codelineno-2-58" name="__codelineno-2-58" href="#__codelineno-2-58"></a>      vectors.py                  # vendored (compute_impact_score/compute_cosine_distance)
+<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a>      nextflow_staging.py         # stageAs-numbered-filename reconstruction helper
+<a id="__codelineno-2-60" name="__codelineno-2-60" href="#__codelineno-2-60"></a>      log.py                      # vendored
+<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a>  docs/
+<a id="__codelineno-2-62" name="__codelineno-2-62" href="#__codelineno-2-62"></a>  tests/
+<a id="__codelineno-2-63" name="__codelineno-2-63" href="#__codelineno-2-63"></a>    unit/
+<a id="__codelineno-2-64" name="__codelineno-2-64" href="#__codelineno-2-64"></a>    integration/                  # end-to-end nextflow run + output assertions
 </code></pre></div>
 <p>New dependency versus <code>fisseq-data-pipeline</code>'s stack: <strong><code>webdataset</code></strong>
 (<code>BUILD_DATASET</code> writes shards, <code>EMBED_CELLS</code> reads them), plus whatever
@@ -2366,86 +2496,102 @@ deliberate line change versus upstream.</p>
 <p>This pipeline tracks <code>starcall-workflow</code>'s <code>origin/devel</code> branch, not
 <code>master</code>, which has a differently-shaped <code>make_cell_images</code> and no
 <code>extract_embeddings</code> rule at all.</p>
-<h3 id="cell-info-table-input-from-starcall-workflow">Cell Info Table (input, from <code>starcall-workflow</code>)<a class="headerlink" href="#cell-info-table-input-from-starcall-workflow" title="Permanent link">&para;</a></h3>
-<p>One row per segmented cell. Columns <code>qcfilter.py</code> reads (unchanged, per
-its config defaults):</p>
-<table>
-<thead>
-<tr>
-<th>Column</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>upBarcode</code></td>
-<td>sequenced/matched barcode string</td>
-</tr>
-<tr>
-<td><code>aaChanges</code></td>
-<td>variant label (renamed to <code>meta_aa_changes</code> on ingest)</td>
-</tr>
-<tr>
-<td><code>editDistance</code></td>
-<td>base changes needed to match the barcode; <code>-1</code> = unmatched</td>
-</tr>
-<tr>
-<td><code>bbox_x1/y1/x2/y2</code></td>
-<td>cell bounding box, in phenotype-image scale</td>
-</tr>
-</tbody>
-</table>
-<p>Written by <code>starcall-workflow</code>'s <code>rule tabulate_cells</code>. The real schema has
-no <code>xpos</code>/<code>ypos</code> columns -- only <code>bbox_x1/y1/x2/y2</code>. <code>BUILD_DATASET</code>
-computes each cell's crop center as the bbox midpoint,
-<code>((bbox_x1+bbox_x2)//2, (bbox_y1+bbox_y2)//2)</code>.</p>
-<h3 id="cell-images-input-from-starcall-workflow">Cell Images (input, from <code>starcall-workflow</code>)<a class="headerlink" href="#cell-images-input-from-starcall-workflow" title="Permanent link">&para;</a></h3>
-<p><code>BUILD_DATASET</code> reads two per-tile outputs directly rather than depending
-on a pre-cropped per-cell file (which isn't reliably produced for every
-experiment):</p>
+<h3 id="cell-images-build_cell_images-output-from-starcall-workflow">Cell Images (<code>BUILD_CELL_IMAGES</code> output, from <code>starcall-workflow</code>)<a class="headerlink" href="#cell-images-build_cell_images-output-from-starcall-workflow" title="Permanent link">&para;</a></h3>
+<p><code>BUILD_CELL_IMAGES</code> (<code>modules/local/build_cell_images.nf</code>,
+<code>build_cell_images_enumerate.py</code>, <code>build_cell_images_table.py</code>) is the only stage that reads
+<code>starcall-workflow</code>'s tree directly or invokes Snakemake. For every tile of
+every configured well, it forces three real <code>starcall-workflow</code> outputs to
+exist (via one <code>snakemake &lt;targets&gt;</code> invocation per experiment against the
+real, unredirected tree, so Snakemake's own mtime caching reuses whatever's
+already built) and reads/collects them:</p>
 <ul>
 <li><strong><code>rule stitch_tile_pt</code></strong> -- the entire stitched phenotype image for one
-  tile: <code>'{path}/{corrected|raw}_pt.tif'</code>,
-  <code>(num_phenotyping_cycles, num_channels, width, height)</code>.</li>
-<li><strong><code>rule stitch_tile_from_well_segmentation</code></strong> -- the tile's segmentation
-  label mask: <code>'{path}/{segmentation_type}_mask.tif'</code>.</li>
+  tile: <code>phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{corrected|raw}_pt.tif</code>,
+  <code>(num_phenotyping_cycles, num_channels, width, height)</code>. Collected
+  (symlinked by default, or hard-copied if <code>cell_images_hard_copy: true</code>)
+  into this stage's own per-experiment output directory.</li>
+<li><strong><code>rule stitch_tile_segmentation</code></strong> -- the tile's segmentation label
+  mask: <code>phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}_mask.tif</code>.
+  Collected the same way. (Not <code>rule stitch_tile_from_well_segmentation</code> --
+  that rule name appears only inside a dead, commented-out block in the
+  currently-tracked <code>origin/devel</code> source; confirmed by reading it
+  directly. <code>stitch_tile_segmentation</code> is the live rule producing this
+  exact output pattern.)</li>
+<li><strong><code>rule split_grid_table</code>/<code>drop_duplicate_cells</code></strong> -- the tile's
+  segmentation-side cell table:
+  <code>phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}.csv</code>,
+  columns <code>orig_index</code>/<code>bbox_x1/y1/x2/y2</code>/<code>mask8</code> only -- <strong>no</strong>
+  <code>upBarcode</code>/<code>aaChanges</code>/<code>editDistance</code> (a real gap in what <code>BUILD_DATASET</code>
+  used to assume this file carried; see below).</li>
+<li><strong><code>rule merge_final_tables</code></strong> -- the tile's sequencing-side genotype
+  table, a <em>different</em> directory tree:
+  <code>sequencing_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}_reads{params}.csv</code>,
+  carrying <code>editDistance</code> and whatever aux-table genotype columns (e.g.
+  <code>upBarcode</code>/<code>aaChanges</code>-equivalents; names vary per experiment) got
+  joined in upstream. <code>{params}</code> (<code>sequencing_reads_params</code>) defaults to
+  <code>""</code> -- verify against a real run if your starcall-workflow config uses
+  a non-empty value there.</li>
+<li>(only when <code>cp_features: true</code>) the tile's CellProfiler output,
+  <code>phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/cellprofiler{cycle}_{pipeline}.csv</code>
+  -- same path <code>BUILD_CP_FEATURES</code> used to read directly before this
+  refactor, now read here instead.</li>
 </ul>
-<p><code>BUILD_DATASET</code> ports <code>rule make_cell_images</code>'s crop-window algorithm
-directly into Python (window-centered box, clipped and zero-padded at tile
-edges, mask label matched positionally as <code>i + 1</code>) rather than depending on
-that rule's own output.</p>
+<p><code>BUILD_CELL_IMAGES</code> does <strong>not</strong> force <code>rule make_cell_images</code>'s
+pre-cropped output (<code>{segmentation_type}_crops_{window}.tif</code>) to exist --
+see architecture decision 17 above. <code>BUILD_DATASET</code> still does its own
+per-cell windowed cropping from the whole-tile image (<code>_crop_cell</code>, ported
+from <code>make_cell_images</code>'s own algorithm).</p>
+<p><code>build_cell_images_table.py</code> then joins, per tile: the segmentation table
+to the sequencing table <strong>by index value</strong> (both are the same
+<code>RangeIndex</code>, restarting at 1 per tile -- verified via
+<code>combine_cell_reads</code>/<code>merge_final_tables</code>'s source; see architecture
+decision 16), and, if <code>cp_features</code>, the CellProfiler CSV <strong>by row
+position</strong> (renamed <code>cp_&lt;name&gt;</code>). Every tile's joined table is
+concatenated (<code>diagonal_relaxed</code> -- schema legitimately varies per
+experiment) into one <code>cell_table.parquet</code> per experiment, published
+alongside the collected tile images:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>{pipeline_dir}/cell_images/{batch_stem}/
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>├── cell_table.parquet
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>├── well1_grid12/tile0x0y/
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>│   ├── raw_pt.tif          (or corrected_pt.tif)
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>│   └── cells_mask.tif
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>└── ...
+</code></pre></div>
+<p><code>BUILD_DATASET</code>/<code>BUILD_CP_FEATURES</code> read only this directory -- neither
+touches <code>starcall-workflow</code>'s tree, and neither needs
+<code>phenotyping_dir</code>/<code>wells</code>/<code>grid_size</code>/<code>segmentation_type</code>/<code>use_corrected</code>
+any more.</p>
+<p><strong>A known <code>starcall-workflow</code> gotcha, not applicable here but worth
+knowing:</strong> <code>rule merge_phenotype_genotype</code> (<code>sequencing.smk</code>) produces a
+<em>well-level</em> <code>{well}{possible_grid}.{phenotype_type}{segmentation_type}_full.csv</code>
+by joining tables on that same per-tile-restarting <code>RangeIndex</code> -- but at
+the well level (spanning multiple tiles) that index has cross-tile
+duplicates, and <code>pandas.DataFrame.join()</code> silently multiplies/misattributes
+rows when that happens (reproduced during this stage's design). This
+pipeline never reads that file -- <code>BUILD_CELL_IMAGES</code> joins strictly
+per-tile, where the index is genuinely unique -- but it's a landmine for
+anyone reaching for <code>.cells_full.csv</code> directly elsewhere.</p>
 <h3 id="cell-dataset-this-pipelines-join">Cell Dataset (this pipeline's join)<a class="headerlink" href="#cell-dataset-this-pipelines-join" title="Permanent link">&para;</a></h3>
 <p>Per experiment: a <strong>WebDataset</strong> (sharded <code>.tar</code> archives, one sample per
 cell) built by cropping every tile's stitched phenotype image and
-segmentation mask around each cell's bbox-derived center, and repackaging
-each row as one sample keyed by a unique cell id, carrying the crop array,
-the mask array, and <code>meta_*</code> fields (barcode, variant label, edit
-distance, well/tile, cell index).</p>
-<h3 id="cellprofiler-feature-csv-input-from-starcall-workflow">CellProfiler feature CSV (input, from starcall-workflow)<a class="headerlink" href="#cellprofiler-feature-csv-input-from-starcall-workflow" title="Permanent link">&para;</a></h3>
-<p><code>BUILD_CP_FEATURES</code> reads a second per-tile output <code>starcall-workflow</code>'s
-<code>origin/devel</code> <code>workflow/rules/phenotyping.smk</code> already produces (rules
-<code>run_cellprofiler</code>/<code>copy_cellprofiler_output</code>), alongside the same
-<code>{segmentation_type}.csv</code> cell table <code>BUILD_DATASET</code> reads:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>{tile_dir}/cellprofiler{cycle}_{pipeline}.csv
-</code></pre></div>
-<p>where <code>{tile_dir}</code> is the same <code>{well}_grid{N}/tile{x}x{y}y/</code> directory
-<code>discover_tiles</code> already resolves, <code>{cycle}</code> is <code>""</code> or <code>"cycle&lt;N&gt;"</code>
-(<code>CpFeaturesConfig.cellprofiler_cycle</code>), and <code>{pipeline}</code> is the
-CellProfiler <code>.cppipe</code> pipeline's basename
-(<code>CpFeaturesConfig.cellprofiler_pipeline</code>, required). One row per cell,
-one column per CellProfiler measurement -- no <code>meta_*</code> prefix, no
-identity columns (<code>upBarcode</code>/<code>aaChanges</code>/<code>editDistance</code> come from the
-cell table, not this file).</p>
-<p><strong>Row-position join, not index-value join.</strong> <code>BUILD_CP_FEATURES</code> pairs the
-cell table's row <code>i</code> with the CellProfiler CSV's row <code>i</code> -- not by
-matching their first-column index <em>values</em>. This mirrors
-<code>BUILD_DATASET</code>'s own <code>_crop_cell(..., label=i + 1, ...)</code> convention
-(segmentation mask labels are the row <em>position</em>, <code>i + 1</code>, not the cell
-table's index <em>value</em> -- see <code>write_dataset_shards</code>), and CellProfiler's
-own <code>ObjectNumber</code> numbering is standardly derived from ascending
-mask-label order, i.e. that same row position. A tile whose cell table
-and CellProfiler CSV have different row counts raises rather than
-silently misaligning every downstream row.</p>
+segmentation mask (read from <code>BUILD_CELL_IMAGES</code>' output directory) around
+each cell's bbox-derived center, and repackaging each row as one sample
+keyed by a unique cell id, carrying the crop array, the mask array, and
+<code>meta_*</code> fields (barcode, variant label, edit distance, well/tile, cell
+index). The real schema has no <code>xpos</code>/<code>ypos</code> columns -- only
+<code>bbox_x1/y1/x2/y2</code>; <code>BUILD_DATASET</code> computes each cell's crop center as the
+bbox midpoint, <code>((bbox_x1+bbox_x2)//2, (bbox_y1+bbox_y2)//2)</code>.</p>
+<h3 id="cellprofiler-feature-columns-build_cp_features-input">CellProfiler feature columns (<code>BUILD_CP_FEATURES</code> input)<a class="headerlink" href="#cellprofiler-feature-columns-build_cp_features-input" title="Permanent link">&para;</a></h3>
+<p><code>BUILD_CP_FEATURES</code> no longer reads any CellProfiler CSV, or
+<code>starcall-workflow</code>'s tree, directly -- it selects <code>cp_*</code>-prefixed columns
+straight out of <code>BUILD_CELL_IMAGES</code>' <code>cell_table.parquet</code> (stripping the
+prefix back off on the way out, so <code>cp_features.parquet</code>'s own column
+names are unchanged: one column per CellProfiler measurement, no <code>meta_*</code>
+prefix). The row-position join between each tile's cell table and its
+CellProfiler CSV -- CellProfiler's own <code>ObjectNumber</code> numbering has no
+shared index with the segmentation table's <code>orig_index</code>/<code>RangeIndex</code> --
+now happens once, inside <code>BUILD_CELL_IMAGES</code>' <code>build_cell_images_table.py</code>,
+not per-consumer.</p>
 <h2 id="embed_cells-cell-dino-inference-internals"><code>EMBED_CELLS</code> / Cell-DINO inference internals<a class="headerlink" href="#embed_cells-cell-dino-inference-internals" title="Permanent link">&para;</a></h2>
 <p><code>dinov2</code>'s own docs don't publish a documented inference API -- only
 training/linear-eval/kNN-eval scripts. This section records what's

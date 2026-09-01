@@ -12,7 +12,7 @@
         <link rel="prev" href="../nextflow/">
       
       
-        <link rel="next" href="../cli/dataset/">
+        <link rel="next" href="../cli/build_cell_images_enumerate/">
       
       
         
@@ -327,7 +327,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../cli/dataset/" class="md-tabs__link">
+        <a href="../cli/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -347,7 +347,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/dataset/" class="md-tabs__link">
+        <a href="../api/build_cell_images_enumerate/" class="md-tabs__link">
           
   
   
@@ -702,6 +702,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1153,6 +1209,62 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/build_cell_images_enumerate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_enumerate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/build_cell_images_table/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1725,24 +1837,48 @@ two:</p>
 <code>EmbeddingsPipeline</code> fails fast with a specific message if either is unset
 (see <a href="../nextflow/">Nextflow Workflow</a>), rather than letting Nextflow's own
 less-specific "no such property" error surface first.</p>
-<p><code>BUILD_DATASET</code>'s own fields (<code>phenotyping_dir</code>, <code>wells</code>, <code>grid_size</code>,
-<code>window</code>, ...) are per-experiment, not pipeline-wide -- instead each
-experiment supplies its own map of these fields as one entry of
-<code>params.yaml</code>'s <code>experiments:</code> list (see
-<a href="../nextflow/#per-experiment-configs">Nextflow Workflow</a>).
-<code>BUILD_CP_FEATURES</code>' fields (<code>phenotyping_dir</code>, <code>wells</code>, <code>grid_size</code>,
-<code>cellprofiler_cycle</code>, <code>cellprofiler_pipeline</code>, ...) work the same way, but
-there's no separate list -- an <code>experiments:</code> entry opts itself into the
-CellProfiler-feature track by setting <code>cp_features: true</code>, reusing that
-same entry's fields -- see
-<a href="../nextflow/#cellprofiler-feature-track">Nextflow Workflow</a>. Three fields
-that are logically per-experiment but in practice are almost always the
-same across every experiment in a run -- <code>window</code>, <code>cellprofiler_pipeline</code>,
-<code>cellprofiler_cycle</code> -- are the exception: each has its own pipeline-wide
-default below (<code>window</code>, <code>cellprofiler_pipeline</code>, <code>cellprofiler_cycle</code> in
-the Fields table), used for any experiment entry that doesn't set its own
-value for that key; an entry's own value always wins over the global
-default.</p>
+<p>Each experiment supplies its own map of per-experiment fields as one entry
+of <code>params.yaml</code>'s <code>experiments:</code> list (see
+<a href="../nextflow/#per-experiment-configs">Nextflow Workflow</a>), split across up
+to three stages:</p>
+<ul>
+<li><strong><code>BUILD_CELL_IMAGES</code></strong> (starcall-workflow-facing, always runs):
+  <code>starcall_workflow_dir</code>, <code>phenotyping_dir</code>, <code>segmentation_dir</code>,
+  <code>sequencing_dir</code>, <code>wells</code>, <code>grid_size</code>, <code>segmentation_type</code>,
+  <code>use_corrected</code>, <code>sequencing_reads_params</code>. This is the ONLY stage that
+  touches <code>starcall-workflow</code>'s tree or invokes Snakemake -- see
+  <a href="../architecture/#cell-images-buildcellimages-output-from-starcall-workflow">Architecture</a>.
+  <code>phenotyping_dir</code>/<code>segmentation_dir</code>/<code>sequencing_dir</code> are all optional,
+  each auto-resolved when omitted: <code>starcall_workflow_dir</code>'s own
+  <code>config.yaml</code> (or <code>default-config.yaml</code>) is read for that key if
+  present -- the same project config <code>starcall-workflow</code>'s own
+  <code>workflow/Snakefile</code> would load -- else it falls back to a subdirectory
+  of <code>starcall_workflow_dir</code> (<code>phenotyping</code>/<code>segmentation</code>/<code>sequencing</code>,
+  matching <code>starcall-workflow</code>'s own documented default). Set one
+  explicitly only when that tree isn't colocated under
+  <code>starcall_workflow_dir</code> at all.</li>
+<li><strong><code>BUILD_DATASET</code></strong>: <code>window</code>, <code>shard_maxcount</code>, <code>barcode_col_name</code>/
+  <code>aa_changes_col_name</code>/<code>edit_distance_col_name</code>. <code>cell_images_dir</code> (which
+  directory to read) is injected automatically from <code>BUILD_CELL_IMAGES</code>'
+  own output -- never set it yourself.</li>
+<li><strong><code>BUILD_CP_FEATURES</code></strong> (only for <code>cp_features: true</code> entries):
+  the same three <code>*_col_name</code> fields, shared with <code>BUILD_DATASET</code> since
+  both read the same <code>cell_table.parquet</code>. <code>cell_images_dir</code> is injected
+  the same way. There's no separate list to keep in sync with
+  <code>experiments:</code> -- an entry opts itself in by setting <code>cp_features: true</code>,
+  which also makes <code>BUILD_CELL_IMAGES</code> force + fold in that experiment's
+  CellProfiler CSV -- see
+  <a href="../nextflow/#cellprofiler-feature-track">Nextflow Workflow</a>.</li>
+</ul>
+<p>Four fields that are logically per-experiment but in practice are almost
+always the same across every experiment in a run -- <code>window</code>,
+<code>cellprofiler_pipeline</code>, <code>cellprofiler_cycle</code> -- are the exception: each
+has its own pipeline-wide default below, used for any experiment entry
+that doesn't set its own value for that key; an entry's own value always
+wins over the global default. <code>cell_images_hard_copy</code> is a <em>further</em>
+exception -- it's global-only, with no per-experiment override at all
+(Nextflow's <code>publishDir</code> mode must be a static value at process-definition
+time; see <code>params.yaml</code>'s own comment on this).</p>
 <h3 id="fields">Fields<a class="headerlink" href="#fields" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1761,7 +1897,7 @@ default.</p>
 <tr>
 <td><code>container_image</code></td>
 <td><code>"fisseq-embeddings-pipeline:latest"</code></td>
-<td>all</td>
+<td>all stages</td>
 </tr>
 <tr>
 <td><code>cell_dino_checkpoint</code></td>
@@ -1771,7 +1907,7 @@ default.</p>
 <tr>
 <td><code>experiments</code></td>
 <td><code>[]</code> (required non-empty)</td>
-<td><code>BUILD_DATASET</code>, and <code>BUILD_CP_FEATURES</code> for any entry setting <code>cp_features: true</code> (list of per-experiment maps, each requiring <code>batch_stem</code>; see above)</td>
+<td><code>BUILD_CELL_IMAGES</code> (always), <code>BUILD_DATASET</code>, and <code>BUILD_CP_FEATURES</code> for any entry setting <code>cp_features: true</code> (list of per-experiment maps, each requiring <code>batch_stem</code>; see above)</td>
 </tr>
 <tr>
 <td><code>window</code></td>
@@ -1781,12 +1917,22 @@ default.</p>
 <tr>
 <td><code>cellprofiler_pipeline</code></td>
 <td><code>null</code> (required, here or per <code>cp_features: true</code> entry, once any experiment sets <code>cp_features: true</code>)</td>
-<td><code>BUILD_CP_FEATURES</code> (global default for any <code>cp_features: true</code> entry that omits <code>cellprofiler_pipeline</code>)</td>
+<td><code>BUILD_CELL_IMAGES</code> (global default for any <code>cp_features: true</code> entry that omits <code>cellprofiler_pipeline</code>)</td>
 </tr>
 <tr>
 <td><code>cellprofiler_cycle</code></td>
 <td><code>""</code></td>
-<td><code>BUILD_CP_FEATURES</code> (global default for any <code>cp_features: true</code> entry that omits <code>cellprofiler_cycle</code>)</td>
+<td><code>BUILD_CELL_IMAGES</code> (global default for any <code>cp_features: true</code> entry that omits <code>cellprofiler_cycle</code>)</td>
+</tr>
+<tr>
+<td><code>cell_images_hard_copy</code></td>
+<td><code>false</code></td>
+<td><code>BUILD_CELL_IMAGES</code> (global-only, see above -- <code>false</code> symlinks collected tile images from their real <code>starcall-workflow</code> location, <code>true</code> hard-copies them)</td>
+</tr>
+<tr>
+<td><code>snakemake_cores</code></td>
+<td><code>4</code></td>
+<td><code>BUILD_CELL_IMAGES</code> (<code>--cores</code> for its own <code>snakemake</code> invocation, distinct from Nextflow's own executor parallelism across experiments)</td>
 </tr>
 <tr>
 <td><code>random_seed</code></td>
@@ -1942,6 +2088,18 @@ ones (<code>QC_FILTER</code>, <code>FILTER_EMBEDDINGS</code>, etc.) -- simpler t
 version as a single artifact than a GPU image plus a slimmer CPU image, at
 the cost of a larger pull for CPU-only processes. Worth splitting into two
 images later if that pull cost matters in practice; not required for v1.</p>
+<p>That same image also bakes in <code>starcall-workflow</code>'s own dependency stack
+(tensorflow/stardist/cellpose/snakemake) as a second, isolated conda env
+(<code>ops</code>), used only by <code>BUILD_CELL_IMAGES</code>' own <code>snakemake</code> invocation --
+rather than publishing that as yet another separate image. This grows the
+image meaningfully (two full ML stacks in one artifact, so every pull,
+even for CPU-only stages, is bigger than it would be with the two split
+apart) and means every build now also runs the <code>ops</code> env's install chain
+(conda/pip installs, a <code>starcall-workflow</code> git clone) -- worth knowing if a
+build ever gets noticeably slower or larger, but not something to work
+around: this is the direct cost of one image over two, chosen so
+<code>starcall-workflow</code>'s own environment gets the same CI build coverage as
+everything else (it previously had none at all).</p>
 <h2 id="build_dataset-shard-sizing"><code>BUILD_DATASET</code> shard sizing<a class="headerlink" href="#build_dataset-shard-sizing" title="Permanent link">&para;</a></h2>
 <p><code>shard_maxcount</code> (default <code>2000</code>, <code>BuildDatasetConfig.shard_maxcount</code>)
 controls how many cells <code>write_dataset_shards()</code> packs into each
