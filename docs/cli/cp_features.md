@@ -1,33 +1,18 @@
 # CellProfiler Feature Dataset (`BUILD_CP_FEATURES`)
 
 `python -m fisseq_embeddings_pipeline.cp_features` (Nextflow process
-`BUILD_CP_FEATURES`) combines every discovered tile's cell table with that
-tile's already-computed CellProfiler measurement CSV into one
-per-experiment `cp_features.parquet` -- the CellProfiler-feature analog of
-`EMBED_CELLS`' `embeddings.parquet`.
+`BUILD_CP_FEATURES`) selects `BUILD_CELL_IMAGES`' `cp_*`-prefixed
+CellProfiler feature columns out of its `cell_table.parquet`, stripping
+the prefix back off, into one per-experiment `cp_features.parquet` -- the
+CellProfiler-feature analog of `EMBED_CELLS`' `embeddings.parquet`.
 
-Tile discovery reuses `BUILD_DATASET`'s own `discover_tiles()` directly
-(same `phenotyping_dir`/`wells`/`grid_size`/`segmentation_type`
-resolution, same `{well}_grid{N}/tile{x}x{y}y/` glob), since
-`starcall-workflow`'s `origin/devel` `workflow/rules/phenotyping.smk`
-already writes each tile's CellProfiler output at a deterministic path
-alongside its cell table:
-`{tile_dir}/cellprofiler{cellprofiler_cycle}_{cellprofiler_pipeline}.csv`.
-No hand-specified merged input file or per-run join-key column mapping is
-needed.
-
-**Row-position join, not index-value join.** Each tile's cell table row
-`i` is paired with its CellProfiler CSV's row `i` -- not by matching their
-first-column index values. This mirrors `BUILD_DATASET`'s own
-`_crop_cell(..., label=i + 1, ...)` convention. A tile whose cell table
-and CellProfiler CSV have different row counts raises, rather than
-silently misaligning every downstream row -- see
-[Architecture](../architecture.md#cellprofiler-feature-csv-input-from-starcall-workflow).
-
-A tile whose CellProfiler CSV is missing or empty is skipped with a
-logged warning (CellProfiler's own failure path can leave an empty
-output); a tile whose cell table is empty is skipped silently, same as
-`BUILD_DATASET`.
+This stage no longer discovers tiles, reads any CSV, or touches
+`starcall-workflow`'s tree at all -- `BUILD_CELL_IMAGES` is the only stage
+that does, and it already joined each tile's CellProfiler CSV into
+`cell_table.parquet` (by row position -- CellProfiler's own `ObjectNumber`
+numbering has no shared index with the segmentation table) before this
+stage ever runs. See
+[Architecture](../architecture.md#cell-images-buildcellimages-output-from-starcall-workflow).
 
 ## Config fields
 
@@ -35,18 +20,17 @@ Extends the [common config fields](#common-config-fields) below.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| `phenotyping_dir` | **required** | `starcall-workflow`'s phenotyping output root -- same directory as this experiment's `BUILD_DATASET` entry. |
-| `wells` | **required** | Wells belonging to this experiment. |
-| `grid_size` | `null` | Tile grid size; auto-detected per well when unset, same convention as `BUILD_DATASET`. |
-| `segmentation_type` | `"cells"` | Which segmentation output's cell table to read (`{segmentation_type}.csv`). |
-| `use_corrected` | `false` | **Unused by this stage's own logic** -- present only because `discover_tiles()` (reused for tile discovery) reads it to populate an image-path column this stage never reads. |
-| `cellprofiler_cycle` | `""` | The `{cycle}` component of the CellProfiler output filename -- `""` (no cycle) or `"cycle<N>"`. When run via `BUILD_CP_FEATURES`, a `cp_features: true` `experiments:` entry omitting this falls back to `params.yaml`'s pipeline-wide `cellprofiler_cycle` default (see [Configuration](../configuration.md)). |
-| `cellprofiler_pipeline` | **required** | The `{pipeline}` component of that filename -- the CellProfiler `.cppipe` pipeline's basename. When run via `BUILD_CP_FEATURES`, a `cp_features: true` `experiments:` entry omitting this falls back to `params.yaml`'s pipeline-wide `cellprofiler_pipeline` default; required here only when invoking this module's CLI directly (or when neither the entry nor the global default sets it). |
+| `cell_images_dir` | **required** | `BUILD_CELL_IMAGES`' per-experiment output directory (holds `cell_table.parquet`, already carrying this experiment's `cp_*`-prefixed CellProfiler columns). Injected automatically by `workflows/embeddings.nf` when run through the pipeline; set explicitly only when invoking this module's CLI directly against a `BUILD_CELL_IMAGES` output you already have. |
 | `batch_stem` | **required** | This experiment's identifier, written into every row as `meta_batch`. |
-| `barcode_col_name` | `"upBarcode"` | Input column name for cell barcodes, read from the cell table. |
-| `aa_changes_col_name` | `"aaChanges"` | Input column name for amino-acid change labels. |
-| `edit_distance_col_name` | `"editDistance"` | Input column name for edit distances. |
-| `csv_schema_scan_rows` | `100` | Rows scanned from each tile's cell table CSV and CellProfiler CSV to infer column dtypes. `null` scans every row. |
+| `barcode_col_name` | `"upBarcode"` | Column name for cell barcodes in `cell_table.parquet`. |
+| `aa_changes_col_name` | `"aaChanges"` | Column name for amino-acid change labels in `cell_table.parquet`. |
+| `edit_distance_col_name` | `"editDistance"` | Column name for edit distances in `cell_table.parquet`. |
+
+`phenotyping_dir`/`wells`/`grid_size`/`segmentation_type`/`use_corrected`/
+`cellprofiler_cycle`/`cellprofiler_pipeline`/`csv_schema_scan_rows` are no
+longer fields on this stage -- they're `BUILD_CELL_IMAGES`-only now
+(starcall-workflow-discovery concerns, including which CellProfiler CSV to
+force and fold in).
 
 ## Output file
 
@@ -62,9 +46,7 @@ Written to `output_dir`:
 ```bash
 uv run python -m fisseq_embeddings_pipeline.cp_features \
     output_dir=./out \
-    phenotyping_dir=/data/experiment1/phenotyping \
-    'wells=[well1,well2]' \
-    cellprofiler_pipeline=my_pipeline \
+    cell_images_dir=/pipeline/cell_images/experiment1 \
     batch_stem=experiment1 \
     random_seed=0
 ```

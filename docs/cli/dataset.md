@@ -14,11 +14,13 @@ expensive GPU embedding pass -- you pay for embedding every cell once, up
 front.
 
 No hand-authored tile manifest is needed: `BUILD_DATASET` derives the
-tile list directly from `starcall-workflow`'s own directory convention
-(`{well}_grid{grid_size}/tile{x}x{y}y/`), given just a well list -- and,
-unless overridden, its own grid size too: when `grid_size` is left unset,
-each well's grid size is auto-detected by scanning `phenotyping_dir` for
-that well's `{well}_grid<N>` directory.
+tile list directly from `BUILD_CELL_IMAGES`' own output directory (see
+[Architecture](../architecture.md#cell-images-buildcellimages-output-from-starcall-workflow)),
+not from `starcall-workflow`'s tree directly -- `BUILD_CELL_IMAGES` is the
+only stage that touches `starcall-workflow`'s tree or invokes Snakemake.
+`BUILD_DATASET` itself no longer does any well/grid-size discovery of its
+own; it just globs `cell_images_dir`'s already-resolved
+`{well}_grid<N>/tile<x>x<y>y/` directories.
 
 ## Config fields
 
@@ -26,18 +28,19 @@ Extends the [common config fields](#common-config-fields) below.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| `phenotyping_dir` | **required** | `starcall-workflow`'s phenotyping output root. |
-| `wells` | **required** | Wells belonging to this experiment, e.g. `["well1", "well2"]`. |
-| `grid_size` | `null` | Tile grid size, matching `starcall-workflow`'s own directory convention. When unset, auto-detected per well from `phenotyping_dir`'s `{well}_grid<N>` directory name; set explicitly to skip detection (e.g. if a well has more than one such directory). |
+| `cell_images_dir` | **required** | `BUILD_CELL_IMAGES`' per-experiment output directory (holds `cell_table.parquet` plus each tile's collected `*_pt.tif`/`*_mask.tif`). Injected automatically by `workflows/embeddings.nf` when run through the pipeline; set explicitly only when invoking this module's CLI directly against a `BUILD_CELL_IMAGES` output you already have. |
 | `window` | **required** | Crop size to produce around each cell's bbox-derived center -- must match the loaded Cell-DINO checkpoint's expected input. When run via `BUILD_DATASET`, an `experiments:` entry omitting this falls back to `params.yaml`'s pipeline-wide `window` default (see [Configuration](../configuration.md)); required here only when invoking this module's CLI directly. |
 | `batch_stem` | **required** | This experiment's identifier, written into every sample's `meta.json` as `meta_batch`. |
-| `segmentation_type` | `"cells"` | Which segmentation output to use (`{segmentation_type}.csv` / `{segmentation_type}_mask.tif`). |
-| `use_corrected` | `false` | Whether to read `corrected_pt.tif` or `raw_pt.tif`. |
 | `shard_maxcount` | `2000` | Max samples per WebDataset shard. See [shard sizing](../configuration.md#build_dataset-shard-sizing). |
-| `barcode_col_name` | `"upBarcode"` | Input column name for cell barcodes. |
-| `aa_changes_col_name` | `"aaChanges"` | Input column name for amino-acid change labels. |
-| `edit_distance_col_name` | `"editDistance"` | Input column name for edit distances. |
-| `csv_schema_scan_rows` | `100` | Rows scanned from each tile's cell table CSV to infer column dtypes (polars `scan_csv`'s `infer_schema_length`). `null` scans every row. |
+| `barcode_col_name` | `"upBarcode"` | Column name for cell barcodes in `cell_table.parquet`. |
+| `aa_changes_col_name` | `"aaChanges"` | Column name for amino-acid change labels in `cell_table.parquet`. |
+| `edit_distance_col_name` | `"editDistance"` | Column name for edit distances in `cell_table.parquet`. |
+
+`phenotyping_dir`/`wells`/`grid_size`/`segmentation_type`/`use_corrected`/
+`csv_schema_scan_rows` are no longer fields on this stage -- they're
+`BUILD_CELL_IMAGES`-only now (starcall-workflow-discovery concerns), and
+there's no CSV left for this stage to scan-infer dtypes for
+(`cell_table.parquet` is already typed).
 
 ## Output files
 
@@ -58,16 +61,11 @@ Written to `output_dir`:
 ```bash
 uv run python -m fisseq_embeddings_pipeline.dataset \
     output_dir=./out \
-    phenotyping_dir=/data/experiment1/phenotyping \
-    'wells=[well1,well2]' \
+    cell_images_dir=/pipeline/cell_images/experiment1 \
     window=224 \
     batch_stem=experiment1 \
     random_seed=0
 ```
-
-`grid_size` is omitted above -- it's auto-detected per well from
-`phenotyping_dir`'s directory naming. Pass `grid_size=12` explicitly to
-override detection.
 
 ## Common config fields
 

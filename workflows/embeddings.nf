@@ -9,6 +9,7 @@
 // {GLOBAL_VARIANT_CP_FEATURES, GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES}.
 nextflow.enable.dsl = 2
 
+include { BUILD_CELL_IMAGES } from '../modules/local/build_cell_images'
 include { BUILD_DATASET } from '../modules/local/build_dataset'
 include { QC_FILTER } from '../modules/local/qc_filter'
 include { EMBED_CELLS } from '../modules/local/embed_cells'
@@ -38,8 +39,9 @@ workflow EmbeddingsPipeline {
     }
     // Every entry in params.experiments (a YAML list of maps, declared
     // directly in params.yaml under the `experiments:` key -- see that
-    // file's own comment) supplies BuildDatasetConfig's per-experiment
-    // fields (phenotyping_dir, wells, grid_size, window, ...) directly.
+    // file's own comment) supplies BUILD_CELL_IMAGES' starcall-workflow-
+    // facing fields (phenotyping_dir, wells, grid_size, ...) and/or
+    // BuildDatasetConfig's own remaining fields (window, ...) directly.
     // batch_stem is a required key *inside* each map now (there's no
     // filename to derive it from any more, unlike the old
     // configs/<batch_stem>.yaml-per-experiment mechanism this replaces).
@@ -66,11 +68,47 @@ workflow EmbeddingsPipeline {
         error "ERROR: params.experiments has duplicate batch_stem value(s): ${duplicate_stems.join(', ')}. Every experiment's batch_stem must be unique."
     }
 
+    // BUILD_CELL_IMAGES is the ONLY thing that touches starcall-workflow's
+    // tree (phenotyping_dir/segmentation_dir/sequencing_dir) or invokes
+    // Snakemake -- every starcall-workflow-facing key in an experiment's
+    // map (starcall_workflow_dir, phenotyping_dir, segmentation_dir,
+    // sequencing_dir, wells, grid_size, segmentation_type, use_corrected,
+    // sequencing_reads_params, cp_features, cellprofiler_pipeline,
+    // cellprofiler_cycle) routes to it, not to BUILD_DATASET/
+    // BUILD_CP_FEATURES. Runs unconditionally for every experiment (not
+    // gated on cp_features) -- both tracks below depend on its
+    // cell_images_dir output. `cellprofiler_pipeline`/`cellprofiler_cycle`
+    // fall back to their global params.yaml defaults the same way `window`
+    // does for config_ch below -- an entry's own value always wins.
+    // (cell_images_hard_copy is NOT per-experiment: it's read directly off
+    // params by build_cell_images.nf's own publishDir directive, since
+    // Nextflow's publishDir `mode:` must be a static value at process-
+    // definition time, unlike `path:` -- confirmed against a real
+    // Nextflow 26.04.6 run. See that module's own comment.)
+    def cell_images_field_includes = [
+        'starcall_workflow_dir', 'phenotyping_dir', 'segmentation_dir', 'sequencing_dir',
+        'wells', 'grid_size', 'segmentation_type', 'use_corrected', 'sequencing_reads_params',
+        'cp_features', 'cellprofiler_pipeline', 'cellprofiler_cycle',
+    ] as Set
+    cell_images_config_ch = channel.fromList(params.experiments).map { entry ->
+        def overrides = entry.findAll { k, v -> k in cell_images_field_includes }
+        if (!overrides.containsKey('cellprofiler_pipeline') && params.cellprofiler_pipeline != null) {
+            overrides = overrides + [cellprofiler_pipeline: params.cellprofiler_pipeline]
+        }
+        if (!overrides.containsKey('cellprofiler_cycle') && params.cellprofiler_cycle != null) {
+            overrides = overrides + [cellprofiler_cycle: params.cellprofiler_cycle]
+        }
+        tuple(entry.batch_stem, overrides)
+    }
+    cell_images_ch = BUILD_CELL_IMAGES(cell_images_config_ch) // (batch_stem, cell_table.parquet, cell_images_dir)
+
     // `cp_features` opts an experiment into the CellProfiler-feature track
     // below and isn't a BuildDatasetConfig field itself, so BUILD_DATASET
-    // never sees it; `cellprofiler_pipeline`/`cellprofiler_cycle` are
-    // CpFeaturesConfig-only fields a `cp_features: true` entry may also
-    // carry (see below), so BUILD_DATASET never sees those either.
+    // never sees it; every starcall-workflow-facing key above is now
+    // BUILD_CELL_IMAGES-only, so BUILD_DATASET never sees those either --
+    // it only needs cell_images_dir (injected below) plus whatever
+    // BuildDatasetConfig fields remain (window, shard_maxcount,
+    // barcode_col_name/aa_changes_col_name/edit_distance_col_name).
     //
     // Parsed here (not passed through as a raw file) so BUILD_DATASET's
     // -resume cache key is the actual scalar values -- matching this
@@ -78,14 +116,25 @@ workflow EmbeddingsPipeline {
     // `window` falls back to the global params.window default (see
     // params.yaml's "Shared per-experiment defaults" section) whenever an
     // entry doesn't set its own -- an entry's own value always wins.
-    def dataset_field_excludes = ['batch_stem', 'cp_features', 'cellprofiler_pipeline', 'cellprofiler_cycle'] as Set
-    config_ch = channel.fromList(params.experiments).map { entry ->
-        def overrides = entry.findAll { k, v -> !(k in dataset_field_excludes) }
-        if (!overrides.containsKey('window') && params.window != null) {
-            overrides = overrides + [window: params.window]
+    def dataset_field_excludes = (['batch_stem', 'cp_features', 'cell_images_hard_copy'] + cell_images_field_includes) as Set
+    config_ch = channel.fromList(params.experiments)
+        .map { entry ->
+            def overrides = entry.findAll { k, v -> !(k in dataset_field_excludes) }
+            if (!overrides.containsKey('window') && params.window != null) {
+                overrides = overrides + [window: params.window]
+            }
+            tuple(entry.batch_stem, overrides)
         }
-        tuple(entry.batch_stem, overrides)
-    }
+        // parquet.getParent(), not the tuple's own third (*_grid* glob)
+        // element -- path("*_grid*", type: 'dir') resolves to each matched
+        // grid subdirectory itself (e.g. well1_grid1/), not its containing
+        // directory; cell_table.parquet's parent is the one unambiguous
+        // reference to BUILD_CELL_IMAGES' actual per-experiment output
+        // directory, regardless of how many *_grid* subdirectories exist
+        // (confirmed against a real Nextflow 26.04.6 run -- see
+        // modules/local/build_cell_images.nf).
+        .join(cell_images_ch.map { stem, parquet, dir -> tuple(stem, parquet.getParent()) })
+        .map { stem, overrides, cell_images_dir -> tuple(stem, overrides + [cell_images_dir: cell_images_dir.toString()]) }
 
     // Per-batch (per-experiment) chain -- identical shape to
     // fisseq-data-pipeline's per-batch resolution pattern (BatchParams.resolve).
@@ -127,26 +176,25 @@ workflow EmbeddingsPipeline {
     // cellDINO-only runs work unchanged.
     def cp_experiments = params.experiments.findAll { it.cp_features == true }
     if (cp_experiments) {
-        // Same per-experiment parsed-config-channel shape as config_ch
-        // above, reusing each opted-in entry's own phenotyping_dir/wells/
-        // grid_size/segmentation_type/etc. `window`/`shard_maxcount` are
-        // BuildDatasetConfig-only fields a `cp_features: true` entry may
-        // also carry (for BUILD_DATASET's own sake), so BUILD_CP_FEATURES
-        // never sees them; `cp_features` itself isn't a CpFeaturesConfig
-        // field either. `cellprofiler_pipeline`/`cellprofiler_cycle` fall
-        // back to their global params.yaml defaults the same way `window`
-        // does for config_ch -- an entry's own value always wins.
-        def cp_field_excludes = ['batch_stem', 'cp_features', 'window', 'shard_maxcount'] as Set
-        cp_config_ch = channel.fromList(cp_experiments).map { entry ->
-            def overrides = entry.findAll { k, v -> !(k in cp_field_excludes) }
-            if (!overrides.containsKey('cellprofiler_pipeline') && params.cellprofiler_pipeline != null) {
-                overrides = overrides + [cellprofiler_pipeline: params.cellprofiler_pipeline]
-            }
-            if (!overrides.containsKey('cellprofiler_cycle') && params.cellprofiler_cycle != null) {
-                overrides = overrides + [cellprofiler_cycle: params.cellprofiler_cycle]
-            }
-            tuple(entry.batch_stem, overrides)
-        }
+        // CpFeaturesConfig no longer needs any starcall-workflow-facing
+        // field at all -- BUILD_CELL_IMAGES already folded this
+        // experiment's CellProfiler columns into cell_table.parquet (see
+        // cell_images_config_ch/cell_images_ch above), so this stage just
+        // needs cell_images_dir (injected below) plus barcode_col_name/
+        // aa_changes_col_name/edit_distance_col_name/batch_stem.
+        def cp_field_excludes = (['batch_stem', 'cp_features', 'cell_images_hard_copy'] + cell_images_field_includes) as Set
+        cp_config_ch = channel.fromList(cp_experiments)
+            .map { entry -> tuple(entry.batch_stem, entry.findAll { k, v -> !(k in cp_field_excludes) }) }
+            // parquet.getParent(), not the tuple's own third (*_grid* glob)
+            // element -- path("*_grid*", type: 'dir') resolves to each
+            // matched grid subdirectory itself (e.g. well1_grid1/), not
+            // its containing directory; cell_table.parquet's parent is the
+            // one unambiguous reference to BUILD_CELL_IMAGES' actual
+            // per-experiment output directory, regardless of how many
+            // *_grid* subdirectories exist (confirmed against a real
+            // Nextflow 26.04.6 run -- see modules/local/build_cell_images.nf).
+            .join(cell_images_ch.map { stem, parquet, dir -> tuple(stem, parquet.getParent()) })
+            .map { stem, overrides, cell_images_dir -> tuple(stem, overrides + [cell_images_dir: cell_images_dir.toString()]) }
 
         cp_ch = BUILD_CP_FEATURES(cp_config_ch)   // (batch_stem, cp_features.parquet)
         // Reuses the SAME qc_ch computed above for the cellDINO track --

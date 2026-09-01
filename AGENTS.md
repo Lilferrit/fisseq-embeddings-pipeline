@@ -60,8 +60,11 @@ depends on (`make_cell_images`, `extract_embeddings` in
   one shared `random_seed` field every stochastic stage reads from — never
   add a stage-local `random_state`/seed field.
 - **polars, not pandas**, for all tabular data except where the pipeline
-  explicitly uses pandas (`BUILD_DATASET`'s tile manifest — matching
-  `starcall-workflow`'s own CSV-reading convention there).
+  explicitly uses pandas (`build_cell_images_glue.py`'s per-tile CSV
+  reads — matching `starcall-workflow`'s own CSV-reading convention there;
+  it still writes its final `cell_table.parquet` via polars, though, to
+  keep everything downstream of `BUILD_CELL_IMAGES` in the usual
+  convention).
 - **`meta_*` column convention**: metadata columns are prefixed `meta_*`;
   `FEATURE_SELECTOR` (`cs.exclude("^meta_.*$")`) and `EMBEDDING_SELECTOR`
   (`cs.matches(r"^emb_\d+$")`) key off this — see

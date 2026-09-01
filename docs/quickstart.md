@@ -10,18 +10,27 @@ a `--pipeline_dir` directory holding that experiment's raw data:
 window: 224   # must match your Cell-DINO checkpoint's crop size -- global
               # default, used by every experiment below that doesn't set
               # its own `window`
+starcall_container_image: "starcall-workflow:latest"  # required once any
+                                                        # experiment is present
 
 experiments:
   - batch_stem: experiment1
+    starcall_workflow_dir: /data/experiment1/starcall-workflow  # a checkout Snakemake can run against
     phenotyping_dir: /data/experiment1/phenotyping   # starcall-workflow output root
+    segmentation_dir: /data/experiment1/segmentation
+    sequencing_dir: /data/experiment1/sequencing
     wells: [well1, well2]
     # grid_size omitted -- auto-detected per well from phenotyping_dir's
     # own {well}_grid<N> directory naming; set it explicitly to override.
     # window omitted -- falls back to the global `window` default above.
 ```
 
-See [`BUILD_DATASET`'s stage reference](cli/dataset.md) for every field
-`BuildDatasetConfig` accepts.
+These starcall-workflow-facing fields all belong to `BUILD_CELL_IMAGES`,
+the one stage that touches `starcall-workflow`'s tree -- see
+[`BUILD_CELL_IMAGES`' section of the Architecture doc](architecture.md#cell-images-buildcellimages-output-from-starcall-workflow)
+for every field it accepts, and
+[`BUILD_DATASET`'s stage reference](cli/dataset.md) for `BuildDatasetConfig`'s
+own remaining fields (`window`, `shard_maxcount`, ...).
 
 ## 2. Get a Cell-DINO checkpoint
 
@@ -60,8 +69,9 @@ nextflow run . \
 ## 4. Read the outputs
 
 Every stage's output lands under `<pipeline_dir>/`, one subdirectory per
-stage (`dataset/`, `qc_filter/`, `embeddings/`, `filter_embeddings/`,
-`feature_select_batchwise/`, `ovwt_batchwise/`, `global/`). See
+stage (`cell_images/`, `dataset/`, `qc_filter/`, `embeddings/`,
+`filter_embeddings/`, `feature_select_batchwise/`, `ovwt_batchwise/`,
+`global/`). See
 [Nextflow Workflow](nextflow.md#output-directory-layout) for the full tree
 and [Architecture](architecture.md#data-contracts) for what each Parquet
 file's columns mean.

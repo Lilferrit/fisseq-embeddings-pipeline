@@ -6,16 +6,28 @@ Gathers one experiment's cells into a sharded WebDataset (dataset-*.tar)
 plus a companion metadata.parquet, with no hand-authored tile manifest --
 the tile layout is discovered directly (see `discover_tiles`).
 
-Reads directly from starcall-workflow's (origin/devel branch) per-tile
-outputs -- `rule stitch_tile_pt` (stitching.smk)'s stitched phenotype image,
-`rule stitch_tile_from_well_segmentation` (segmentation.smk)'s segmentation
-mask, and `rule tabulate_cells` (segmentation.smk)'s cell table -- and does
-its own per-cell cropping, rather than depending on `rule make_cell_images`
-(phenotyping.smk)'s pre-cropped output, which isn't reliably run for every
-experiment and reads `xpos`/`ypos` columns that don't exist in the real
-cell table schema (only `bbox_x1/y1/x2/y2`). Its crop-window *algorithm* is
-ported here directly (see `_crop_cell`), computing each cell's crop center
-as the bbox midpoint instead.
+Reads from BUILD_CELL_IMAGES' output directory (modules/local/
+build_cell_images.nf), not starcall-workflow's tree directly -- that stage
+is now the ONLY place in the pipeline that touches phenotyping_dir/
+segmentation_dir/sequencing_dir or invokes Snakemake. Concretely, this
+module reads:
+
+- each tile's whole stitched phenotype image and segmentation mask
+  (`*_pt.tif`/`*_mask.tif`, symlinked or copied into cell_images_dir by
+  BUILD_CELL_IMAGES from their real starcall-workflow locations), and
+- `cell_images_dir/cell_table.parquet`, BUILD_CELL_IMAGES' own
+  self-sufficient per-experiment cell table (already joining segmentation
+  and sequencing genotype columns -- see that module's docstring).
+
+Still does its own per-cell cropping (`_crop_cell`), rather than depending
+on `rule make_cell_images` (phenotyping.smk)'s pre-cropped output: that
+rule isn't reliably run for every experiment and reads `xpos`/`ypos`
+columns that don't exist in the real cell table schema (only
+`bbox_x1/y1/x2/y2`) -- confirmed against a real starcall-workflow
+`origin/devel` checkout. Its crop-window *algorithm* is ported here
+directly (see `_crop_cell`), computing each cell's crop center as the bbox
+midpoint instead. BUILD_CELL_IMAGES deliberately doesn't force that rule's
+output to exist either, for the same reason.
 """
 
 import dataclasses
@@ -23,11 +35,10 @@ import glob
 import logging
 import pathlib
 import re
-from typing import List, Optional, Tuple
+from typing import Tuple
 
 import hydra
 import numpy as np
-import pandas as pd
 import polars as pl
 import tifffile
 import webdataset as wds
@@ -38,15 +49,23 @@ from .config import AppConfig
 from .utils.constants import META_BARCODE_COL, META_BATCH_COL, META_EDIT_DISTANCE_COL
 from .utils.log import setup_logging
 
-# Fixed structural contract of starcall-workflow's `tabulate_cells` rule
-# (starcall.cells.make_cell_table(), regionprops-derived bbox columns) --
-# not configurable, unlike barcode_col_name/aa_changes_col_name/
-# edit_distance_col_name, which name columns from a project-specific
-# downstream annotation step.
+# Fixed structural contract of BUILD_CELL_IMAGES' cell_table.parquet
+# (carried through unchanged from starcall-workflow's own segmentation-side
+# cell table -- regionprops-derived bbox columns) -- not configurable,
+# unlike barcode_col_name/aa_changes_col_name/edit_distance_col_name, which
+# name columns from a project-specific downstream annotation step.
 _BBOX_X1_COL = "bbox_x1"
 _BBOX_Y1_COL = "bbox_y1"
 _BBOX_X2_COL = "bbox_x2"
 _BBOX_Y2_COL = "bbox_y2"
+
+# Matches a tile directory's own name (e.g. "tile2x0y") -- used only to
+# recover (tile_x, tile_y) as integers for deterministic numeric sorting in
+# discover_tiles (lexical sorting would misorder e.g. "tile10x0y" before
+# "tile2x0y"). Grid-size ambiguity itself is resolved upstream, by
+# BUILD_CELL_IMAGES -- this stage's cell_images_dir only ever contains the
+# one grid size that stage chose, so there's no grid regex here any more.
+_TILE_DIR_RE = re.compile(r"^tile(\d+)x(\d+)y$")
 
 
 @dataclasses.dataclass
@@ -60,27 +79,13 @@ class BuildDatasetConfig(AppConfig):
 
     Attributes
     ----------
-    phenotyping_dir : str
-        starcall-workflow's phenotyping output root -- the same directory
-        stitch_tile_pt (stitching.smk) and stitch_tile_from_well_segmentation
-        / tabulate_cells (segmentation.smk, devel branch) write into.
-    wells : list[str]
-        Wells belonging to this experiment, e.g. ["well1", "well2"].
-    grid_size : Optional[int]
-        Tile grid size, matching starcall-workflow's own
-        {well}_grid{grid_size}/tile{x}x{y}y/ directory convention. Defaults
-        to None, which auto-detects each well's grid size by scanning
-        phenotyping_dir for its {well}_grid<N> directory instead of
-        requiring it to be typed in by hand -- set it explicitly to skip
-        detection (e.g. if a well has more than one {well}_grid<N>
-        directory and detection can't disambiguate).
-    segmentation_type : str
-        Which segmentation output to use ({segmentation_type}.csv /
-        {segmentation_type}_mask.tif). Defaults to "cells".
-    use_corrected : bool
-        Whether to read corrected_pt.tif or raw_pt.tif (mirrors
-        starcall-workflow's ``config["phenotyping"]["use_corrected"]``,
-        whose own default is False). Defaults to False.
+    cell_images_dir : str
+        BUILD_CELL_IMAGES' per-experiment output directory (modules/local/
+        build_cell_images.nf) -- holds `{well}_grid<N>/tile<x>x<y>y/`
+        subdirectories (each with one `*_pt.tif` and one `*_mask.tif`) plus
+        `cell_table.parquet`. Replaces the old `phenotyping_dir`/`wells`/
+        `grid_size`/`segmentation_type`/`use_corrected` fields -- all now
+        starcall-workflow-discovery concerns BUILD_CELL_IMAGES owns.
     window : int
         Crop size BUILD_DATASET itself produces around each cell's
         bbox-derived center, matching the loaded Cell-DINO checkpoint's
@@ -93,182 +98,91 @@ class BuildDatasetConfig(AppConfig):
         as meta_batch (matching fisseq-data-pipeline's META_BATCH_COL
         convention) -- one BUILD_DATASET run covers exactly one experiment.
     barcode_col_name : str
-        Name of the barcode column in the source cell table. Defaults to
+        Name of the barcode column in cell_table.parquet. Defaults to
         ``"upBarcode"``.
     aa_changes_col_name : str
-        Name of the amino-acid changes column in the source cell table.
+        Name of the amino-acid changes column in cell_table.parquet.
         Defaults to ``"aaChanges"``.
     edit_distance_col_name : str
-        Name of the edit distance column in the source cell table. Defaults
+        Name of the edit distance column in cell_table.parquet. Defaults
         to ``"editDistance"``.
-    csv_schema_scan_rows : Optional[int]
-        Rows scanned from each tile's cell table CSV to infer column
-        dtypes, forwarded to polars ``scan_csv``'s ``infer_schema_length``
-        (mirrors fisseq-data-pipeline's INPUT stage's own
-        ``csv_schema_scan_rows``). Defaults to 100. None scans every row
-        instead -- slower, but avoids mis-inferred dtypes on columns whose
-        non-null/non-integer values only appear after the scanned prefix.
     """
 
-    phenotyping_dir: str = MISSING
-    wells: List[str] = MISSING
-    grid_size: Optional[int] = None
-    segmentation_type: str = "cells"
-    use_corrected: bool = False
+    cell_images_dir: str = MISSING
     window: int = MISSING
     shard_maxcount: int = 2000
     batch_stem: str = MISSING
     barcode_col_name: str = "upBarcode"
     aa_changes_col_name: str = "aaChanges"
     edit_distance_col_name: str = "editDistance"
-    csv_schema_scan_rows: Optional[int] = 100
 
 
-_TILE_DIR_RE = re.compile(r"tile(\d+)x(\d+)y$")
-_GRID_DIR_RE = re.compile(r"_grid(\d+)$")
+def discover_tiles(cfg: BuildDatasetConfig) -> pl.DataFrame:
+    """Glob BUILD_CELL_IMAGES' output directory for this experiment's tiles.
 
-
-def _resolve_grid_size(
-    phenotyping_dir: str, well: str, grid_size: Optional[int]
-) -> int:
-    """Resolve one well's tile grid size, auto-detecting it when omitted.
-
-    If ``grid_size`` is given, it's returned as-is (today's behavior,
-    unchanged). Otherwise this scans ``phenotyping_dir`` for a
-    ``{well}_grid<N>`` directory -- starcall-workflow's own naming
-    convention already encodes the grid size there, so there's no need to
-    make users repeat it in params.yaml. Exactly one distinct grid size is
-    required per well; zero matches would otherwise silently discover zero
-    tiles, and multiple different-sized matches would be ambiguous.
-
-    Parameters
-    ----------
-    phenotyping_dir : str
-        starcall-workflow's phenotyping output root.
-    well : str
-        The well to resolve a grid size for.
-    grid_size : Optional[int]
-        An explicit override, or None to auto-detect.
-
-    Returns
-    -------
-    int
-        The resolved grid size.
-
-    Raises
-    ------
-    ValueError
-        If auto-detection finds no ``{well}_grid<N>`` directory, or finds
-        more than one distinct grid size among matching directories.
-    """
-    if grid_size is not None:
-        return grid_size
-
-    matches = []
-    for candidate in glob.glob(f"{phenotyping_dir}/{well}_grid*"):
-        if not pathlib.Path(candidate).is_dir():
-            continue
-        m = _GRID_DIR_RE.search(pathlib.Path(candidate).name)
-        if m is not None:
-            matches.append((candidate, int(m.group(1))))
-
-    sizes = {size for _, size in matches}
-    if not sizes:
-        raise ValueError(
-            f"Could not auto-detect grid_size for well '{well}': no "
-            f"'{well}_grid<N>' directory found under {phenotyping_dir!r}. "
-            "Fix phenotyping_dir/wells, or set grid_size explicitly. If "
-            "phenotyping_dir plainly exists when you look from outside this "
-            "process (e.g. `ls` on the host), this can also mean it isn't "
-            "bind-mounted into a Singularity/Apptainer container -- see "
-            "docs/nextflow.md's 'Singularity/Apptainer and arbitrary host "
-            "paths' section."
-        )
-    if len(sizes) > 1:
-        found = ", ".join(candidate for candidate, _ in sorted(matches))
-        raise ValueError(
-            f"Could not auto-detect grid_size for well '{well}': found "
-            f"multiple candidate directories with different grid sizes "
-            f"({found}). Set grid_size explicitly to disambiguate."
-        )
-    return sizes.pop()
-
-
-def discover_tiles(cfg: BuildDatasetConfig) -> pd.DataFrame:
-    """Glob starcall-workflow's own phenotyping_dir layout for this experiment's tiles.
-
-    No manifest file -- derives (cell_table_csv, pt_tif, mask_tif, well,
-    tile) directly from the ``{well}_grid{grid_size}/tile{x}x{y}y/``
-    convention starcall-workflow's own rules already use (confirmed against
-    a real ``starcall-workflow`` ``origin/devel`` checkout: ``stitching.smk``'s
-    ``rule stitch_tile_pt`` writes
-    ``'{well}_grid{grid_size}/tile{x}x{y}y/{corrected|raw}_pt.tif'``, and
-    ``segmentation.smk``'s ``rule stitch_tile_from_well_segmentation`` writes
-    ``'{well}_grid{grid_size}/tile{x}x{y}y/{segmentation_type}_mask.tif'``
-    into the same tile directory), for every well in ``cfg.wells``.
-
-    Rows are sorted by ``(well, tile_x, tile_y)`` as integers, not by
-    lexical order (which would misorder double-digit tile indices, e.g.
-    ``tile10x0y`` sorting before ``tile2x0y``) -- sorting on the parsed
-    integers instead makes tile order deterministic regardless of
-    tile-count magnitude.
+    No manifest file -- derives (well, tile, pt_tif, mask_tif) directly
+    from the `{well}_grid<N>/tile<x>x<y>y/` convention BUILD_CELL_IMAGES'
+    own output preserves (mirroring starcall-workflow's own naming). Each
+    tile directory holds exactly one `*_pt.tif` (either `raw_pt.tif` or
+    `corrected_pt.tif`, whichever BUILD_CELL_IMAGES was configured to
+    collect) and one `*_mask.tif` (`{segmentation_type}_mask.tif`) -- glob
+    generically for both rather than needing to know which
+    `segmentation_type`/`use_corrected` BUILD_CELL_IMAGES chose (those are
+    now BUILD_CELL_IMAGES-only config, not BuildDatasetConfig's).
 
     Parameters
     ----------
     cfg : BuildDatasetConfig
-        Supplies ``phenotyping_dir``, ``wells``, ``grid_size``,
-        ``segmentation_type``, and ``use_corrected`` (used to build the
-        expected per-tile file paths). ``cfg.window`` isn't used here --
-        it only matters once cropping happens, in
-        :func:`write_dataset_shards`. ``cfg.grid_size`` is resolved per
-        well via :func:`_resolve_grid_size` -- when it's None, each well
-        gets its own auto-detected grid size independently, so wells with
-        genuinely different grid sizes within one experiment both work.
+        Supplies ``cell_images_dir``.
 
     Returns
     -------
-    pd.DataFrame
-        Columns ``well``, ``tile``, ``cell_table_csv``, ``pt_tif``,
-        ``mask_tif``, one row per discovered tile, sorted deterministically.
+    pl.DataFrame
+        Columns ``well``, ``tile``, ``pt_tif``, ``mask_tif``, one row per
+        discovered tile, sorted deterministically by ``(well, tile_x,
+        tile_y)`` as integers (not lexically -- lexical order would
+        misorder double-digit tile indices, e.g. ``tile10x0y`` sorting
+        before ``tile2x0y``).
     """
-    phenotype_filename = "corrected_pt.tif" if cfg.use_corrected else "raw_pt.tif"
-
     rows = []
-    for well in cfg.wells:
-        grid_size = _resolve_grid_size(cfg.phenotyping_dir, well, cfg.grid_size)
-        pattern = f"{cfg.phenotyping_dir}/{well}_grid{grid_size}/tile*x*y"
-        for tile_dir in glob.glob(pattern):
-            m = _TILE_DIR_RE.search(tile_dir)
-            if m is None:
-                continue
-            tile_x, tile_y = int(m.group(1)), int(m.group(2))
-            tile = f"tile{tile_x}x{tile_y}y"
-            rows.append(
-                {
-                    "well": well,
-                    "tile": tile,
-                    "tile_x": tile_x,
-                    "tile_y": tile_y,
-                    "cell_table_csv": f"{tile_dir}/{cfg.segmentation_type}.csv",
-                    "pt_tif": f"{tile_dir}/{phenotype_filename}",
-                    "mask_tif": f"{tile_dir}/{cfg.segmentation_type}_mask.tif",
-                }
-            )
+    for tile_dir in glob.glob(f"{cfg.cell_images_dir}/*_grid*/tile*x*y"):
+        tile_path = pathlib.Path(tile_dir)
+        tile_name = tile_path.name
+        well_grid = tile_path.parent.name
+        well = well_grid.rsplit("_grid", 1)[0]
 
-    manifest = pd.DataFrame(
+        pt_matches = glob.glob(f"{tile_dir}/*_pt.tif")
+        mask_matches = glob.glob(f"{tile_dir}/*_mask.tif")
+        if not pt_matches or not mask_matches:
+            continue
+
+        m = _TILE_DIR_RE.match(tile_name)
+        if m is None:
+            continue
+        rows.append(
+            {
+                "well": well,
+                "tile": tile_name,
+                "tile_x": int(m.group(1)),
+                "tile_y": int(m.group(2)),
+                "pt_tif": pt_matches[0],
+                "mask_tif": mask_matches[0],
+            }
+        )
+
+    manifest = pl.DataFrame(
         rows,
-        columns=[
-            "well",
-            "tile",
-            "tile_x",
-            "tile_y",
-            "cell_table_csv",
-            "pt_tif",
-            "mask_tif",
-        ],
+        schema={
+            "well": pl.String,
+            "tile": pl.String,
+            "tile_x": pl.Int64,
+            "tile_y": pl.Int64,
+            "pt_tif": pl.String,
+            "mask_tif": pl.String,
+        },
     )
-    manifest = manifest.sort_values(["well", "tile_x", "tile_y"]).reset_index(drop=True)
-    return manifest.drop(columns=["tile_x", "tile_y"])
+    manifest = manifest.sort(["well", "tile_x", "tile_y"])
+    return manifest.drop(["tile_x", "tile_y"])
 
 
 def _crop_cell(
@@ -345,22 +259,13 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
     metadata.
 
     Tiles come from :func:`discover_tiles`, not a hand-authored manifest.
-    Per tile, this reads the stitched phenotype image (``pt_tif``) and
-    segmentation mask (``mask_tif``) directly and crops around each cell's
-    bbox-derived center via :func:`_crop_cell` -- porting
-    ``make_cell_images``'s crop algorithm rather than depending on its
-    (unreliably-produced) pre-cropped output. See the module docstring.
+    Per-cell metadata and bbox positions come from BUILD_CELL_IMAGES'
+    ``cell_table.parquet``, read once (not re-read per tile). Per tile,
+    this reads the whole stitched phenotype image (``pt_tif``) and
+    segmentation mask (``mask_tif``) and crops around each cell's
+    bbox-derived center via :func:`_crop_cell`.
 
     A tile whose cell table has zero rows is skipped without erroring.
-    Unlike ``make_cell_images`` (which ``touch``-empties its own crop
-    outputs for an empty tile, producing genuinely 0-byte files),
-    ``tabulate_cells`` writes ``{segmentation_type}.csv`` via plain
-    ``DataFrame.to_csv`` unconditionally -- always at least a header row --
-    and ``stitch_tile_pt``/``stitch_tile_from_well_segmentation`` always
-    produce their tile-level outputs regardless of cell count. So only the
-    ``len(table.index) == 0`` case needs guarding here; a missing/corrupt
-    ``pt_tif``/``mask_tif`` for a non-empty tile is a genuine data problem
-    and is allowed to raise.
 
     Parameters
     ----------
@@ -369,77 +274,71 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
         into. Must already exist.
     cfg : BuildDatasetConfig
         Supplies the tile manifest (via :func:`discover_tiles`), the crop
-        ``window``, column-name overrides, ``batch_stem``,
-        ``shard_maxcount``, and ``csv_schema_scan_rows`` (forwarded to each
-        tile's cell table CSV read).
+        ``window``, column-name overrides, ``batch_stem``, and
+        ``shard_maxcount``.
     """
     tile_manifest = discover_tiles(cfg)
+    cell_table = pl.read_parquet(f"{cfg.cell_images_dir}/cell_table.parquet")
+
     output_pattern = str(output_dir / "dataset-%06d.tar")
     metadata_rows = []
 
     with wds.ShardWriter(output_pattern, maxcount=cfg.shard_maxcount) as sink:
-        for row in tile_manifest.itertuples():
-            # pl.scan_csv (not pd.read_csv) so cfg.csv_schema_scan_rows can
-            # control dtype inference; .set_index on the first column
-            # reproduces pd.read_csv's old index_col=0 -- tabulate_cells
-            # writes that column as the unnamed pandas row index via plain
-            # DataFrame.to_csv().
-            table = (
-                pl.scan_csv(
-                    row.cell_table_csv, infer_schema_length=cfg.csv_schema_scan_rows
+        for row in tile_manifest.iter_rows(named=True):
+            tile_table = (
+                cell_table.filter(
+                    (pl.col("well") == row["well"]) & (pl.col("tile") == row["tile"])
                 )
-                .collect()
+                .sort("crop_index")
                 .to_pandas()
             )
-            table = table.set_index(table.columns[0])
-            if len(table.index) == 0:
-                logging.info("Skipping empty tile %s/%s", row.well, row.tile)
+            if len(tile_table.index) == 0:
+                logging.info("Skipping empty tile %s/%s", row["well"], row["tile"])
                 continue
 
-            image = tifffile.imread(row.pt_tif)  # (cycles, C, H, W) or (C, H, W)
+            image = tifffile.imread(row["pt_tif"])  # (cycles, C, H, W) or (C, H, W)
             if image.ndim == 3:
-                # stitch_tile_pt's docstring promises 4D always, but with
-                # the common single-cycle case (phenotype_cycles=['PT']) a
-                # (1, C, H, W) array can come back squeezed to 3D on
-                # write/read -- guard for both.
+                # A (1, C, H, W) array can come back squeezed to 3D on
+                # write/read in the common single-cycle case -- guard for
+                # both.
                 image = image[None]
             image = image.reshape(-1, *image.shape[-2:])  # (cycles*C, H, W)
-            mask = tifffile.imread(row.mask_tif)  # (H, W)
+            mask = tifffile.imread(row["mask_tif"])  # (H, W)
             assert mask.shape == image.shape[1:], (
                 f"pt_tif/mask_tif spatial shape mismatch for "
-                f"{row.well}/{row.tile}: image {image.shape[1:]} vs "
+                f"{row['well']}/{row['tile']}: image {image.shape[1:]} vs "
                 f"mask {mask.shape}"
             )
 
             cx = (
-                ((table[_BBOX_X1_COL] + table[_BBOX_X2_COL]) // 2)
+                ((tile_table[_BBOX_X1_COL] + tile_table[_BBOX_X2_COL]) // 2)
                 .astype("int64")
                 .to_numpy()
             )
             cy = (
-                ((table[_BBOX_Y1_COL] + table[_BBOX_Y2_COL]) // 2)
+                ((tile_table[_BBOX_Y1_COL] + tile_table[_BBOX_Y2_COL]) // 2)
                 .astype("int64")
                 .to_numpy()
             )
 
-            for i, cell_index in enumerate(table.index):
+            for i in range(len(tile_table.index)):
+                tile_row = tile_table.iloc[i]
                 crop, crop_mask = _crop_cell(
                     image, mask, int(cx[i]), int(cy[i]), label=i + 1, window=cfg.window
                 )
+                cell_index = int(tile_row["tile_cell_index"])
                 meta = {
                     META_BATCH_COL: cfg.batch_stem,
-                    "meta_well": row.well,
-                    "meta_tile": row.tile,
-                    "meta_cell_index": int(cell_index),
-                    META_BARCODE_COL: str(table[cfg.barcode_col_name].iat[i]),
-                    "meta_aa_changes": str(table[cfg.aa_changes_col_name].iat[i]),
-                    META_EDIT_DISTANCE_COL: int(
-                        table[cfg.edit_distance_col_name].iat[i]
-                    ),
+                    "meta_well": row["well"],
+                    "meta_tile": row["tile"],
+                    "meta_cell_index": cell_index,
+                    META_BARCODE_COL: str(tile_row[cfg.barcode_col_name]),
+                    "meta_aa_changes": str(tile_row[cfg.aa_changes_col_name]),
+                    META_EDIT_DISTANCE_COL: int(tile_row[cfg.edit_distance_col_name]),
                 }
                 sink.write(
                     {
-                        "__key__": f"{row.well}_{row.tile}_{cell_index}",
+                        "__key__": f"{row['well']}_{row['tile']}_{cell_index}",
                         "crop.npy": crop,
                         "mask.npy": crop_mask,
                         "meta.json": meta,
@@ -487,16 +386,10 @@ def main(cfg: DictConfig) -> None:
 
         python -m fisseq_embeddings_pipeline.dataset \\
             output_dir=./out \\
-            phenotyping_dir=/data/experiment1/phenotyping \\
-            'wells=[well1,well2]' \\
-            grid_size=12 \\
+            cell_images_dir=/pipeline/cell_images/experiment1 \\
             window=224 \\
             batch_stem=experiment1 \\
             random_seed=0
-
-    ``grid_size`` is optional -- omit it (or pass ``grid_size=null``) to
-    auto-detect it per well from ``phenotyping_dir``'s own
-    ``{well}_grid<N>`` directory naming instead.
     """
     build_cfg: BuildDatasetConfig = OmegaConf.to_object(cfg)
 
@@ -506,11 +399,9 @@ def main(cfg: DictConfig) -> None:
     setup_logging(build_cfg, "dataset")
 
     logging.info(
-        "Building dataset for batch %s from %s (wells=%s, grid_size=%s)",
+        "Building dataset for batch %s from %s",
         build_cfg.batch_stem,
-        build_cfg.phenotyping_dir,
-        build_cfg.wells,
-        build_cfg.grid_size if build_cfg.grid_size is not None else "auto-detect",
+        build_cfg.cell_images_dir,
     )
     write_dataset_shards(output_dir, build_cfg)
     logging.info("Done")

@@ -17,11 +17,29 @@ already established at the unit-test level in tests/unit/test_embed.py's
 `test_main_runs_end_to_end_via_cli`. This exercises the wrapper's real
 control flow (weight loading, forward pass, shape handling), not
 Cell-DINO's actual pretrained-checkpoint output quality.
+
+BUILD_CELL_IMAGES (the one stage that shells out to a real `snakemake`
+binary against a real starcall-workflow checkout) is exercised here via a
+stub `snakemake` executable prepended onto PATH -- not by bypassing the
+real Nextflow process. The synthetic fixture pre-populates a
+starcall-workflow-shaped phenotyping_dir/sequencing_dir tree directly (the
+way a real `snakemake` invocation would have left it), and the stub simply
+exits 0 without touching the filesystem, standing in for "every requested
+target is already up to date". This exercises BUILD_CELL_IMAGES' own real
+tile-enumeration, symlink-collection, and cell_table.parquet-building logic
+end to end through the real Nextflow/Hydra plumbing -- only the external
+`snakemake`/starcall-workflow dependency itself (unavailable in CI, and
+this repo's own docker/starcall.Dockerfile is unvalidated -- see
+docs/architecture.md) is faked, matching the same "fake the expensive/
+external dependency, exercise real control flow elsewhere" precedent
+EMBED_CELLS' checkpoint fixture already sets.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import Sequence, Tuple
@@ -84,76 +102,113 @@ _EXTRA_NF_PARAMS = [
     "0",
 ]
 
+_STUB_SNAKEMAKE_SCRIPT = """#!/bin/sh
+# Stub snakemake for integration testing: the fixture that invokes this
+# already pre-populates every real starcall-workflow-shaped target file
+# BUILD_CELL_IMAGES would request, so there's nothing for a real Snakemake
+# invocation to do -- just succeed, mimicking "every requested target is
+# already up to date". See this test module's own docstring.
+echo "stub snakemake invoked: $*" >&2
+exit 0
+"""
+
+
+def _write_stub_snakemake(bin_dir: Path) -> None:
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / "snakemake"
+    script.write_text(_STUB_SNAKEMAKE_SCRIPT)
+    script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
 
 def _make_deterministic_image(channels: int, size: int) -> np.ndarray:
     rng = np.random.default_rng(0)
     return rng.integers(0, 255, size=(channels, size, size), dtype=np.uint16)
 
 
-def _write_tile(
-    tile_dir: Path,
+_CELLPROFILER_PIPELINE = "test_pipeline"
+
+
+def _write_starcall_tile(
+    phenotyping_dir: Path,
+    sequencing_dir: Path,
+    well: str,
+    grid_size: int,
+    tile: str,
     cell_ids: Sequence[int],
     centers: Sequence[Tuple[int, int]],
     barcodes: Sequence[str],
     aa_changes: Sequence[str],
+    write_cellprofiler_csv: bool = False,
 ) -> None:
-    """Write one starcall-workflow-shaped tile (cell table CSV + stitched
-    phenotype tif + segmentation mask tif) -- same convention as
-    tests/unit/test_dataset.py's `_write_populated_tile`, trimmed to what
-    this fixture needs (single cycle, no edit-distance/edge-case variety)."""
-    tile_dir.mkdir(parents=True, exist_ok=True)
+    """Write one starcall-workflow-shaped tile across the phenotyping and
+    sequencing trees BUILD_CELL_IMAGES actually reads from -- the
+    segmentation-side cell table (phenotyping_dir, bbox/orig_index/mask8
+    only, matching `rule split_grid_table`'s real output columns) and the
+    sequencing-side reads table (sequencing_dir, editDistance/upBarcode/
+    aaChanges, matching `rule merge_final_tables`) are deliberately kept
+    separate -- matching the real starcall-workflow data flow this
+    pipeline now correctly follows (see dataset.py's module docstring, and
+    build_cell_images_glue.py's index-value join)."""
+    grid_dir = f"{well}_grid{grid_size}"
+    pheno_tile_dir = phenotyping_dir / grid_dir / tile
+    seq_tile_dir = sequencing_dir / grid_dir / tile
+    pheno_tile_dir.mkdir(parents=True, exist_ok=True)
+    seq_tile_dir.mkdir(parents=True, exist_ok=True)
 
-    table = pd.DataFrame(
+    seg_table = pd.DataFrame(
         {
             "bbox_x1": [cx for cx, _ in centers],
             "bbox_y1": [cy for _, cy in centers],
             "bbox_x2": [cx for cx, _ in centers],
             "bbox_y2": [cy for _, cy in centers],
-            "upBarcode": list(barcodes),
-            "aaChanges": list(aa_changes),
-            "editDistance": [0] * len(cell_ids),
+            "orig_index": list(cell_ids),
+            "mask8": [0] * len(cell_ids),
         },
         index=list(cell_ids),
     )
-    table.to_csv(tile_dir / "cells.csv")
+    seg_table.to_csv(pheno_tile_dir / "cells.csv")
+
+    reads_table = pd.DataFrame(
+        {
+            "editDistance": [0] * len(cell_ids),
+            "upBarcode": list(barcodes),
+            "aaChanges": list(aa_changes),
+        },
+        index=list(cell_ids),
+    )
+    reads_table.to_csv(seq_tile_dir / "cells_reads.csv")
 
     image = _make_deterministic_image(_NUM_CHANNELS, _TILE_SIZE)
     mask = np.zeros((_TILE_SIZE, _TILE_SIZE), dtype=np.int32)
     for i, (cx, cy) in enumerate(centers):
         mask[cx, cy] = i + 1
 
-    tifffile.imwrite(tile_dir / "raw_pt.tif", image, photometric="minisblack")
-    tifffile.imwrite(tile_dir / "cells_mask.tif", mask)
+    tifffile.imwrite(pheno_tile_dir / "raw_pt.tif", image, photometric="minisblack")
+    tifffile.imwrite(pheno_tile_dir / "cells_mask.tif", mask)
 
-
-_CELLPROFILER_PIPELINE = "test_pipeline"
-
-
-def _write_cellprofiler_csv(tile_dir: Path, cell_ids: Sequence[int]) -> None:
-    """One CellProfiler-style feature column, alongside the tile's cell
-    table -- same file-naming convention cp_features.py reads
-    (`cellprofiler{cycle}_{pipeline}.csv`, cycle="" here), row-position
-    matched to the cell table (cell_ids here are already 0..N-1 in the
-    same order the cell table itself is written in, so row position and
-    cell_id value coincide -- see cp_features.py's module docstring on the
-    row-position join)."""
-    cp_table = pd.DataFrame(
-        {"Cells_AreaShape_Area": [float(100 + cid) for cid in cell_ids]},
-        index=list(cell_ids),
-    )
-    cp_table.to_csv(tile_dir / f"cellprofiler_{_CELLPROFILER_PIPELINE}.csv")
+    if write_cellprofiler_csv:
+        # Row-position matched to the cell table (cell_ids here are already
+        # 0..N-1 in the same order the cell table itself is written in, so
+        # row position and cell_id value coincide -- see
+        # build_cell_images_glue.py's module docstring on the row-position
+        # join for CellProfiler specifically).
+        cp_table = pd.DataFrame(
+            {"Cells_AreaShape_Area": [float(100 + cid) for cid in cell_ids]},
+            index=list(cell_ids),
+        )
+        cp_table.to_csv(pheno_tile_dir / f"cellprofiler_{_CELLPROFILER_PIPELINE}.csv")
 
 
 def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -> Path:
-    """Write a tiny synthetic phenotyping_dir under exp_dir, plus a
+    """Write a tiny synthetic starcall-workflow-shaped tree (phenotyping_dir
+    + sequencing_dir) under exp_dir, a stub `snakemake` executable, and a
     params.yaml (repo defaults + a single `experiments:` entry for this
     batch, with `cp_features: true` opting it into the CellProfiler-feature
-    track too) also under exp_dir, matching BUILD_DATASET's real input
+    track too) also under exp_dir, matching BUILD_CELL_IMAGES' real input
     contract closely enough to run end to end. Returns exp_dir.
 
     include_grid_size=False omits grid_size from the entry entirely,
-    exercising BUILD_DATASET's (and, since the same entry also drives
-    BUILD_CP_FEATURES here, BUILD_CP_FEATURES') auto-detection of it from
+    exercising BUILD_CELL_IMAGES' auto-detection of it from
     phenotyping_dir's own `well1_grid1` directory naming instead.
 
     The entry sets neither `window` nor `cellprofiler_pipeline` itself --
@@ -163,7 +218,13 @@ def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -
     wiring end to end (an entry's own value, if present, would still win
     -- see workflows/embeddings.nf)."""
     phenotyping_dir = exp_dir / "phenotyping"
-    tile_dir = phenotyping_dir / "well1_grid1" / "tile0x0y"
+    segmentation_dir = exp_dir / "segmentation"  # unused by the stub, created for realism
+    sequencing_dir = exp_dir / "sequencing"
+    starcall_workflow_dir = exp_dir / "starcall-workflow"
+    (starcall_workflow_dir / "workflow").mkdir(parents=True, exist_ok=True)
+    (starcall_workflow_dir / "workflow" / "Snakefile").write_text("# stub, never read\n")
+    segmentation_dir.mkdir(parents=True, exist_ok=True)
+    _write_stub_snakemake(exp_dir / "stub_bin")
 
     cell_id = 0
     centers = []
@@ -181,11 +242,24 @@ def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -
                 cell_id += 1
 
     cell_ids = list(range(cell_id))
-    _write_tile(tile_dir, cell_ids, centers, barcodes, aa_changes)
-    _write_cellprofiler_csv(tile_dir, cell_ids)
+    _write_starcall_tile(
+        phenotyping_dir,
+        sequencing_dir,
+        "well1",
+        1,
+        "tile0x0y",
+        cell_ids,
+        centers,
+        barcodes,
+        aa_changes,
+        write_cellprofiler_csv=True,
+    )
 
     batch_config = {
+        "starcall_workflow_dir": str(starcall_workflow_dir),
         "phenotyping_dir": str(phenotyping_dir),
+        "segmentation_dir": str(segmentation_dir),
+        "sequencing_dir": str(sequencing_dir),
         "wells": ["well1"],
         "cp_features": True,
     }
@@ -194,6 +268,8 @@ def _write_synthetic_experiment(exp_dir: Path, include_grid_size: bool = True) -
     params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
     params["window"] = _WINDOW
     params["cellprofiler_pipeline"] = _CELLPROFILER_PIPELINE
+    params["starcall_container_image"] = "unused-under-profile-local"
+    params["snakemake_cores"] = 1
     params["experiments"] = [{"batch_stem": "batch1", **batch_config}]
     with open(exp_dir / "params.yaml", "w") as f:
         yaml.safe_dump(params, f)
@@ -217,12 +293,19 @@ def _run_nextflow(exp_dir: Path, checkpoint_path: Path) -> subprocess.CompletedP
     from-scratch runs against two separate `pipeline_dir`s with identical
     params (including `random_seed`) -- not two invocations sharing one
     `pipeline_dir`, which would let the second run's `-resume` cache hit
-    reuse the first run's outputs instead of genuinely recomputing them."""
+    reuse the first run's outputs instead of genuinely recomputing them.
+
+    PATH is prepended with exp_dir's own stub_bin/ (written by
+    _write_synthetic_experiment) so BUILD_CELL_IMAGES' `snakemake`
+    invocation resolves to the stub, not a real (likely absent) snakemake
+    binary -- see this module's own docstring."""
     # exp_dir's own params.yaml (repo defaults + this run's `experiments:`
     # entry, written by _write_synthetic_experiment) -- not the repo's root
     # params.yaml, since Nextflow only accepts one -params-file per run and
     # experiments now has to live inside it.
     params_yaml = exp_dir / "params.yaml"
+    env = os.environ.copy()
+    env["PATH"] = f"{exp_dir / 'stub_bin'}{os.pathsep}{env.get('PATH', '')}"
     return subprocess.run(
         [
             "nextflow",
@@ -244,6 +327,7 @@ def _run_nextflow(exp_dir: Path, checkpoint_path: Path) -> subprocess.CompletedP
         capture_output=True,
         text=True,
         timeout=600,
+        env=env,
     )
 
 
@@ -265,6 +349,24 @@ def pipeline_outputs(tmp_path_factory):
 def test_pipeline_exits_cleanly(pipeline_outputs):
     exp_dir, result = pipeline_outputs
     assert result.returncode == 0, result.stderr
+
+
+def test_cell_images_produced(pipeline_outputs):
+    """BUILD_CELL_IMAGES' own output -- the one complete, self-sufficient
+    cell table everything downstream reads, plus the collected whole-tile
+    image files (see build_cell_images.nf's module docstring)."""
+    exp_dir, _ = pipeline_outputs
+    cell_images_dir = exp_dir / "cell_images" / "batch1"
+    cell_table = pl.read_parquet(cell_images_dir / "cell_table.parquet")
+    n_cells = sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
+    assert cell_table.height == n_cells
+    assert {"editDistance", "upBarcode", "aaChanges", "bbox_x1", "crop_index"}.issubset(
+        cell_table.columns
+    )
+    assert any(c.startswith("cp_") for c in cell_table.columns)
+    tile_dir = cell_images_dir / "well1_grid1" / "tile0x0y"
+    assert (tile_dir / "raw_pt.tif").exists()
+    assert (tile_dir / "cells_mask.tif").exists()
 
 
 def test_dataset_and_embeddings_produced(pipeline_outputs):
@@ -301,8 +403,8 @@ def test_aggregate_and_ovwt_outputs_exist(pipeline_outputs):
 def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
     """grid_size can be omitted from an experiment entry entirely -- proves
     auto-detection works through the real Nextflow/Hydra override
-    plumbing, not just in-process (see tests/unit/test_dataset.py for the
-    in-process coverage of the detection logic itself)."""
+    plumbing, not just in-process (see tests/unit/test_build_cell_images_glue.py
+    for the in-process coverage of the detection logic itself)."""
     if shutil.which("nextflow") is None:
         pytest.skip("nextflow not on PATH -- see this module's docstring")
 
