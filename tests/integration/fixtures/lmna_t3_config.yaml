@@ -231,7 +231,12 @@ phenotype_date: 'phenotype'
 # the auto-detection code above -- that code is dead, wrapped in a
 # `"""..."""` string literal in workflow/rules/config.smk (confirmed by
 # reading it directly against origin/devel). Must be explicit.
-wells: ['well1']
+# 'well1_subset1' -- not 'well1' -- matching the actual on-disk directory
+# name scripts/prepare_real_starcall_test_data.py writes under input/
+# (its own _CROPPED_WELL); config.yaml's `wells:` must name the real
+# input/ well subdirectory Snakemake will glob for, not the source well's
+# original name.
+wells: ['well1_subset1']
 cycles: ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11']
 phenotype_cycles: ['PT']
 # Internal chunking grid for large-well parallelism. Confirmed via a real
