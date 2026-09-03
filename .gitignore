@@ -18,6 +18,7 @@ wheels/
 .pytest_cache/
 .claude/
 .codegraph/
+.devcontainer-tmp/
 
 # Generated docs output
 site/

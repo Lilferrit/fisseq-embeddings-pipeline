@@ -8,6 +8,8 @@
     "ghcr.io/devcontainers/features/java:1": { "version": "17" },
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": { "moby": false }
   },
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
   "mounts": [
     "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
     "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,readonly",
@@ -15,10 +17,11 @@
     "source=/Users/gwen/Documents/starcall-workflow,target=/workspaces/starcall-workflow,type=bind,readonly"
   ],
   "containerEnv": {
-    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+    "TMPDIR": "${localWorkspaceFolder}/.devcontainer-tmp"
   },
   "containerUser": "vscode",
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && uv sync && (cd /tmp && curl -s https://get.nextflow.io | bash) && sudo mv /tmp/nextflow /usr/local/bin/nextflow && sudo chmod +x /usr/local/bin/nextflow",
+  "postCreateCommand": "mkdir -p \"${localWorkspaceFolder}/.devcontainer-tmp\" && sudo chown -R vscode:vscode /home/vscode/.claude && uv sync && (cd /tmp && curl -s https://get.nextflow.io | bash) && sudo mv /tmp/nextflow /usr/local/bin/nextflow && sudo chmod +x /usr/local/bin/nextflow",
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "ms-python.python", "charliermarsh.ruff"]
