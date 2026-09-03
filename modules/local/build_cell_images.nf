@@ -139,6 +139,14 @@ process BUILD_CELL_IMAGES {
     def enumerate_overrides = batch_config.collect { key, value ->
         (value instanceof List) ? "'${key}=[${value.join(",")}]'" : "${key}=${value}"
     }.join(' \\\n        ')
+    // --use-conda shells out to a bare `conda` regardless of
+    // snakemake_bin's own absolute path -- see the comment at its call
+    // site below. Computed once here (Groovy, at script-generation time,
+    // not bash runtime) so -profile local's empty conda_bin_dir emits no
+    // PATH= prefix at all, rather than a bash-level conditional.
+    def conda_path_prefix = task.ext.conda_bin_dir
+        ? "PATH=\"${task.ext.conda_bin_dir}:\$PATH\" "
+        : ''
     """
     set -euo pipefail
 
@@ -161,13 +169,46 @@ process BUILD_CELL_IMAGES {
     # local overrides this back to bare `snakemake`, since that profile
     # has no ops env at all to point at. A process directive (`ext`), not
     # params.yaml -- see that file's own comment on why.
-    ${task.ext.snakemake_bin} \\
+    #
+    # --use-conda itself shells out to a bare `conda` (Conda().prefix_path,
+    # snakemake/deployment/conda.py) regardless of snakemake_bin's own
+    # absolute path -- and conda's own base env (where that binary lives)
+    # is deliberately kept off this image's PATH too (same Dockerfile
+    # reasoning), so scope it onto PATH just for this one invocation via
+    # task.ext.conda_bin_dir (nextflow.config) rather than polluting the
+    # whole container's default PATH; empty under -profile local, which
+    # has no /opt/conda at all.
+    #
+    # The trailing '/' appended to each --config value here (not present in
+    # resolved_dirs.env itself -- resolve_data_dir's own return value is
+    # deliberately slash-free, matching how phase 1/3's own Python always
+    # joins onto it with an explicit '/') matters specifically at this one
+    # crossing point: workflow/rules/*.smk builds every output path by
+    # plain string concatenation (`sequencing_dir + '{well}_grid.../...'`,
+    # no path-joining), matching config.yaml/default-config.yaml's own
+    # literal defaults ('phenotyping/', 'segmentation/', 'sequencing/') --
+    # confirmed directly: a slash-free --config override here still runs,
+    # but silently produces a malformed `{path}` wildcard (an unwanted
+    # leading '/') that no rule matches (MissingRuleException) or, worse,
+    # recurses without bound inside sequencing.smk's own get_aux_data.
+    #
+    # The '--' immediately before the target list (not just a style choice)
+    # stops --config's own arg parser -- which otherwise keeps consuming
+    # tokens past its own key=value entries -- from swallowing the target
+    # paths themselves as bogus, unparseable config entries; confirmed
+    # against a real multi-well/multi-tile run, where non-empty
+    # targets.txt actually has entries to swallow (this repo's own fixture-
+    # driven tests never catch it: targets.txt is empty whenever the fixed
+    # well-name bug or a from-scratch, unprimed tile grid leaves 0 tiles
+    # enumerated, so there's nothing after --config's values to swallow).
+    ${conda_path_prefix}${task.ext.snakemake_bin} \\
         --snakefile "${starcall_workflow_dir}/workflow/Snakefile" \\
         --directory "${starcall_workflow_dir}" \\
         --cores ${params.snakemake_cores} \\
         --use-conda --conda-frontend conda \\
         --rerun-triggers mtime \\
-        --config phenotyping_dir="\$phenotyping_dir" segmentation_dir="\$segmentation_dir" sequencing_dir="\$sequencing_dir" \\
+        --config phenotyping_dir="\$phenotyping_dir/" segmentation_dir="\$segmentation_dir/" sequencing_dir="\$sequencing_dir/" \\
+        -- \\
         \$(cat targets.txt)
 
     while IFS=\$'\\t' read -r rel_path abs_path; do

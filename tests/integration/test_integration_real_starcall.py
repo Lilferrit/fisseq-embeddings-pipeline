@@ -50,6 +50,46 @@ real `stardist`/`cellpose` segmentation, and real sequencing base-calling
 against a real (if tiny) barcode library. Budget minutes, not seconds --
 this is the appropriate place to pay that cost, once, deliberately,
 rather than never paying it at all.
+
+`_prime_tile_grid` pays a second, related cost first: BUILD_CELL_IMAGES'
+own enumerate phase (build_cell_images_enumerate.py) deliberately
+*discovers* tiles by globbing starcall-workflow's phenotyping_dir tree for
+directories that already exist there, rather than computing tile names
+combinatorially -- a precondition real deployments meet because
+starcall-workflow has typically already been run (at least partially)
+against a well before this pipeline is ever pointed at it; not every
+`{well}_grid{N}/tile{x}x{y}y` combination a dense square would imply
+necessarily exists or gets built, e.g. at real, irregular well boundaries.
+A from-scratch checkout -- this fixture's whole point -- doesn't start
+with that precondition met, so this primes it: one real, direct
+`snakemake` invocation (the same image, the same real compute the
+now-fixed BUILD_CELL_IMAGES invocation below would otherwise be the first
+to attempt) against the concrete tile00x00y targets grid_size=1 implies,
+run straight from a from-scratch checkout. BUILD_CELL_IMAGES' own
+Snakemake invocation inside the real pipeline run then finds everything
+already built (`--rerun-triggers mtime`) and doesn't redo this work.
+
+STILL OPEN as of this session's debugging, confirmed empirically, not yet
+fixed anywhere: under plain `-profile docker`, Nextflow's Docker executor
+only ever bind-mounts one path into each task's container -- that task's
+own workDir (`nxf_stage(){ true }` in a real `.command.run` here: nothing
+else gets staged, because starcall_workflow_dir/params.cell_dino_checkpoint
+are plain string params, not Nextflow `path`-typed inputs Nextflow would
+know to stage). Neither ever lands inside that one mounted directory, so
+BUILD_CELL_IMAGES/EMBED_CELLS can't actually see them at all in this mode
+-- confirmed directly: a container given only that one `-v` cannot `ls` a
+sibling `starcall_workflow_dir`, full stop, independent of every other bug
+this session found and fixed. This is why "the Docker Desktop file-sharing
+allowlist" gotcha above reads as the *expected* failure mode: whoever
+wrote it had it backwards, or was validating a since-diverged version --
+`docker cp`, the very workaround this docstring dismisses two paragraphs
+up, is exactly what sidesteps this. It does not appear to block real
+deployments (Singularity/Apptainer's own default, full-filesystem-sharing
+behavior papers over it, matching a real cluster run this session traced
+that got well past this point), so it's not fixed here -- flagging it
+rather than silently landing a speculative `docker.runOptions` mount was
+the judgment call this session made; revisit before trusting a green
+result from this test under `-profile docker` specifically.
 """
 
 from __future__ import annotations
@@ -64,6 +104,7 @@ import pytest
 import torch
 import yaml
 
+from fisseq_embeddings_pipeline.build_cell_images_enumerate import resolve_data_dir
 from fisseq_embeddings_pipeline.vendor.dinov2.models.vision_transformer import vit_small
 
 _PROJECT_ROOT = Path(__file__).parents[2]
@@ -79,6 +120,29 @@ _STARCALL_WORKFLOW_REF = "origin/devel"
 # multiple of 16; small enough to run fast on CPU.
 _WINDOW = 32
 _IMAGE_TAG = "fisseq-embeddings-pipeline:real-starcall-test"
+
+# grid_size=1 means a single "tile" covering the whole stitched image (no
+# internal chunking) -- always exactly one tile, x=0/y=0, named per
+# qc.smk's own '{:02}' formatting convention (utils.constants.TILE_DIR_RE
+# matches any digit count, but starcall-workflow itself always emits
+# zero-padded names). BUILD_CELL_IMAGES' own params["experiments"][0]
+# below must keep using this same grid_size -- see _prime_tile_grid.
+_GRID_SIZE = 1
+_TILE_NAME = "tile00x00y"
+# The four final targets build_enumeration (build_cell_images_enumerate.py)
+# would itself compute for this one tile, at that module's own defaults
+# (segmentation_type="cells", use_corrected=False, sequencing_reads_params=
+# "") -- BUILD_CELL_IMAGES' Nextflow module (build_cell_images.nf) doesn't
+# override any of those for this fixture, so these are hand-mirrored here
+# rather than importing build_enumeration itself, which would need a tile
+# to already be enumerable to compute them -- exactly the precondition
+# this function exists to establish.
+_PRIME_TARGET_SUFFIXES = (
+    ("phenotyping_dir", "raw_pt.tif"),
+    ("phenotyping_dir", "cells_mask.tif"),
+    ("phenotyping_dir", "cells.csv"),
+    ("sequencing_dir", "cells_reads.csv"),
+)
 
 
 def _fixture_available() -> bool:
@@ -141,6 +205,69 @@ def _write_starcall_workflow_dir(dest: Path) -> Path:
     return dest
 
 
+def _prime_tile_grid(image: str, starcall_workflow_dir: Path, well: str) -> None:
+    """Establishes BUILD_CELL_IMAGES' own enumerate-phase precondition (see
+    this module's own docstring) for one well at `_GRID_SIZE`: a real,
+    direct Snakemake invocation -- the same image, same `ops` env,
+    `task.ext.snakemake_bin`'s own absolute path (nextflow.config) -- for
+    the concrete tile00x00y targets, run straight from a from-scratch
+    starcall-workflow checkout. Mirrors build_cell_images.nf's own
+    invocation shape exactly (including the `--` separator ending
+    `--config`'s own arg list, and the conda_bin_dir PATH prefix --use-
+    conda itself needs -- both real bugs this session's manual debugging
+    against this exact fixture found and fixed there), since this is
+    genuinely the same command BUILD_CELL_IMAGES' own script block would
+    run, just pointed at concrete paths instead of a glob-discovered list.
+    """
+    resolved_dirs = {
+        dir_key: resolve_data_dir(str(starcall_workflow_dir), dir_key, None)
+        for dir_key in ("phenotyping_dir", "segmentation_dir", "sequencing_dir")
+    }
+    grid_dir = f"{well}_grid{_GRID_SIZE}"
+    # Absolute, joined with an explicit '/' -- matching build_enumeration's
+    # own tile_dir/seq_tile_dir construction exactly (build_cell_images_
+    # enumerate.py), since these targets must resolve against the *same*
+    # --config-overridden (absolute) phenotyping_dir/sequencing_dir passed
+    # below, not starcall-workflow's own relative config.yaml defaults --
+    # a relative target here would silently mismatch every rule's
+    # (now-absolute) output pattern and fail DAG resolution outright.
+    targets = [
+        f"{resolved_dirs[dir_key]}/{grid_dir}/{_TILE_NAME}/{name}"
+        for dir_key, name in _PRIME_TARGET_SUFFIXES
+    ]
+
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{starcall_workflow_dir}:{starcall_workflow_dir}",
+            "-w",
+            str(starcall_workflow_dir),
+            image,
+            "bash",
+            "-c",
+            'export PATH="/opt/conda/bin:$PATH"; '
+            "/opt/conda/envs/ops/bin/snakemake "
+            f'--snakefile "{starcall_workflow_dir}/workflow/Snakefile" '
+            f'--directory "{starcall_workflow_dir}" '
+            "--cores 4 --use-conda --conda-frontend conda --rerun-triggers mtime "
+            # Trailing '/' on each value -- see build_cell_images.nf's own
+            # comment at its matching --config invocation: workflow/rules/
+            # *.smk concatenates these directly onto '{well}_grid.../...'
+            # with no separator of its own, matching config.yaml's own
+            # always-slash-terminated defaults ('phenotyping/', etc.).
+            f'--config phenotyping_dir="{resolved_dirs["phenotyping_dir"]}/" '
+            f'segmentation_dir="{resolved_dirs["segmentation_dir"]}/" '
+            f'sequencing_dir="{resolved_dirs["sequencing_dir"]}/" -- '
+            + " ".join(targets),
+        ],
+        check=True,
+        timeout=3600,
+    )
+
+
 def _build_image() -> str:
     subprocess.run(
         ["docker", "build", "-t", _IMAGE_TAG, str(_PROJECT_ROOT)],
@@ -173,6 +300,7 @@ def test_real_starcall_pipeline_produces_cell_images(tmp_path_factory, real_star
     silently-empty cell table would defeat the point of this test."""
     exp_dir = tmp_path_factory.mktemp("real_starcall_experiment")
     starcall_workflow_dir = _write_starcall_workflow_dir(exp_dir / "starcall-workflow")
+    _prime_tile_grid(real_starcall_image, starcall_workflow_dir, "well1_subset1")
 
     checkpoint_path = tmp_path_factory.mktemp("real_starcall_weights") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
@@ -184,8 +312,12 @@ def test_real_starcall_pipeline_produces_cell_images(tmp_path_factory, real_star
         {
             "batch_stem": "lmna_t3",
             "starcall_workflow_dir": str(starcall_workflow_dir),
-            "wells": ["well1"],
-            "grid_size": 1,
+            # 'well1_subset1', matching the fixture's actual input/ well
+            # directory name (scripts/prepare_real_starcall_test_data.py's
+            # _CROPPED_WELL) and lmna_t3_config.yaml's own `wells:` --
+            # not the source dataset's original 'well1'.
+            "wells": ["well1_subset1"],
+            "grid_size": _GRID_SIZE,
             # phenotyping_dir/segmentation_dir/sequencing_dir omitted --
             # resolved from starcall_workflow_dir's own config.yaml /
             # default-config.yaml (resolve_data_dir), matching how this
