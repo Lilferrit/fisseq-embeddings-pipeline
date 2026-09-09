@@ -18,7 +18,9 @@ import yaml
 from fisseq_embeddings_pipeline import build_cell_images_enumerate as mod
 
 
-def _make_tile_dir(phenotyping_dir: Path, well: str, grid_size: int, x: int, y: int) -> Path:
+def _make_tile_dir(
+    phenotyping_dir: Path, well: str, grid_size: int, x: int, y: int
+) -> Path:
     tile_dir = phenotyping_dir / f"{well}_grid{grid_size}" / f"tile{x}x{y}y"
     tile_dir.mkdir(parents=True)
     return tile_dir
@@ -30,13 +32,20 @@ def _make_tile_dir(phenotyping_dir: Path, well: str, grid_size: int, x: int, y: 
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_data_dir_returns_explicit_value_without_reading_any_config(tmp_path: Path):
+def test_resolve_data_dir_returns_explicit_value_without_reading_any_config(
+    tmp_path: Path,
+):
     # No config.yaml/default-config.yaml written at all -- an explicit
     # value must never require one to exist.
-    assert mod.resolve_data_dir(str(tmp_path), "phenotyping_dir", "/elsewhere") == "/elsewhere"
+    assert (
+        mod.resolve_data_dir(str(tmp_path), "phenotyping_dir", "/elsewhere")
+        == "/elsewhere"
+    )
 
 
-def test_resolve_data_dir_falls_back_to_bare_subdir_when_no_config_file_exists(tmp_path: Path):
+def test_resolve_data_dir_falls_back_to_bare_subdir_when_no_config_file_exists(
+    tmp_path: Path,
+):
     assert mod.resolve_data_dir(str(tmp_path), "phenotyping_dir", None) == str(
         tmp_path / "phenotyping"
     )
@@ -63,7 +72,9 @@ def test_resolve_data_dir_resolves_relative_value_from_config_yaml_against_starc
 ):
     # starcall-workflow's own default-config.yaml convention: a relative,
     # trailing-slash value.
-    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"phenotyping_dir": "custom_pheno/"}))
+    (tmp_path / "config.yaml").write_text(
+        yaml.safe_dump({"phenotyping_dir": "custom_pheno/"})
+    )
     assert mod.resolve_data_dir(str(tmp_path), "phenotyping_dir", None) == str(
         tmp_path / "custom_pheno"
     )
@@ -157,7 +168,7 @@ def test_build_enumeration_lists_expected_targets_without_cp_features(tmp_path: 
         wells=["well1"],
         grid_size=None,
         segmentation_type="cells",
-        use_corrected=False,
+        window=32,
         sequencing_reads_params="",
         cp_features=False,
         cellprofiler_cycle="",
@@ -166,8 +177,8 @@ def test_build_enumeration_lists_expected_targets_without_cp_features(tmp_path: 
 
     tile_dir = f"{tmp_path}/well1_grid4/tile0x0y"
     assert set(result["targets"]) == {
-        f"{tile_dir}/raw_pt.tif",
-        f"{tile_dir}/cells_mask.tif",
+        f"{tile_dir}/cells_crops_32.tif",
+        f"{tile_dir}/cells_mask_crops_32.tif",
         f"{tile_dir}/cells.csv",
         f"{seq_dir}/well1_grid4/tile0x0y/cells_reads.csv",
     }
@@ -176,11 +187,17 @@ def test_build_enumeration_lists_expected_targets_without_cp_features(tmp_path: 
     assert row["cellprofiler_csv"] == ""
     assert row["segmentation_csv"] == f"{tile_dir}/cells.csv"
     assert row["reads_csv"] == f"{seq_dir}/well1_grid4/tile0x0y/cells_reads.csv"
+    assert row["crops_tif"] == f"{tile_dir}/cells_crops_32.tif"
+    assert row["mask_crops_tif"] == f"{tile_dir}/cells_mask_crops_32.tif"
 
     symlink_map = dict(result["symlinks"])
-    assert symlink_map["well1_grid4/tile0x0y/raw_pt.tif"] == f"{tile_dir}/raw_pt.tif"
     assert (
-        symlink_map["well1_grid4/tile0x0y/cells_mask.tif"] == f"{tile_dir}/cells_mask.tif"
+        symlink_map["well1_grid4/tile0x0y/cells_crops_32.tif"]
+        == f"{tile_dir}/cells_crops_32.tif"
+    )
+    assert (
+        symlink_map["well1_grid4/tile0x0y/cells_mask_crops_32.tif"]
+        == f"{tile_dir}/cells_mask_crops_32.tif"
     )
 
 
@@ -193,7 +210,7 @@ def test_build_enumeration_includes_cellprofiler_target_when_enabled(tmp_path: P
         wells=["well1"],
         grid_size=None,
         segmentation_type="cells",
-        use_corrected=False,
+        window=32,
         sequencing_reads_params="",
         cp_features=True,
         cellprofiler_cycle="cycle0",
@@ -205,7 +222,10 @@ def test_build_enumeration_includes_cellprofiler_target_when_enabled(tmp_path: P
     assert result["manifest_rows"][0]["cellprofiler_csv"] == expected_cp
 
 
-def test_build_enumeration_uses_corrected_pt_filename(tmp_path: Path):
+def test_build_enumeration_interpolates_window_into_target_filenames(tmp_path: Path):
+    """`window` is embedded directly in the requested crop-stack target
+    filenames -- a regression guard that it's actually threaded through,
+    not silently ignored/hardcoded."""
     _make_tile_dir(tmp_path, "well1", 4, 0, 0)
 
     result = mod.build_enumeration(
@@ -214,12 +234,25 @@ def test_build_enumeration_uses_corrected_pt_filename(tmp_path: Path):
         wells=["well1"],
         grid_size=None,
         segmentation_type="cells",
-        use_corrected=True,
+        window=224,
         sequencing_reads_params="",
         cp_features=False,
         cellprofiler_cycle="",
         cellprofiler_pipeline="",
     )
 
-    assert any(t.endswith("corrected_pt.tif") for t in result["targets"])
-    assert not any(t.endswith("/raw_pt.tif") for t in result["targets"])
+    assert any(t.endswith("cells_crops_224.tif") for t in result["targets"])
+    assert any(t.endswith("cells_mask_crops_224.tif") for t in result["targets"])
+    assert not any("_32.tif" in t for t in result["targets"])
+
+
+def test_window_is_a_required_config_field():
+    """window has no default -- BuildCellImagesEnumerateConfig requires it,
+    matching the other starcall-workflow-facing required fields
+    (starcall_workflow_dir, wells): its own centroid-fixed crop stack now
+    embeds `window` in its target filename, so this stage needs it even
+    though it never crops anything itself."""
+    from omegaconf import MISSING
+
+    fields = mod.BuildCellImagesEnumerateConfig.__dataclass_fields__
+    assert fields["window"].default is MISSING

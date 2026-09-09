@@ -3,6 +3,7 @@
 
 process FILTER_EMBEDDINGS {
     errorStrategy 'ignore'
+    label 'process_low'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/filter_embeddings/${batch_stem}" }, mode: 'copy'
 
@@ -10,7 +11,10 @@ process FILTER_EMBEDDINGS {
     tuple val(batch_stem), path(embeddings_parquet), path(filtered_cells_parquet)
 
     output:
-    tuple val(batch_stem), path("filtered_keys.parquet"), path("normalizer.parquet")
+    tuple val(batch_stem), path("filtered_keys.parquet"), path("normalizer.parquet"), emit: filtered
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

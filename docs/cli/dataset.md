@@ -1,10 +1,13 @@
 # Cell Dataset (`BUILD_DATASET`)
 
 `python -m fisseq_embeddings_pipeline.dataset` (Nextflow process
-`BUILD_DATASET`) crops every tile's stitched phenotype image and
-segmentation mask around each of an experiment's cells into a single
-**WebDataset** -- a sharded `.tar` archive holding every cell in the
-experiment, unfiltered -- that `EMBED_CELLS` streams from directly.
+`BUILD_DATASET`) indexes directly into every tile's already-cropped
+per-cell crop stacks (`BUILD_CELL_IMAGES`' own `make_cell_images_bbox`
+output -- see [Architecture](../architecture.md) decision 17) at each
+cell's `crop_index`, repackaging each row into a single **WebDataset** --
+a sharded `.tar` archive holding every cell in the experiment, unfiltered
+-- that `EMBED_CELLS` streams from directly. No cropping happens in this
+module any more.
 
 Building it (and running `EMBED_CELLS` over it) is deliberately decoupled
 from `QC_FILTER`: QC thresholds get tuned and re-run often, and the whole
@@ -28,8 +31,8 @@ Extends the [common config fields](#common-config-fields) below.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| `cell_images_dir` | **required** | `BUILD_CELL_IMAGES`' per-experiment output directory (holds `cell_table.parquet` plus each tile's collected `*_pt.tif`/`*_mask.tif`). Injected automatically by `workflows/embeddings.nf` when run through the pipeline; set explicitly only when invoking this module's CLI directly against a `BUILD_CELL_IMAGES` output you already have. |
-| `window` | **required** | Crop size to produce around each cell's bbox-derived center -- must match the loaded Cell-DINO checkpoint's expected input. When run via `BUILD_DATASET`, an `experiments:` entry omitting this falls back to `params.yaml`'s pipeline-wide `window` default (see [Configuration](../configuration.md)); required here only when invoking this module's CLI directly. |
+| `cell_images_dir` | **required** | `BUILD_CELL_IMAGES`' per-experiment output directory (holds `cell_table.parquet` plus each tile's collected `*_crops_*.tif`/`*_mask_crops_*.tif`). Injected automatically by `workflows/embeddings.nf` when run through the pipeline; set explicitly only when invoking this module's CLI directly against a `BUILD_CELL_IMAGES` output you already have. |
+| `window` | **required** | Crop size `BUILD_CELL_IMAGES`' own `make_cell_images_bbox` already produced each cell's crop at -- sanity-checked against the discovered stacks' actual shape, and must match the loaded Cell-DINO checkpoint's expected input. When run via `BUILD_DATASET`, an `experiments:` entry omitting this falls back to `params.yaml`'s pipeline-wide `window` default (see [Configuration](../configuration.md)); required here only when invoking this module's CLI directly. |
 | `batch_stem` | **required** | This experiment's identifier, written into every sample's `meta.json` as `meta_batch`. |
 | `shard_maxcount` | `2000` | Max samples per WebDataset shard. See [shard sizing](../configuration.md#build_dataset-shard-sizing). |
 | `barcode_col_name` | `"upBarcode"` | Column name for cell barcodes in `cell_table.parquet`. |

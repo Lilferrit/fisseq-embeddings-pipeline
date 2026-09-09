@@ -21,7 +21,7 @@ experiments: []
 # - BUILD_CELL_IMAGES (starcall-workflow-facing, always runs):
 #   starcall_workflow_dir, phenotyping_dir, segmentation_dir,
 #   sequencing_dir, wells, grid_size, segmentation_type, use_corrected,
-#   sequencing_reads_params. This is the ONLY stage that touches
+#   window, sequencing_reads_params. This is the ONLY stage that touches
 #   starcall-workflow's tree or invokes Snakemake -- see
 #   docs/architecture.md's Data contracts section. `starcall_workflow_dir`
 #   is per-experiment (not a shared global path) since Snakemake keeps
@@ -113,13 +113,16 @@ experiments: []
 #     # cp_features omitted -- cellDINO-only for this experiment
 
 # ── Shared per-experiment defaults (window / cellprofiler_pipeline / cellprofiler_cycle) ──
-# `window` (BuildDatasetConfig) and `cellprofiler_pipeline`/
-# `cellprofiler_cycle` (CpFeaturesConfig-facing, consumed by
-# BUILD_CELL_IMAGES) are logically per-experiment fields (see "Per-
-# experiment configs" above), but in practice are almost always the same
-# value across every experiment in a run -- one crop size per Cell-DINO
-# checkpoint, one CellProfiler pipeline per run. Set the shared value once
-# here; `workflows/embeddings.nf` fills it in for any `experiments:` entry
+# `window` (both BUILD_CELL_IMAGES, which now forces its crop-stack output
+# at this size via `make_cell_images_bbox`, and BuildDatasetConfig, which
+# sanity-checks the discovered stacks' shape against it) and
+# `cellprofiler_pipeline`/`cellprofiler_cycle` (CpFeaturesConfig-facing,
+# consumed by BUILD_CELL_IMAGES) are logically per-experiment fields (see
+# "Per-experiment configs" above), but in practice are almost always the
+# same value across every experiment in a run -- one crop size per
+# Cell-DINO checkpoint, one CellProfiler pipeline per run. Set the shared
+# value once here; `workflows/embeddings.nf` fills it in (via two
+# independent fallback blocks, one per stage) for any `experiments:` entry
 # that doesn't set its own value for that key, and an entry that *does* set
 # its own value always wins over the global default here.
 window: 224                    # crop size in pixels -- must match cell_dino_crop_size below
@@ -134,7 +137,7 @@ cellprofiler_cycle: ""         # "" (no cycle) unless starcall-workflow ran cell
 # does (confirmed against a real Nextflow 26.04.6 run). A genuine per-
 # experiment override would need two separate processes with experiments
 # routed between them; not implemented.
-cell_images_hard_copy: false   # false = symlink BUILD_CELL_IMAGES' collected tif files from their real starcall-workflow location (default, no duplication); true = real copies (self-contained, no dependency on phenotyping_dir staying mounted)
+cell_images_hard_copy: false   # false = symlink BUILD_CELL_IMAGES' collected per-cell crop-stack tif files (make_cell_images_bbox's output -- small, not whole-tile images) from their real starcall-workflow location (default, no duplication); true = real copies (self-contained, no dependency on phenotyping_dir staying mounted)
 
 # ── Snakemake invocation (BUILD_CELL_IMAGES) ─────────────────────────────────
 snakemake_cores: 4             # --cores passed to snakemake within one BUILD_CELL_IMAGES task -- local parallelism inside that one invocation, distinct from Nextflow's own executor parallelism across experiments

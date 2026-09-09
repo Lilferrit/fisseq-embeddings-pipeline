@@ -136,9 +136,7 @@ def build_cp_features(cfg: CpFeaturesConfig) -> pl.DataFrame:
         pl.col("tile_cell_index").cast(pl.Int64).alias("meta_cell_index"),
         pl.col(cfg.barcode_col_name).cast(pl.String).alias(META_BARCODE_COL),
         pl.col(cfg.aa_changes_col_name).cast(pl.String).alias("meta_aa_changes"),
-        pl.col(cfg.edit_distance_col_name)
-        .cast(pl.Int64)
-        .alias(META_EDIT_DISTANCE_COL),
+        pl.col(cfg.edit_distance_col_name).cast(pl.Int64).alias(META_EDIT_DISTANCE_COL),
         cs.starts_with(_CP_COL_PREFIX).name.map(
             lambda name: name[len(_CP_COL_PREFIX) :]
         ),

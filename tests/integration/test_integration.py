@@ -23,21 +23,28 @@ binary against a real starcall-workflow checkout) is exercised here via a
 stub `snakemake` executable prepended onto PATH -- not by bypassing the
 real Nextflow process. The synthetic fixture pre-populates a
 starcall-workflow-shaped phenotyping_dir/sequencing_dir tree directly (the
-way a real `snakemake` invocation would have left it), and the stub simply
-exits 0 without touching the filesystem, standing in for "every requested
-target is already up to date". This exercises BUILD_CELL_IMAGES' own real
-tile-enumeration, symlink-collection, and cell_table.parquet-building logic
-end to end through the real Nextflow/Hydra plumbing -- only the external
-`snakemake`/starcall-workflow dependency itself (unavailable in CI, and
-the root Dockerfile's own `ops` conda env -- which real rule execution
-would run in -- is unvalidated -- see docs/architecture.md) is faked,
-matching the same "fake the expensive/external dependency, exercise real
-control flow elsewhere" precedent EMBED_CELLS' checkpoint fixture already
-sets. `-profile local` (which this test uses) has no `ops` env to point
-at at all, so `nextflow.config` overrides `process.ext.snakemake_bin`
-back to bare `snakemake`, resolved via the stub prepended onto PATH here
--- the same override that lets every other stage run directly against
-this repo's own venv instead of a built image.
+way a real `snakemake` invocation of `make_cell_images_bbox` would have
+left it -- the per-tile crop-stack pair, not the whole-tile phenotype
+image/segmentation mask those temp() intermediates never survive as), and
+the stub simply exits 0 without touching the filesystem, standing in for
+"every requested target is already up to date". This exercises
+BUILD_CELL_IMAGES' own real tile-enumeration, symlink-collection, and
+cell_table.parquet-building logic end to end through the real
+Nextflow/Hydra plumbing -- only the external `snakemake`/starcall-workflow
+dependency itself (unavailable in CI, and the root Dockerfile's own `ops`
+conda env -- which real rule execution would run in -- is unvalidated --
+see docs/architecture.md) is faked, matching the same "fake the
+expensive/external dependency, exercise real control flow elsewhere"
+precedent EMBED_CELLS' checkpoint fixture already sets. `-profile local`
+(which this test uses) has no `ops` env to point at at all, so
+`nextflow.config` overrides `process.ext.snakemake_bin` back to bare
+`snakemake`, resolved via the stub prepended onto PATH here -- the same
+override that lets every other stage run directly against this repo's own
+venv instead of a built image. (`--snakefile` still points for real at this
+repo's own `resources/starcall_overrides/wrapper.smk` --
+`process.ext.starcall_overrides_dir` under `-profile local` -- since the
+stub only fakes the `snakemake` binary itself, not the flags it's invoked
+with.)
 """
 
 from __future__ import annotations
@@ -67,7 +74,6 @@ _PROJECT_ROOT = Path(__file__).parents[2]
 # patch_size=16.
 _WINDOW = 32
 _NUM_CHANNELS = 4
-_TILE_SIZE = 96
 
 # 4 WT barcodes x 3 cells, 2 synonymous ("A1A") barcodes x 3 cells, 2
 # missense ("M1K") barcodes x 3 cells -- every threshold below is lowered
@@ -125,9 +131,24 @@ def _write_stub_snakemake(bin_dir: Path) -> None:
     script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _make_deterministic_image(channels: int, size: int) -> np.ndarray:
+def _make_crop_stack(num_cells: int, channels: int, window: int) -> np.ndarray:
+    """A synthetic (num_cells, channels, window, window) crop stack, shaped
+    like `make_cell_images_bbox`'s own real output -- no whole-tile image
+    or cropping involved any more (see this module's own docstring)."""
     rng = np.random.default_rng(0)
-    return rng.integers(0, 255, size=(channels, size, size), dtype=np.uint16)
+    return rng.integers(
+        0, 255, size=(num_cells, channels, window, window), dtype=np.uint16
+    )
+
+
+def _make_mask_crop_stack(num_cells: int, window: int) -> np.ndarray:
+    """A synthetic (num_cells, window, window) mask-crop stack: cell i's
+    mask is a single foreground pixel, labeled i + 1 (make_cell_images_bbox's
+    own positional-label convention)."""
+    stack = np.zeros((num_cells, window, window), dtype=np.uint8)
+    for i in range(num_cells):
+        stack[i, i % window, i % window] = i + 1
+    return stack
 
 
 _CELLPROFILER_PIPELINE = "test_pipeline"
@@ -183,13 +204,21 @@ def _write_starcall_tile(
     )
     reads_table.to_csv(seq_tile_dir / "cells_reads.csv")
 
-    image = _make_deterministic_image(_NUM_CHANNELS, _TILE_SIZE)
-    mask = np.zeros((_TILE_SIZE, _TILE_SIZE), dtype=np.int32)
-    for i, (cx, cy) in enumerate(centers):
-        mask[cx, cy] = i + 1
-
-    tifffile.imwrite(pheno_tile_dir / "raw_pt.tif", image, photometric="minisblack")
-    tifffile.imwrite(pheno_tile_dir / "cells_mask.tif", mask)
+    # The per-tile crop-stack pair make_cell_images_bbox itself would have
+    # produced (and Snakemake's own temp() bookkeeping would have already
+    # deleted the whole-tile intermediates behind) -- see this module's own
+    # docstring. Content is synthetic/deterministic, not actually cropped
+    # from anything -- BUILD_DATASET only indexes into these now, it
+    # doesn't crop.
+    num_cells = len(cell_ids)
+    tifffile.imwrite(
+        pheno_tile_dir / f"cells_crops_{_WINDOW}.tif",
+        _make_crop_stack(num_cells, _NUM_CHANNELS, _WINDOW),
+    )
+    tifffile.imwrite(
+        pheno_tile_dir / f"cells_mask_crops_{_WINDOW}.tif",
+        _make_mask_crop_stack(num_cells, _WINDOW),
+    )
 
     if write_cellprofiler_csv:
         # Row-position matched to the cell table (cell_ids here are already
@@ -262,12 +291,12 @@ def _write_synthetic_experiment(
     sequencing_dir = _resolved_dir("sequencing_dir", exp_dir / "sequencing")
 
     (starcall_workflow_dir / "workflow").mkdir(parents=True, exist_ok=True)
-    (starcall_workflow_dir / "workflow" / "Snakefile").write_text("# stub, never read\n")
+    (starcall_workflow_dir / "workflow" / "Snakefile").write_text(
+        "# stub, never read\n"
+    )
     if project_config_dir_names:
         (starcall_workflow_dir / "config.yaml").write_text(
-            yaml.safe_dump(
-                {k: f"{v}/" for k, v in project_config_dir_names.items()}
-            )
+            yaml.safe_dump({k: f"{v}/" for k, v in project_config_dir_names.items()})
         )
     segmentation_dir.mkdir(parents=True, exist_ok=True)
     _write_stub_snakemake(exp_dir / "stub_bin")
@@ -402,8 +431,8 @@ def test_pipeline_exits_cleanly(pipeline_outputs):
 
 def test_cell_images_produced(pipeline_outputs):
     """BUILD_CELL_IMAGES' own output -- the one complete, self-sufficient
-    cell table everything downstream reads, plus the collected whole-tile
-    image files (see build_cell_images.nf's module docstring)."""
+    cell table everything downstream reads, plus the collected per-tile
+    crop-stack pair (see build_cell_images.nf's module docstring)."""
     exp_dir, _ = pipeline_outputs
     cell_images_dir = exp_dir / "cell_images" / "batch1"
     cell_table = pl.read_parquet(cell_images_dir / "cell_table.parquet")
@@ -414,8 +443,8 @@ def test_cell_images_produced(pipeline_outputs):
     )
     assert any(c.startswith("cp_") for c in cell_table.columns)
     tile_dir = cell_images_dir / "well1_grid1" / "tile0x0y"
-    assert (tile_dir / "raw_pt.tif").exists()
-    assert (tile_dir / "cells_mask.tif").exists()
+    assert (tile_dir / f"cells_crops_{_WINDOW}.tif").exists()
+    assert (tile_dir / f"cells_mask_crops_{_WINDOW}.tif").exists()
 
 
 def test_dataset_and_embeddings_produced(pipeline_outputs):
@@ -520,10 +549,14 @@ def test_pipeline_reads_data_dirs_from_project_config_yaml_when_nonstandard(
     result = _run_nextflow(exp_dir, checkpoint_path)
     assert result.returncode == 0, result.stderr
 
-    cell_table = pl.read_parquet(exp_dir / "cell_images" / "batch1" / "cell_table.parquet")
+    cell_table = pl.read_parquet(
+        exp_dir / "cell_images" / "batch1" / "cell_table.parquet"
+    )
     assert cell_table.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
 
-    cell_table = pl.read_parquet(exp_dir / "cell_images" / "batch1" / "cell_table.parquet")
+    cell_table = pl.read_parquet(
+        exp_dir / "cell_images" / "batch1" / "cell_table.parquet"
+    )
     assert cell_table.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
 
 

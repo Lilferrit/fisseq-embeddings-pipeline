@@ -3,10 +3,11 @@
 //
 // `stageAs: "res_input_*.parquet"` avoids every experiment's identically-
 // named results.parquet colliding when collected into this one task, same
-// pattern/caveat as global_variant_embeddings.nf.
+// pattern/caveat as global_variant_embeddings/main.nf.
 
 process GLOBAL_VARIANT_DISTINGUISHABILITY {
     errorStrategy 'ignore'
+    label 'process_medium'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/global/distinguishability" }, mode: 'copy'
 
@@ -15,7 +16,10 @@ process GLOBAL_VARIANT_DISTINGUISHABILITY {
     val(batch_stems)
 
     output:
-    path("global_scores.parquet")
+    path("global_scores.parquet"), emit: global_scores
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

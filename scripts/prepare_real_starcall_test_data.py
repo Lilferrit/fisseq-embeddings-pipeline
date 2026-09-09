@@ -57,7 +57,9 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
-_DATASET_URL = "https://visseq.gs.washington.edu/static/LMNA_T3_testing_image_set.tar.gz"
+_DATASET_URL = (
+    "https://visseq.gs.washington.edu/static/LMNA_T3_testing_image_set.tar.gz"
+)
 _TARBALL_NAME = "LMNA_T3_testing_image_set.tar.gz"
 _SOURCE_WELL = "well1_subset3"
 _CROPPED_WELL = "well1_subset1"
@@ -163,10 +165,14 @@ def crop_to_center_tiles(well_dir: Path, output_dir: Path, size: int) -> None:
         n_kept = int(mask.sum())
         print(f"  {cycle_name}: keeping {n_kept}/{len(poses)} tile(s)")
         if n_kept == 0:
-            raise SystemExit(f"{cycle_name}: crop selected zero tiles -- size too small?")
+            raise SystemExit(
+                f"{cycle_name}: crop selected zero tiles -- size too small?"
+            )
 
         images = tifffile.imread(img_path)
-        np.savetxt(out_cycle_dir / "positions.csv", poses[mask], delimiter=",", fmt="%d")
+        np.savetxt(
+            out_cycle_dir / "positions.csv", poses[mask], delimiter=",", fmt="%d"
+        )
         tifffile.imwrite(out_cycle_dir / "raw.tif", images[mask])
         del images
 
@@ -177,7 +183,9 @@ def main() -> None:
         "--force", action="store_true", help="Redo the crop step even if output exists."
     )
     parser.add_argument(
-        "--force-download", action="store_true", help="Redownload even if a cached copy exists."
+        "--force-download",
+        action="store_true",
+        help="Redownload even if a cached copy exists.",
     )
     args = parser.parse_args()
 
@@ -194,9 +202,7 @@ def main() -> None:
 
     print(f"Cropping {_SOURCE_WELL} -> {_CROPPED_WELL} (size={_CROP_SIZE})...")
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    crop_to_center_tiles(
-        source_well_dir, _OUTPUT_DIR / _CROPPED_WELL, size=_CROP_SIZE
-    )
+    crop_to_center_tiles(source_well_dir, _OUTPUT_DIR / _CROPPED_WELL, size=_CROP_SIZE)
 
     auxdata_src = extract_dir / "input" / "auxdata"
     auxdata_dst = _OUTPUT_DIR / "auxdata"

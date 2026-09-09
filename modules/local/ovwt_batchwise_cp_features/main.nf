@@ -1,10 +1,11 @@
 // OVWT_BATCHWISE_CP_FEATURES. Same three-input shape as
-// aggregate_cp_features.nf; reuses the SAME `ovwt_*` params as
+// aggregate_cp_features/main.nf; reuses the SAME `ovwt_*` params as
 // OVWT_BATCHWISE -- OVWT hyperparameters are about scoring methodology,
 // not feature type, so there is no parallel `ovwt_*_cp_features` set.
 
 process OVWT_BATCHWISE_CP_FEATURES {
     errorStrategy 'ignore'
+    label 'process_high'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/ovwt_batchwise_cp_features/${batch_stem}" }, mode: 'copy'
 
@@ -12,7 +13,10 @@ process OVWT_BATCHWISE_CP_FEATURES {
     tuple val(batch_stem), path(cp_features_parquet), path(filtered_keys_parquet), path(normalizer_parquet)
 
     output:
-    tuple val(batch_stem), path("results.parquet"), path("cell_scores.parquet"), path("models.pkl")
+    tuple val(batch_stem), path("results.parquet"), path("cell_scores.parquet"), path("models.pkl"), emit: ovwt
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

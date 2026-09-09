@@ -5,6 +5,7 @@
 
 process AGGREGATE_EMBEDDINGS {
     errorStrategy 'ignore'
+    label 'process_medium'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/feature_select_batchwise/${batch_stem}" }, mode: 'copy'
 
@@ -12,7 +13,10 @@ process AGGREGATE_EMBEDDINGS {
     tuple val(batch_stem), path(embeddings_parquet), path(filtered_keys_parquet), path(normalizer_parquet)
 
     output:
-    tuple val(batch_stem), path("aggregate.parquet")
+    tuple val(batch_stem), path("aggregate.parquet"), emit: aggregate
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """
