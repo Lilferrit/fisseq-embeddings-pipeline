@@ -29,16 +29,20 @@
 // so there's exactly one place (Python, unit-tested) that knows how to
 // find these three directories.
 //
-// Does NOT force rule make_cell_images's pre-cropped output to exist --
-// dataset.py's own _crop_cell already ports that rule's crop algorithm and
-// deliberately avoids depending on make_cell_images itself, because that
-// rule reads xpos/ypos columns that don't exist in the real cell table
+// Forces `make_cell_images_bbox`, a patched copy of starcall-workflow's own
+// `rule make_cell_images` injected via `ruleorder:` + plain `include:`
+// composition (resources/starcall_overrides/{wrapper.smk,
+// fixed_cell_images.smk}) -- NOT the real (broken) `make_cell_images`,
+// which reads xpos/ypos columns that don't exist in the real cell table
 // schema (confirmed against a real starcall-workflow origin/devel
-// checkout). Instead this module forces the whole-tile phenotype image and
-// segmentation mask that dataset.py already successfully reads today, plus
-// (the actual fix this stage exists for) the sequencing-side genotype
-// columns dataset.py currently reads from the wrong file. See
-// docs/architecture.md's Data contracts section for the full rationale.
+// checkout; see docs/architecture.md decision 17/18 for the full
+// rationale and the bug reproduction this fix is built on). Forcing
+// make_cell_images_bbox's own per-tile crop-stack output instead of the
+// whole-tile phenotype image/segmentation mask directly lets Snakemake's
+// ordinary temp() bookkeeping delete those whole-tile intermediates right
+// after use -- the actual disk-space fix. dataset.py no longer crops
+// anything itself; it only indexes into the crop stacks this stage
+// collects.
 //
 // Three-phase script. Phases 1 and 3 run in this repo's own installed
 // package (`params.container_image` -- the same one every other process
@@ -69,9 +73,10 @@
 //      computed -- see decision 3 in the implementation plan for why this
 //      stage doesn't instead redirect phenotyping_dir to force a
 //      from-scratch rebuild every run), then a plain symlink loop over
-//      symlinks.txt to collect just the two per-tile image files (pt_tif,
-//      mask_tif -- not the CSVs, which phase 3 reads directly from their
-//      real locations) into this task's own working directory, preserving
+//      symlinks.txt to collect just the two per-tile crop-stack files
+//      (crops_tif, mask_crops_tif -- not the CSVs, which phase 3 reads
+//      directly from their real locations) into this task's own working
+//      directory, preserving
 //      the {well}_grid{N}/tile{x}x{y}y/ substructure. publishDir's own
 //      `mode:` (below) then decides whether these become real copies or
 //      another layer of symlinks when published.
@@ -100,6 +105,7 @@
 
 process BUILD_CELL_IMAGES {
     errorStrategy 'ignore'
+    label 'process_medium'
     container "${params.container_image}"
     // symlink, not copy -- the one deliberate default deviation from every
     // other module's `mode: 'copy'` convention. Governed by the GLOBAL
@@ -122,7 +128,10 @@ process BUILD_CELL_IMAGES {
     tuple val(batch_stem), val(batch_config)
 
     output:
-    tuple val(batch_stem), path("cell_table.parquet"), path("*_grid*", type: 'dir')
+    tuple val(batch_stem), path("cell_table.parquet"), path("*_grid*", type: 'dir'), emit: cell_images
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     // starcall_workflow_dir is the one field phase 2's --snakefile/
@@ -131,7 +140,7 @@ process BUILD_CELL_IMAGES {
     // are). Everything else (including phenotyping_dir/segmentation_dir/
     // sequencing_dir themselves, when an entry sets them explicitly) is
     // threaded straight through to phase 1 via the same List-vs-scalar
-    // Hydra-override idiom as build_dataset.nf/build_cp_features.nf --
+    // Hydra-override idiom as build_dataset/main.nf/build_cp_features/main.nf --
     // no per-key exclusion needed any more, since
     // BuildCellImagesEnumerateConfig now has a field for every key
     // batch_config can carry.
@@ -159,10 +168,24 @@ process BUILD_CELL_IMAGES {
     # phase 1 above (resolve_data_dir) -- not recomputed here.
     source resolved_dirs.env
 
-    # Snakemake resolves stitch_tile_pt/stitch_tile_segmentation's temp-
-    # wrapped intermediates within this one invocation; only the requested,
-    # non-temp final targets persist under phenotyping_dir/sequencing_dir.
-    # task.ext.snakemake_bin (nextflow.config): the ops conda env's
+    # --snakefile points directly at the static wrapper.smk template baked
+    # into the image (or, under -profile local, the checked-out repo -- see
+    # ext.starcall_overrides_dir, nextflow.config); no per-task copy or text
+    # substitution needed. wrapper.smk itself pulls starcall_workflow_dir
+    # out of `config` (populated by --config below) via `os.path.join`, and
+    # its own `include:` of fixed_cell_images.smk is a bare relative
+    # filename resolved against --snakefile's own directory, so that sibling
+    # file resolves correctly with no copy either. See
+    # resources/starcall_overrides/wrapper.smk's own comment for why plain
+    # `include:` (not `module:`) is what makes this work.
+    #
+    # Requesting make_cell_images_bbox's crop-stack targets (not the
+    # whole-tile stitch_tile_pt/stitch_tile_segmentation outputs directly)
+    # lets Snakemake resolve those temp()-wrapped whole-tile intermediates
+    # within this one invocation and delete them right after use; only the
+    # requested, non-temp crop-stack targets persist under
+    # phenotyping_dir/sequencing_dir. task.ext.snakemake_bin
+    # (nextflow.config): the ops conda env's
     # absolute path by default (not bare `snakemake` -- that env is
     # deliberately NOT on PATH, see the root Dockerfile, so bare
     # `python`/`snakemake` never ambiguously resolves into it); -profile
@@ -202,12 +225,12 @@ process BUILD_CELL_IMAGES {
     # well-name bug or a from-scratch, unprimed tile grid leaves 0 tiles
     # enumerated, so there's nothing after --config's values to swallow).
     ${conda_path_prefix}${task.ext.snakemake_bin} \\
-        --snakefile "${starcall_workflow_dir}/workflow/Snakefile" \\
+        --snakefile "${task.ext.starcall_overrides_dir}/wrapper.smk" \\
         --directory "${starcall_workflow_dir}" \\
         --cores ${params.snakemake_cores} \\
         --use-conda --conda-frontend conda \\
         --rerun-triggers mtime \\
-        --config phenotyping_dir="\$phenotyping_dir/" segmentation_dir="\$segmentation_dir/" sequencing_dir="\$sequencing_dir/" \\
+        --config phenotyping_dir="\$phenotyping_dir/" segmentation_dir="\$segmentation_dir/" sequencing_dir="\$sequencing_dir/" starcall_workflow_dir="${starcall_workflow_dir}" \\
         -- \\
         \$(cat targets.txt)
 

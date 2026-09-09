@@ -18,6 +18,7 @@
 
 process GLOBAL_VARIANT_EMBEDDINGS {
     errorStrategy 'ignore'
+    label 'process_medium'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/global/embeddings" }, mode: 'copy'
 
@@ -26,7 +27,10 @@ process GLOBAL_VARIANT_EMBEDDINGS {
     val(batch_stems)
 
     output:
-    tuple path("median_aggregate.parquet"), path("pca_scores.parquet"), path("pca_components.parquet"), path("pca_variance_explained.parquet"), path("pca_reduced.parquet")
+    tuple path("median_aggregate.parquet"), path("pca_scores.parquet"), path("pca_components.parquet"), path("pca_variance_explained.parquet"), path("pca_reduced.parquet"), emit: global
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

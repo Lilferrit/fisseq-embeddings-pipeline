@@ -74,10 +74,16 @@ depends on (`make_cell_images`, `extract_embeddings` in
   write a full copy of another stage's table to disk (rather than a join
   key + something new), stop and check whether that violates the no-copy
   principle — see `docs/architecture.md`'s architecture decisions.
-- **Nextflow modules** (`modules/local/*.nf`): `errorStrategy 'ignore'`,
-  `container "${params.container_image}"`, `publishDir`, a `python -m
-  <pkg>.<module>` script block ending in `random_seed=${params.random_seed}`
-  — see `embed_cells.nf` for the fully-worked example.
+- **Nextflow modules** (`modules/local/<name>/main.nf`, one directory per
+  module — nf-core's layout convention): `errorStrategy 'ignore'`, one
+  bundled resource `label` (`process_single`/`process_low`/`process_medium`/
+  `process_high`, plus `process_gpu` on `EMBED_CELLS`), `container
+  "${params.container_image}"`, `publishDir`, a `when: task.ext.when == null
+  || task.ext.when` gate, a `python -m <pkg>.<module>` script block ending in
+  `random_seed=${params.random_seed}`, and a named `emit:` on the output —
+  see `embed_cells/main.nf` for the fully-worked example. See
+  [`docs/nextflow.md`](docs/nextflow.md#nf-core-conventions) for which
+  nf-core conventions this repo follows and which it deliberately doesn't.
 - **Config**: defaults belong in `params.yaml` (repo root), never in
   `nextflow.config`'s `params {}` block — see
   [`docs/configuration.md`](docs/configuration.md).

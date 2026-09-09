@@ -36,10 +36,14 @@ its own keys through as individual Hydra CLI overrides.
 
 `window` is one field with its own pipeline-wide default (`params.window`,
 see [Configuration](configuration.md)): `workflows/embeddings.nf` fills it
-into an entry's `BUILD_DATASET`-bound overrides only when that entry
-doesn't already set `window` itself, so a single value covers every
+into an entry's `BUILD_CELL_IMAGES`-bound *and* `BUILD_DATASET`-bound
+overrides (two independent fallback blocks, one per stage) only when that
+entry doesn't already set `window` itself, so a single value covers every
 experiment sharing a crop size while any experiment needing a different
-one can still override it locally.
+one can still override it locally. `BUILD_CELL_IMAGES` needs it too now,
+since it requests `make_cell_images_bbox`'s crop-stack output at this
+size (see `docs/architecture.md` decision 17) -- both stages read the
+same value, just via separate routing.
 
 ## Stage graph
 
@@ -47,7 +51,7 @@ one can still override it locally.
 cell_images_config_ch (params.experiments -- starcall-workflow-facing fields)
     │
     ▼
-BUILD_CELL_IMAGES  (cell_table.parquet + collected tile images per experiment)
+BUILD_CELL_IMAGES  (cell_table.parquet + collected per-tile crop stacks per experiment)
     │
     ▼ (cell_images_dir injected into both config_ch and cp_config_ch below)
 config_ch (params.experiments -- BuildDatasetConfig fields)
@@ -167,7 +171,7 @@ GPU-bound processes carry `label 'process_gpu'`; `nextflow.config` applies
 settings (SGE/Slurm queue, etc.) to that same `withLabel` block for your
 own deployment.
 
-### Singularity/Apptainer and arbitrary host paths
+### Docker and Singularity/Apptainer: arbitrary host paths
 
 `phenotyping_dir`/`segmentation_dir`/`sequencing_dir`/`starcall_workflow_dir`
 (`BUILD_CELL_IMAGES` only now -- see
@@ -175,21 +179,28 @@ own deployment.
 and `cell_dino_checkpoint` (`EMBED_CELLS`) are threaded into each process
 as plain Hydra CLI-override strings when an experiment sets them itself
 (or, for `starcall_workflow_dir`, a Groovy-interpolated bash argument --
-see `modules/local/build_cell_images.nf`) -- when an entry omits one of
+see `modules/local/build_cell_images/main.nf`) -- when an entry omits one of
 the three data dirs, it's instead resolved inside the container/venv by
 `build_cell_images_enumerate.py`'s `resolve_data_dir`, reading
 `starcall_workflow_dir`'s own `config.yaml`/`default-config.yaml` if
 present. Either way, none of these are ever declared as Nextflow `path`
 process inputs, and the paths a project's own `config.yaml` names are just
 as host-filesystem-real as an explicit override. That means Nextflow
-itself never stages or binds any of them; under Docker (the default
-profile) this is invisible because the whole host filesystem is reachable
-inside the container anyway, but under a Singularity/Apptainer-based
-profile it isn't. Apptainer's own `autoMounts` only covers `$HOME`, `$PWD`
-(the task work dir), and system default binds -- a sibling data tree
-outside `pipeline_dir`'s own tree (e.g. an experiment's `phenotyping_dir`
-living under a different top-level project directory) simply isn't
-visible inside the container, even though it's plainly there on the host.
+itself never stages or binds any of them on its own -- confirmed
+**wrong** in an earlier version of this doc: under Docker (the default
+profile) this is *not* invisible because "the whole host filesystem is
+reachable inside the container anyway" -- Nextflow's Docker executor only
+ever bind-mounts one path into each task's container, that task's own
+workDir, exactly like Singularity's `autoMounts` only covering `$HOME`,
+`$PWD`, and system default binds. A sibling data tree outside
+`pipeline_dir`'s own tree (e.g. an experiment's `phenotyping_dir` living
+under a different top-level project directory) is invisible inside the
+container under *either* engine, confirmed directly by
+`tests/integration/test_integration_real_starcall.py` failing exactly
+this way under plain `-profile docker` before the fix below existed:
+`nextflow run` exits 0 (`BUILD_CELL_IMAGES`' `errorStrategy 'ignore'`
+swallows the container-side "No such file or directory" on
+`starcall_workflow_dir`) but `cell_table.parquet` is never written.
 
 The symptom is confusing because it surfaces deep inside Python as an
 ordinary-looking "file/directory not found" error (e.g.
@@ -198,8 +209,34 @@ ordinary-looking "file/directory not found" error (e.g.
 the host shell -- the giveaway is that it's a container-visibility
 problem, not a real `phenotyping_dir`/`wells` misconfiguration.
 
-Any Singularity/Apptainer profile needs an explicit bind covering every
-host root your `params.yaml` paths can point into, via
+**Docker** (the default profile) is fixed in-repo: `nextflow.config` gives
+`BUILD_CELL_IMAGES`, `EMBED_CELLS`, and `BUILD_DATASET`/`BUILD_CP_FEATURES`
+each a dynamic `containerOptions` closure (evaluated per-task, with access
+to that process' own input variables, e.g. `BUILD_CELL_IMAGES`'
+`batch_config.starcall_workflow_dir`) that bind-mounts every host path
+that process might reach at its own, unchanged absolute path -- Docker
+bind-mount sources/targets must match, since `wrapper.smk` and
+starcall-workflow's own rules build every output path by literal string
+concatenation onto `phenotyping_dir`/`segmentation_dir`/`sequencing_dir`.
+`BUILD_DATASET`/`BUILD_CP_FEATURES` need this too even though they never
+touch starcall-workflow's tree directly: `cell_images_dir` (BUILD_CELL_IMAGES'
+own per-experiment output directory, injected by `workflows/embeddings.nf`)
+is a real Nextflow `path` value scoped to *that* task's own workDir, but
+it's threaded into these two processes as the same kind of plain
+Hydra-override string as everything else above -- so it hits the exact
+same gap one stage downstream (confirmed the same way: a from-scratch run
+got past the `BUILD_CELL_IMAGES` fix only to fail identically at
+`BUILD_DATASET`, `nextflow run` exiting 0 with no `metadata.parquet`
+written). See `nextflow.config`'s own comments on these `containerOptions`
+entries for the exact paths each one covers.
+
+**Singularity/Apptainer** still needs its own, separate fix -- the
+`containerOptions` entries above use Docker-only `-v host:host` syntax
+(Singularity's equivalent is `-B`), and no Singularity/Apptainer profile
+is actually defined in this repo (the `sge`/`singularity` sketches in
+`nextflow.config` are commented-out starting points, not live profiles).
+Any real Singularity/Apptainer profile needs an explicit bind covering
+every host root your `params.yaml` paths can point into, via
 `singularity.runOptions = '-B <path>[,<path>...]'`. See
 `scratch/nextflow.config`'s `sge` profile (Fowler lab cluster; gitignored
 since it's a per-cluster local config, not shipped in the repo) for a
@@ -207,23 +244,80 @@ worked example binding the lab's shared NFS root.
 
 ## Nextflow modules
 
-Every `modules/local/*.nf` file follows the same shape: `errorStrategy
-'ignore'`, `container "${params.container_image}"`, `publishDir`, and a
-`python -m fisseq_embeddings_pipeline.<module>` script block ending in
-`random_seed=${params.random_seed}`. `EMBED_CELLS` additionally carries
-`label 'process_gpu'`, since it's the pipeline's only GPU-bound stage.
-`BUILD_CELL_IMAGES` (`modules/local/build_cell_images.nf`) is a partial
-exception to the shape above: its `publishDir` `mode:` is `'symlink'` or
-`'copy'` depending on `params.cell_images_hard_copy` (not the shared
-static `'copy'` every other module uses), and its script block is
-three phases rather than one -- `python -m
-fisseq_embeddings_pipeline.build_cell_images_enumerate`, then a
-`snakemake` invocation (the one step needing the `ops` conda env baked
-into the same image -- see the root `Dockerfile`), then `python -m
+Every module lives at `modules/local/<name>/main.nf` (one directory per
+module, nf-core's layout convention) and follows the same shape:
+`errorStrategy 'ignore'`, one bundled nf-core resource `label`
+(`process_single`/`process_low`/`process_medium`/`process_high`),
+`container "${params.container_image}"`, `publishDir`, a `when:
+task.ext.when == null || task.ext.when` gate, a `python -m
+fisseq_embeddings_pipeline.<module>` script block ending in
+`random_seed=${params.random_seed}`, and a named `emit:` on the output.
+`EMBED_CELLS` additionally carries `label 'process_gpu'`, since it's the
+pipeline's only GPU-bound stage. `BUILD_CELL_IMAGES`
+(`modules/local/build_cell_images/main.nf`) is a partial exception to the
+shape above: its `publishDir` `mode:` is `'symlink'` or `'copy'` depending
+on `params.cell_images_hard_copy` (not the shared static `'copy'` every
+other module uses), and its script block is three phases rather than one
+-- `python -m fisseq_embeddings_pipeline.build_cell_images_enumerate`,
+then a `snakemake` invocation (the one step needing the `ops` conda env
+baked into the same image -- see the root `Dockerfile`), then `python -m
 fisseq_embeddings_pipeline.build_cell_images_table` -- but it uses the
 same `container "${params.container_image}"` as every other module, and
 two of its three phases do go through `python -m
 fisseq_embeddings_pipeline...` like everything else.
+
+## nf-core conventions
+
+This pipeline follows nf-core's DSL2 conventions where they're a good fit
+for a small, single-repo lab pipeline, and deliberately diverges where
+they're not. Adopted:
+
+- **Module layout**: one directory per module (`modules/local/<name>/main.nf`).
+- **Strict syntax**: no implicit `it` in closures (named parameters
+  everywhere), no `for`/`switch`/`while`, explicit `script:` labels.
+- **`when:` gate**: every module has `task.ext.when == null ||
+  task.ext.when`, ready for future per-process gating via `nextflow.config`
+  `withName:` blocks, even though nothing sets `task.ext.when` today.
+- **Named `emit:`**: every module's output channel is named.
+- **Resource labels**: every module carries exactly one bundled label
+  (`process_single`/`process_low`/`process_medium`/`process_high`, plus
+  `process_gpu` on `EMBED_CELLS`) -- see `nextflow.config`'s comment next
+  to the `process_gpu` `withLabel:` block for why there's no numeric
+  `cpus`/`memory` behind them yet.
+
+Deliberately **not** adopted, each for a specific reason tied to this
+being a small pipeline where every "module" wraps the same in-repo Python
+package rather than a third-party tool:
+
+- **One container per module.** nf-core's per-tool containers exist so
+  each wrapped tool's own dependency chain stays isolated and
+  independently upgradable. Every module here runs this repo's own
+  `fisseq_embeddings_pipeline` package, so one shared image
+  (`params.container_image`) is the same dependency set regardless of
+  which module runs -- splitting it up would only add build/publish
+  overhead with nothing to isolate.
+- **`ext.args`-only configuration.** nf-core keeps `params.*` out of
+  modules so a vendored, upstream-maintained module file never needs
+  local edits. Nothing here is vendored from an external module registry
+  -- every module is owned in this repo -- so that protection has no
+  target; `params.*` inside a module is direct and readable instead.
+- **`nextflow_schema.json` / `assets/schema_input.json` / nf-schema.**
+  Defaults and validation live in `params.yaml` plus the hand-written
+  checks at the top of `workflows/embeddings.nf` instead -- see
+  [Configuration](configuration.md) for why (it also dodges a real
+  Nextflow &lt;26 `ConfigBuilder` bug tied to an empty `params {}` block).
+- **`conf/base.config` + `conf/modules.config` split.** nf-core splits
+  these mainly to keep `withName:`/`ext.args` overrides out of installed,
+  upstream-maintained module files -- again, nothing here is vendored, so
+  the single `nextflow.config` (with its own detailed inline rationale for
+  each `containerOptions` closure) stays as one file.
+- **nf-test.** `tests/integration/test_integration.py` (pytest, driving
+  real `nextflow run` subprocesses end-to-end) already fills this role --
+  see [Testing](../AGENTS.md#testing) in `AGENTS.md`.
+- **The full nf-core Layer 2 release contract** (`CHANGELOG.md`,
+  `CITATIONS.md`, `.nf-core.yml`, `modules.json`, the `nf-core` CLI,
+  publishing to the nf-core org). This is a lab-internal pipeline, not one
+  being submitted to nf-core.
 
 ## Output directory layout
 
@@ -231,9 +325,9 @@ fisseq_embeddings_pipeline...` like everything else.
 <pipeline_dir>/
   cell_images/<batch>/
     cell_table.parquet                            # the ONE self-sufficient cell table -- genotype + (if cp_features) CellProfiler columns already joined in
-    <well>_grid<N>/tile<x>x<y>y/                   # symlinked (default) or hard-copied whole-tile images
-      raw_pt.tif  (or corrected_pt.tif)
-      <segmentation_type>_mask.tif
+    <well>_grid<N>/tile<x>x<y>y/                   # symlinked (default) or hard-copied per-cell crop stacks
+      <segmentation_type>_crops_<window>.tif        # (num_cells, num_channels, window, window)
+      <segmentation_type>_mask_crops_<window>.tif   # (num_cells, window, window), uint8
   dataset/<batch>/
     dataset-000000.tar, dataset-000001.tar, ...   # WebDataset shards -- all cells, unfiltered
     metadata.parquet                              # same cells, meta_* only, no images

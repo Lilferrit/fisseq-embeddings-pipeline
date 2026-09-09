@@ -1,4 +1,4 @@
-// OVWT_BATCHWISE. Same three-input shape as aggregate_embeddings.nf;
+// OVWT_BATCHWISE. Same three-input shape as aggregate_embeddings/main.nf;
 // k-fold CV controlled by ovwt_n_folds/ovwt_calibrate, all randomness from
 // random_seed. `label_column` reuses the same `filter_label_column` param
 // every other stage (FILTER_EMBEDDINGS/AGGREGATE_EMBEDDINGS/the two global
@@ -7,6 +7,7 @@
 
 process OVWT_BATCHWISE {
     errorStrategy 'ignore'
+    label 'process_high'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/ovwt_batchwise/${batch_stem}" }, mode: 'copy'
 
@@ -14,7 +15,10 @@ process OVWT_BATCHWISE {
     tuple val(batch_stem), path(embeddings_parquet), path(filtered_keys_parquet), path(normalizer_parquet)
 
     output:
-    tuple val(batch_stem), path("results.parquet"), path("cell_scores.parquet"), path("models.pkl")
+    tuple val(batch_stem), path("results.parquet"), path("cell_scores.parquet"), path("models.pkl"), emit: ovwt
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

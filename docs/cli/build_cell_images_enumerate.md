@@ -2,7 +2,7 @@
 
 `python -m fisseq_embeddings_pipeline.build_cell_images_enumerate` is the
 first of `BUILD_CELL_IMAGES`' three phases (Nextflow process
-`BUILD_CELL_IMAGES`, `modules/local/build_cell_images.nf`). It resolves
+`BUILD_CELL_IMAGES`, `modules/local/build_cell_images/main.nf`). It resolves
 each well's tile grid size (explicit override or auto-detected from
 `phenotyping_dir`'s own `{well}_grid<N>` directory naming) and enumerates
 that well's existing tile directories directly against
@@ -10,19 +10,22 @@ that well's existing tile directories directly against
 the rest of the stage consumes:
 
 - `targets_out` (`targets.txt`) -- one Snakemake target file path per
-  line, forcing the whole-tile phenotype image, segmentation mask,
-  segmentation cell table, and sequencing reads table to exist for every
-  discovered tile (plus the CellProfiler CSV, if `cp_features` is set).
-  `build_cell_images.nf`'s own `snakemake ... $(cat targets.txt)` step
-  consumes this.
+  line, forcing the per-tile crop-stack pair (`{segmentation_type}_crops_{window}.tif` /
+  `{segmentation_type}_mask_crops_{window}.tif`, produced by
+  `make_cell_images_bbox` -- see `resources/starcall_overrides/`), the
+  segmentation cell table, and the sequencing reads table to exist for
+  every discovered tile (plus the CellProfiler CSV, if `cp_features` is
+  set). `build_cell_images/main.nf`'s own `snakemake ... $(cat targets.txt)`
+  step consumes this.
 - `manifest_out` (`tiles_manifest.csv`) -- drives phase 3
-  ([`build_cell_images_table`](build_cell_images_table.md)).
+  ([`build_cell_images_table`](build_cell_images_table.md)); columns
+  include `crops_tif`/`mask_crops_tif`.
 - `symlinks_out` (`symlinks.txt`) -- a `relative_path<TAB>absolute_path`
-  TSV of just the two per-tile image files, driving `build_cell_images.nf`'s
-  own symlink-collection loop.
+  TSV of just the two per-tile crop-stack files, driving
+  `build_cell_images/main.nf`'s own symlink-collection loop.
 
 This module runs against `starcall-workflow`'s tree directly -- the only
-place in the pipeline besides `build_cell_images.nf`'s own `snakemake`
+place in the pipeline besides `build_cell_images/main.nf`'s own `snakemake`
 invocation that does so; see
 [Architecture](../architecture.md#cell-images-buildcellimages-output-from-starcall-workflow).
 
@@ -37,7 +40,8 @@ Extends the [common config fields](#common-config-fields) below.
 | `wells` | **required** | Wells to enumerate. |
 | `grid_size` | `null` | Explicit override, or `null` to auto-detect per well. |
 | `segmentation_type` | `"cells"` | Segmentation type name, threaded into every target filename. |
-| `use_corrected` | `false` | Target `corrected_pt.tif` instead of `raw_pt.tif`. |
+| `use_corrected` | `false` | No longer read by this stage's own target/manifest generation -- `make_cell_images_bbox`'s crop-stack output filename doesn't distinguish raw vs. corrected; that choice is `get_phenotyping_pt`'s own, driven by the target starcall-workflow project's `config.yaml` instead. Kept only for config-schema symmetry. |
+| `window` | **required** | Crop size requested from `make_cell_images_bbox` -- embedded in the requested target filename (`{segmentation_type}_crops_{window}.tif`). Must match `dataset`'s own `window`. |
 | `sequencing_reads_params` | `""` | Suffix threaded into the reads CSV filename (`{segmentation_type}_reads{sequencing_reads_params}.csv`). |
 | `cp_features` | `false` | Also target this experiment's CellProfiler CSV. |
 | `cellprofiler_cycle` | `""` | Threaded into the CellProfiler CSV filename when `cp_features` is set. |
@@ -54,7 +58,8 @@ uv run python -m fisseq_embeddings_pipeline.build_cell_images_enumerate \
     phenotyping_dir=/data/experiment1/phenotyping \
     sequencing_dir=/data/experiment1/sequencing \
     'wells=[well1,well2]' \
-    segmentation_type=cells
+    segmentation_type=cells \
+    window=224
 ```
 
 ## Common config fields

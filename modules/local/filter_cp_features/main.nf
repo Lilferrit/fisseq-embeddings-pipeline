@@ -5,6 +5,7 @@
 
 process FILTER_CP_FEATURES {
     errorStrategy 'ignore'
+    label 'process_low'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/filter_cp_features/${batch_stem}" }, mode: 'copy'
 
@@ -12,7 +13,10 @@ process FILTER_CP_FEATURES {
     tuple val(batch_stem), path(cp_features_parquet), path(filtered_cells_parquet)
 
     output:
-    tuple val(batch_stem), path("filtered_keys.parquet"), path("normalizer.parquet")
+    tuple val(batch_stem), path("filtered_keys.parquet"), path("normalizer.parquet"), emit: filtered
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

@@ -139,9 +139,7 @@ def test_build_cp_features_empty_table_returns_empty_schema(tmp_path: Path):
 def test_build_cp_features_warns_when_no_cp_columns_present(
     tmp_path: Path, caplog
 ) -> None:
-    _write_cell_table(
-        tmp_path, [_row("well1", "tile0x0y", 1, "bc1", "A1A", 0)]
-    )
+    _write_cell_table(tmp_path, [_row("well1", "tile0x0y", 1, "bc1", "A1A", 0)])
 
     cfg = _cfg(tmp_path)
     with caplog.at_level("WARNING"):

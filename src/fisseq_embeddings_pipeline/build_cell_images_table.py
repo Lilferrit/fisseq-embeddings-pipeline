@@ -159,7 +159,9 @@ def build_tile_table(
             "the index-value join this relies on)."
         )
 
-    table = seg.merge(reads, on="tile_cell_index", how="inner", suffixes=("", "_reads_dup"))
+    table = seg.merge(
+        reads, on="tile_cell_index", how="inner", suffixes=("", "_reads_dup")
+    )
     dup_cols = [c for c in table.columns if c.endswith("_reads_dup")]
     if dup_cols:
         table = table.drop(columns=dup_cols)

@@ -1,12 +1,13 @@
 // AGGREGATE_CP_FEATURES. Takes cp_features.parquet + filtered_keys.parquet
 // + normalizer.parquet (three inputs, not a pre-normalized single file)
 // and reconstructs filtered_lf itself via load_filtered_embeddings()
-// before aggregating -- same shape as aggregate_embeddings.nf.
+// before aggregating -- same shape as aggregate_embeddings/main.nf.
 // `aggregate_methods_cp_features` defaults to `["median"]`, unlike
 // AGGREGATE_EMBEDDINGS' `aggregate_methods` (`["median", "KS", "AUROC"]`).
 
 process AGGREGATE_CP_FEATURES {
     errorStrategy 'ignore'
+    label 'process_medium'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/feature_select_batchwise_cp_features/${batch_stem}" }, mode: 'copy'
 
@@ -14,7 +15,10 @@ process AGGREGATE_CP_FEATURES {
     tuple val(batch_stem), path(cp_features_parquet), path(filtered_keys_parquet), path(normalizer_parquet)
 
     output:
-    tuple val(batch_stem), path("aggregate.parquet")
+    tuple val(batch_stem), path("aggregate.parquet"), emit: aggregate
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

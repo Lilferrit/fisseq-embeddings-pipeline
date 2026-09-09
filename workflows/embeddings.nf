@@ -9,21 +9,21 @@
 // {GLOBAL_VARIANT_CP_FEATURES, GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES}.
 nextflow.enable.dsl = 2
 
-include { BUILD_CELL_IMAGES } from '../modules/local/build_cell_images'
-include { BUILD_DATASET } from '../modules/local/build_dataset'
-include { QC_FILTER } from '../modules/local/qc_filter'
-include { EMBED_CELLS } from '../modules/local/embed_cells'
-include { FILTER_EMBEDDINGS } from '../modules/local/filter_embeddings'
-include { AGGREGATE_EMBEDDINGS } from '../modules/local/aggregate_embeddings'
-include { OVWT_BATCHWISE } from '../modules/local/ovwt_batchwise'
-include { GLOBAL_VARIANT_EMBEDDINGS } from '../modules/local/global_variant_embeddings'
-include { GLOBAL_VARIANT_DISTINGUISHABILITY } from '../modules/local/global_variant_distinguishability'
-include { BUILD_CP_FEATURES } from '../modules/local/build_cp_features'
-include { FILTER_CP_FEATURES } from '../modules/local/filter_cp_features'
-include { AGGREGATE_CP_FEATURES } from '../modules/local/aggregate_cp_features'
-include { OVWT_BATCHWISE_CP_FEATURES } from '../modules/local/ovwt_batchwise_cp_features'
-include { GLOBAL_VARIANT_CP_FEATURES } from '../modules/local/global_variant_cp_features'
-include { GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES } from '../modules/local/global_variant_distinguishability_cp_features'
+include { BUILD_CELL_IMAGES } from '../modules/local/build_cell_images/main.nf'
+include { BUILD_DATASET } from '../modules/local/build_dataset/main.nf'
+include { QC_FILTER } from '../modules/local/qc_filter/main.nf'
+include { EMBED_CELLS } from '../modules/local/embed_cells/main.nf'
+include { FILTER_EMBEDDINGS } from '../modules/local/filter_embeddings/main.nf'
+include { AGGREGATE_EMBEDDINGS } from '../modules/local/aggregate_embeddings/main.nf'
+include { OVWT_BATCHWISE } from '../modules/local/ovwt_batchwise/main.nf'
+include { GLOBAL_VARIANT_EMBEDDINGS } from '../modules/local/global_variant_embeddings/main.nf'
+include { GLOBAL_VARIANT_DISTINGUISHABILITY } from '../modules/local/global_variant_distinguishability/main.nf'
+include { BUILD_CP_FEATURES } from '../modules/local/build_cp_features/main.nf'
+include { FILTER_CP_FEATURES } from '../modules/local/filter_cp_features/main.nf'
+include { AGGREGATE_CP_FEATURES } from '../modules/local/aggregate_cp_features/main.nf'
+include { OVWT_BATCHWISE_CP_FEATURES } from '../modules/local/ovwt_batchwise_cp_features/main.nf'
+include { GLOBAL_VARIANT_CP_FEATURES } from '../modules/local/global_variant_cp_features/main.nf'
+include { GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES } from '../modules/local/global_variant_distinguishability_cp_features/main.nf'
 
 workflow EmbeddingsPipeline {
     // -params-file params.yaml is mandatory (there's no
@@ -62,7 +62,7 @@ workflow EmbeddingsPipeline {
             error "ERROR: params.experiments[${i}].cp_features must be a boolean (true/false), got ${entry.cp_features?.getClass()?.simpleName}."
         }
     }
-    def batch_stems = params.experiments.collect { it.batch_stem }
+    def batch_stems = params.experiments.collect { experiment -> experiment.batch_stem }
     def duplicate_stems = batch_stems.findAll { s -> batch_stems.count(s) > 1 }.unique()
     if (duplicate_stems) {
         error "ERROR: params.experiments has duplicate batch_stem value(s): ${duplicate_stems.join(', ')}. Every experiment's batch_stem must be unique."
@@ -73,25 +73,33 @@ workflow EmbeddingsPipeline {
     // Snakemake -- every starcall-workflow-facing key in an experiment's
     // map (starcall_workflow_dir, phenotyping_dir, segmentation_dir,
     // sequencing_dir, wells, grid_size, segmentation_type, use_corrected,
-    // sequencing_reads_params, cp_features, cellprofiler_pipeline,
+    // window, sequencing_reads_params, cp_features, cellprofiler_pipeline,
     // cellprofiler_cycle) routes to it, not to BUILD_DATASET/
     // BUILD_CP_FEATURES. Runs unconditionally for every experiment (not
     // gated on cp_features) -- both tracks below depend on its
-    // cell_images_dir output. `cellprofiler_pipeline`/`cellprofiler_cycle`
+    // cell_images_dir output. `window` is new here (BUILD_CELL_IMAGES now
+    // forces `make_cell_images_bbox`'s crop-stack output, which embeds
+    // `window` in its own target filename -- see docs/architecture.md
+    // decision 17); it and `cellprofiler_pipeline`/`cellprofiler_cycle`
     // fall back to their global params.yaml defaults the same way `window`
-    // does for config_ch below -- an entry's own value always wins.
+    // *also* does for config_ch below (two independent fallback
+    // mechanisms, one per stage -- an entry's own value always wins in
+    // both).
     // (cell_images_hard_copy is NOT per-experiment: it's read directly off
-    // params by build_cell_images.nf's own publishDir directive, since
+    // params by build_cell_images/main.nf's own publishDir directive, since
     // Nextflow's publishDir `mode:` must be a static value at process-
     // definition time, unlike `path:` -- confirmed against a real
     // Nextflow 26.04.6 run. See that module's own comment.)
     def cell_images_field_includes = [
         'starcall_workflow_dir', 'phenotyping_dir', 'segmentation_dir', 'sequencing_dir',
-        'wells', 'grid_size', 'segmentation_type', 'use_corrected', 'sequencing_reads_params',
+        'wells', 'grid_size', 'segmentation_type', 'use_corrected', 'window', 'sequencing_reads_params',
         'cp_features', 'cellprofiler_pipeline', 'cellprofiler_cycle',
     ] as Set
     cell_images_config_ch = channel.fromList(params.experiments).map { entry ->
         def overrides = entry.findAll { k, v -> k in cell_images_field_includes }
+        if (!overrides.containsKey('window') && params.window != null) {
+            overrides = overrides + [window: params.window]
+        }
         if (!overrides.containsKey('cellprofiler_pipeline') && params.cellprofiler_pipeline != null) {
             overrides = overrides + [cellprofiler_pipeline: params.cellprofiler_pipeline]
         }
@@ -132,7 +140,7 @@ workflow EmbeddingsPipeline {
         // reference to BUILD_CELL_IMAGES' actual per-experiment output
         // directory, regardless of how many *_grid* subdirectories exist
         // (confirmed against a real Nextflow 26.04.6 run -- see
-        // modules/local/build_cell_images.nf).
+        // modules/local/build_cell_images/main.nf).
         .join(cell_images_ch.map { stem, parquet, dir -> tuple(stem, parquet.getParent()) })
         .map { stem, overrides, cell_images_dir -> tuple(stem, overrides + [cell_images_dir: cell_images_dir.toString()]) }
 
@@ -174,7 +182,7 @@ workflow EmbeddingsPipeline {
     // already guaranteed by the validation above. No entries opting in
     // (the default) skips BUILD_CP_FEATURES onward entirely, so existing
     // cellDINO-only runs work unchanged.
-    def cp_experiments = params.experiments.findAll { it.cp_features == true }
+    def cp_experiments = params.experiments.findAll { experiment -> experiment.cp_features == true }
     if (cp_experiments) {
         // CpFeaturesConfig no longer needs any starcall-workflow-facing
         // field at all -- BUILD_CELL_IMAGES already folded this
@@ -192,7 +200,7 @@ workflow EmbeddingsPipeline {
             // one unambiguous reference to BUILD_CELL_IMAGES' actual
             // per-experiment output directory, regardless of how many
             // *_grid* subdirectories exist (confirmed against a real
-            // Nextflow 26.04.6 run -- see modules/local/build_cell_images.nf).
+            // Nextflow 26.04.6 run -- see modules/local/build_cell_images/main.nf).
             .join(cell_images_ch.map { stem, parquet, dir -> tuple(stem, parquet.getParent()) })
             .map { stem, overrides, cell_images_dir -> tuple(stem, overrides + [cell_images_dir: cell_images_dir.toString()]) }
 

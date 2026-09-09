@@ -36,7 +36,10 @@ def _write_segmentation_csv(
 
 
 def _write_reads_csv(
-    path: Path, index: Sequence[int], edit_distance: Sequence[int], barcode: Sequence[str]
+    path: Path,
+    index: Sequence[int],
+    edit_distance: Sequence[int],
+    barcode: Sequence[str],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -55,7 +58,10 @@ def test_build_tile_table_joins_by_index_value(tmp_path: Path):
     reads_csv = tmp_path / "reads" / "cells_reads.csv"
     _write_segmentation_csv(seg_csv, index=[1, 2, 3], bbox_x1=[10, 20, 30])
     _write_reads_csv(
-        reads_csv, index=[1, 2, 3], edit_distance=[0, 1, 2], barcode=["bcA", "bcB", "bcC"]
+        reads_csv,
+        index=[1, 2, 3],
+        edit_distance=[0, 1, 2],
+        barcode=["bcA", "bcB", "bcC"],
     )
 
     table = mod.build_tile_table(
@@ -79,7 +85,10 @@ def test_build_tile_table_join_is_order_independent(tmp_path: Path):
     _write_segmentation_csv(seg_csv, index=[1, 2, 3], bbox_x1=[10, 20, 30])
     # Reads table's rows are in reverse order on disk.
     _write_reads_csv(
-        reads_csv, index=[3, 2, 1], edit_distance=[2, 1, 0], barcode=["bcC", "bcB", "bcA"]
+        reads_csv,
+        index=[3, 2, 1],
+        edit_distance=[2, 1, 0],
+        barcode=["bcC", "bcB", "bcA"],
     )
 
     table = mod.build_tile_table(
@@ -97,10 +106,14 @@ def test_build_tile_table_raises_on_index_set_mismatch(tmp_path: Path):
     seg_csv = tmp_path / "seg" / "cells.csv"
     reads_csv = tmp_path / "reads" / "cells_reads.csv"
     _write_segmentation_csv(seg_csv, index=[1, 2, 3], bbox_x1=[10, 20, 30])
-    _write_reads_csv(reads_csv, index=[1, 2, 4], edit_distance=[0, 1, 2], barcode=["a", "b", "c"])
+    _write_reads_csv(
+        reads_csv, index=[1, 2, 4], edit_distance=[0, 1, 2], barcode=["a", "b", "c"]
+    )
 
     with pytest.raises(ValueError, match="different tile_cell_index sets"):
-        mod.build_tile_table(str(seg_csv), str(reads_csv), None, well="well1", tile="tile0x0y")
+        mod.build_tile_table(
+            str(seg_csv), str(reads_csv), None, well="well1", tile="tile0x0y"
+        )
 
 
 def test_build_tile_table_folds_in_cellprofiler_by_row_position_with_cp_prefix(
@@ -110,7 +123,9 @@ def test_build_tile_table_folds_in_cellprofiler_by_row_position_with_cp_prefix(
     reads_csv = tmp_path / "reads" / "cells_reads.csv"
     cp_csv = tmp_path / "seg" / "cellprofiler_my_pipeline.csv"
     _write_segmentation_csv(seg_csv, index=[10, 11, 12], bbox_x1=[1, 2, 3])
-    _write_reads_csv(reads_csv, index=[10, 11, 12], edit_distance=[0, 0, 0], barcode=["a", "b", "c"])
+    _write_reads_csv(
+        reads_csv, index=[10, 11, 12], edit_distance=[0, 0, 0], barcode=["a", "b", "c"]
+    )
     # CellProfiler's own ObjectNumber-style index (1, 2, 3), deliberately
     # not matching tile_cell_index (10, 11, 12) -- the join must be by row
     # position, not index value.
@@ -131,7 +146,9 @@ def test_build_tile_table_raises_on_cellprofiler_row_count_mismatch(tmp_path: Pa
     reads_csv = tmp_path / "reads" / "cells_reads.csv"
     cp_csv = tmp_path / "seg" / "cellprofiler_my_pipeline.csv"
     _write_segmentation_csv(seg_csv, index=[1, 2, 3], bbox_x1=[1, 2, 3])
-    _write_reads_csv(reads_csv, index=[1, 2, 3], edit_distance=[0, 0, 0], barcode=["a", "b", "c"])
+    _write_reads_csv(
+        reads_csv, index=[1, 2, 3], edit_distance=[0, 0, 0], barcode=["a", "b", "c"]
+    )
     pd.DataFrame({"Cells_AreaShape_Area": [100.0, 200.0]}, index=[1, 2]).to_csv(cp_csv)
 
     with pytest.raises(ValueError, match="row-position join"):

@@ -2,12 +2,13 @@
 // "${params.container_image}" and a trailing random_seed=${params.random_seed}
 // are the two additions every module picks up versus fisseq-data-pipeline's
 // modules. The `channels=[...]`/`channel_apply_mask=[...]` list
-// interpolation below mirrors aggregate_embeddings.nf's `aggregators=[...]`
+// interpolation below mirrors aggregate_embeddings/main.nf's `aggregators=[...]`
 // precedent.
 
 process EMBED_CELLS {
     errorStrategy 'ignore'
     label 'process_gpu'
+    label 'process_high'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/embeddings/${batch_stem}" }, mode: 'copy'
 
@@ -15,7 +16,10 @@ process EMBED_CELLS {
     tuple val(batch_stem), path(shards)   // dataset-*.tar, collected as a real path list from BUILD_DATASET
 
     output:
-    tuple val(batch_stem), path("embeddings.parquet")
+    tuple val(batch_stem), path("embeddings.parquet"), emit: embeddings
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

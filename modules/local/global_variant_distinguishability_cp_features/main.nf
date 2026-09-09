@@ -1,13 +1,14 @@
 // GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES. Per-experiment
 // synonymous z-score, then cross-experiment median -- CellProfiler analog
-// of global_variant_distinguishability.nf.
+// of global_variant_distinguishability/main.nf.
 //
 // `stageAs: "res_input_*.parquet"` avoids every experiment's identically-
 // named results.parquet colliding when collected into this one task, same
-// pattern/caveat as global_variant_distinguishability.nf.
+// pattern/caveat as global_variant_distinguishability/main.nf.
 
 process GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES {
     errorStrategy 'ignore'
+    label 'process_medium'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/global/distinguishability_cp_features" }, mode: 'copy'
 
@@ -16,7 +17,10 @@ process GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES {
     val(batch_stems)
 
     output:
-    path("global_scores.parquet")
+    path("global_scores.parquet"), emit: global_scores
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

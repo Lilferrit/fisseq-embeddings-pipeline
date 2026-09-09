@@ -191,6 +191,13 @@ SHELL ["/bin/bash", "-c"]
 # installs with it -- no xformers/cuml/git-dependency wrangling needed.
 COPY README.md ./
 COPY src/ src/
+# resources/starcall_overrides/{wrapper.smk,fixed_cell_images.smk}: the
+# `make_cell_images_bbox` rule patch + wrapper Snakefile
+# modules/local/build_cell_images.nf materializes a task-local copy of
+# before every snakemake invocation (STARCALL_WORKFLOW_DIR substituted in
+# via `sed`), composed into starcall-workflow's own real Snakefile via
+# `ruleorder:` + plain `include:` -- see docs/architecture.md decision 17/18.
+COPY resources/ resources/
 RUN uv sync --frozen --no-dev
 
 # `uv sync` installs into a project-local .venv/, not any system Python --

@@ -1,5 +1,5 @@
 // QC_FILTER, vendored close to verbatim from fisseq-data-pipeline's
-// qcfilter.py/modules/local/qc_filter.nf. Reads BUILD_DATASET's
+// qcfilter.py/modules/local/qc_filter/main.nf. Reads BUILD_DATASET's
 // metadata.parquet only, never the WebDataset shards.
 //
 // Note `QcFilterConfig`'s actual field names are `bc_threshold` /
@@ -21,6 +21,7 @@
 
 process QC_FILTER {
     errorStrategy 'ignore'
+    label 'process_low'
     container "${params.container_image}"
     publishDir { "${params.pipeline_dir}/qc_filter/${batch_stem}" }, mode: 'copy'
 
@@ -28,7 +29,10 @@ process QC_FILTER {
     tuple val(batch_stem), path(metadata_parquet)
 
     output:
-    tuple val(batch_stem), path("filtered_cells.parquet"), path("barcode_counts.parquet"), path("variants_per_barcode.parquet")
+    tuple val(batch_stem), path("filtered_cells.parquet"), path("barcode_counts.parquet"), path("variants_per_barcode.parquet"), emit: qc
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     """

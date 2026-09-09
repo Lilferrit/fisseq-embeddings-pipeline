@@ -35,7 +35,7 @@ Global Variant Distinguish-ability Scores    (once, across all experiments)
                                                                                   Distinguish-ability Scores
 ```
 
-"Cell Images" here is `BUILD_CELL_IMAGES` (`modules/local/build_cell_images.nf`)
+"Cell Images" here is `BUILD_CELL_IMAGES` (`modules/local/build_cell_images/main.nf`)
 -- the only stage that reads `starcall-workflow`'s tree or invokes Snakemake;
 see [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow)
 below. "Cell Info Table" no longer appears as its own node: the genotype/
@@ -78,8 +78,8 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
 
 | Diagram node | This pipeline's stage | Reuses / adapts from `fisseq-data-pipeline` |
 | --- | --- | --- |
-| Cell Images | `BUILD_CELL_IMAGES` (new) | the ONLY stage that touches `starcall-workflow`'s tree (`phenotyping_dir`/`segmentation_dir`/`sequencing_dir`) or invokes Snakemake -- **on the `origin/devel` branch**. Forces each tile's stitched phenotype image + segmentation mask to exist and collects them, and joins the segmentation-side cell table to the sequencing-side genotype table into one self-sufficient `cell_table.parquet` -- see [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow) |
-| Cell Dataset | `BUILD_DATASET` (new) | crops a whole experiment's cells from `BUILD_CELL_IMAGES`' collected stitched tile images into a WebDataset, porting `make_cell_images`'s crop-window algorithm |
+| Cell Images | `BUILD_CELL_IMAGES` (new) | the ONLY stage that touches `starcall-workflow`'s tree (`phenotyping_dir`/`segmentation_dir`/`sequencing_dir`) or invokes Snakemake -- **on the `origin/devel` branch**. Forces `make_cell_images_bbox` (a patched copy of `rule make_cell_images`, injected via `ruleorder:`/`include:` composition) to produce each tile's per-cell crop-stack pair and collects them, and joins the segmentation-side cell table to the sequencing-side genotype table into one self-sufficient `cell_table.parquet` -- see [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow) |
+| Cell Dataset | `BUILD_DATASET` (new) | indexes directly into `BUILD_CELL_IMAGES`' already-cropped per-tile crop stacks at each cell's `crop_index` -- no cropping happens in this pipeline any more |
 | QC Filtering | `QC_FILTER` (vendored, ~unchanged) | `qcfilter.py` directly |
 | Cell Embeddings (Cell DINO) | `EMBED_CELLS` (new) | none -- wraps Meta's `dinov2` Cell-DINO |
 | Filter Embeddings | `FILTER_EMBEDDINGS` (adapted) | `normalize.py`'s `Normalizer`, retargeted to a synonymous control query -- publishes a join key + fitted stats, not a normalized copy of the embeddings |
@@ -180,11 +180,11 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     (`upBarcode`/`aaChanges`/`editDistance`) that only ever exist in a
     *different* directory tree (`sequencing_dir`'s
     `{segmentation_type}_reads{params}.csv`, via `rule merge_final_tables`).
-    `BUILD_CELL_IMAGES` now owns all of this: it forces the whole-tile
-    phenotype image/mask and both per-tile tables (plus, for
+    `BUILD_CELL_IMAGES` now owns all of this: it forces the per-cell
+    crop-stack pair (see decision 17) and both per-tile tables (plus, for
     `cp_features: true` experiments, the CellProfiler CSV) to exist, joins
-    them into one `cell_table.parquet`, and publishes that alongside the
-    collected tile images. `BUILD_DATASET`/`BUILD_CP_FEATURES` consume that
+    the tables into one `cell_table.parquet`, and publishes that alongside
+    the collected crop stacks. `BUILD_DATASET`/`BUILD_CP_FEATURES` consume that
     output directory exclusively -- see
     [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow).
     The genotype join is by **index value**, not row position (the
@@ -195,17 +195,86 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     convention as before, just relocated into `BUILD_CELL_IMAGES`'
     `build_cell_images_table.py` and prefixed `cp_*` on the way in
     (stripped back off by `BUILD_CP_FEATURES` on the way out).
-17. **`BUILD_CELL_IMAGES` does NOT force `rule make_cell_images`'s
-    pre-cropped output to exist**, even though that would have been the
-    more literal reading of "collect this experiment's cell images."
-    `dataset.py`'s own `_crop_cell` already ports that rule's crop
-    algorithm and deliberately avoids depending on the rule itself, because
-    it reads `xpos`/`ypos` columns that don't exist in the real cell table
-    schema (only `bbox_x1/y1/x2/y2` -- see the Cell Info Table note below).
-    `BUILD_DATASET` still does its own per-cell windowed cropping from the
-    whole-tile image, unchanged; `BUILD_CELL_IMAGES` only forces the
-    whole-tile image + mask (which `stitch_tile_pt`/`stitch_tile_segmentation`
-    reliably produce) to exist, not the crop stacks.
+17. **`BUILD_CELL_IMAGES` forces a *patched* copy of `rule
+    make_cell_images`'s pre-cropped output to exist, not the whole-tile
+    phenotype image/segmentation mask directly.** Earlier in this
+    pipeline's life, `BUILD_CELL_IMAGES` forced the whole-tile
+    `stitch_tile_pt`/`stitch_tile_segmentation` outputs directly instead
+    (and `dataset.py` did its own per-cell windowed cropping from them,
+    via a `_crop_cell` port of `make_cell_images`'s own crop-window
+    algorithm) specifically to avoid `rule make_cell_images` itself, which
+    reads `cell_table['xpos']`/`['ypos']` -- columns that do not exist in
+    the real per-tile segmentation CSV (only `orig_index`/`bbox_x1/y1/x2/y2`/
+    `mask8`; confirmed against a fresh `origin/devel` clone and, empirically,
+    a real starcall-workflow run's own `cells.csv`, at both single-tile and
+    full 3×3-tile scale -- reproduction logs kept alongside this change).
+    But forcing the whole-tile files directly means Snakemake never
+    auto-deletes them: `temp()` only defers deletion until every declared
+    *consumer* has run, and a file requested directly on the command line
+    (as `build_cell_images_enumerate.py`'s `targets.txt` did) is never
+    purely an intermediate -- so both whole-tile files persisted in the
+    real, unredirected `phenotyping_dir` tree *and* got duplicated again
+    into this pipeline's own `cell_images/` tree, as full multi-channel,
+    multi-cycle TIFFs. That duplication was the actual disk-space problem.
+
+    The fix: `rule make_cell_images` already has exactly the output shape
+    `BUILD_DATASET` needs (a per-tile `(num_cells, channels, window,
+    window)` crop stack + matching `(num_cells, window, window)` mask-crop
+    stack) and already declares the whole-tile files as its own `input:`
+    -- so requesting *that* rule's output instead makes Snakemake's
+    ordinary `temp()` bookkeeping delete the whole-tile intermediates
+    right after use, automatically, with nothing left for this pipeline to
+    collect or clean up. The only blocker was the `xpos`/`ypos` bug above.
+    Since `dataset.py`'s own (now-deleted) `_crop_cell` already proved the
+    fix is a one-line centroid change (bbox midpoint instead of
+    `xpos`/`ypos` -- exactly matching `make_cell_images`'s own crop-window
+    algorithm otherwise), and starcall-workflow's own files can't be
+    edited directly (read-only sibling repo), `BUILD_CELL_IMAGES` now
+    injects a patched copy of the rule (`make_cell_images_bbox`) under a
+    new name and disambiguates it over the real one via `ruleorder:` --
+    see decision 18 for the composition mechanism. `dataset.py` no longer
+    crops anything itself; it only indexes into `make_cell_images_bbox`'s
+    already-cropped stacks at each cell's `crop_index`.
+18. **The `make_cell_images_bbox` patch is composed in via plain
+    `include:` + `ruleorder:`, not `module:`.** `resources/
+    starcall_overrides/wrapper.smk` (`include: "<starcall_workflow_dir>/
+    workflow/Snakefile"` then `include: "fixed_cell_images.smk"`) is what
+    `build_cell_images/main.nf` now points `--snakefile` at, instead of
+    starcall-workflow's own `workflow/Snakefile` directly.  Plain
+    `include:` shares one Python global namespace across every included
+    file -- confirmed `origin/devel`'s own `workflow/Snakefile` already
+    uses plain `include:` for its own rule files, not the isolated
+    `module:` directive, so `fixed_cell_images.smk` can reference
+    `get_phenotyping_pt`/`phenotyping_dir`/`debug` as plain globals exactly
+    like an in-tree rule would, with no re-exporting needed. `module:`
+    wasn't used because it namespaces/isolates included rules by design
+    (the opposite of what's needed here) and its `use rule ... with:`
+    override mechanism isn't confirmed to support a full `run:`-block
+    replacement across Snakemake versions. Editing starcall-workflow's own
+    `.smk` files directly isn't an option at all -- it's a read-only
+    sibling checkout (AGENTS.md), and the real end-to-end integration test
+    clones a separate upstream checkout this repo doesn't control either.
+    `ruleorder: make_cell_images_bbox > make_cell_images` is the standard
+    Snakemake mechanism for "prefer my rule over an existing one with the
+    same output" when two rules genuinely share an output pattern -- more
+    robust than hoping a same-named redeclaration silently wins (a true
+    duplicate rule name raises `WorkflowError`/`AmbiguousRuleException`).
+    `build_cell_images/main.nf` passes `--snakefile` pointing directly at
+    the static `wrapper.smk` template, from a fixed path baked into the
+    Docker image (`process.ext.starcall_overrides_dir`, `nextflow.config`;
+    `-profile local` points this at the checked-out repo's own `resources/
+    starcall_overrides/` instead, since that profile has no baked image).
+    `starcall_workflow_dir` (per-experiment, not known until task-generation
+    time) is threaded into `wrapper.smk`'s first `include:` via `--config`
+    -- the same mechanism already used on the same invocation for
+    `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` -- rather than
+    text-substituted into the file: Snakemake directives are plain Python,
+    so `include:` accepts `os.path.join(config["starcall_workflow_dir"],
+    "workflow/Snakefile")` directly (confirmed against a real Snakemake
+    invocation), and `--config` is parsed before this line ever runs. This
+    means neither `wrapper.smk` nor `fixed_cell_images.smk` needs to be
+    copied or templated per task at all -- both are used as-is straight out
+    of `starcall_overrides_dir`.
 
 ## Repository layout
 
@@ -221,24 +290,28 @@ fisseq-embeddings-pipeline/
                                    # build- and import-verified, real rule
                                    # execution not yet tested, see the
                                    # Dockerfile's own comments
+  resources/
+    starcall_overrides/            # make_cell_images_bbox rule patch +
+                                    # wrapper.smk composing it into starcall-
+                                    # workflow's own Snakefile -- see decision 18
   workflows/
     embeddings.nf                 # the one pipeline_mode this repo has
   modules/local/
-    build_cell_images.nf          # the only stage touching starcall-workflow's tree
-    build_dataset.nf
-    qc_filter.nf
-    embed_cells.nf
-    filter_embeddings.nf
-    aggregate_embeddings.nf
-    ovwt_batchwise.nf
-    global_variant_embeddings.nf
-    global_variant_distinguishability.nf
-    build_cp_features.nf
-    filter_cp_features.nf
-    aggregate_cp_features.nf
-    ovwt_batchwise_cp_features.nf
-    global_variant_cp_features.nf
-    global_variant_distinguishability_cp_features.nf
+    build_cell_images/main.nf          # the only stage touching starcall-workflow's tree
+    build_dataset/main.nf
+    qc_filter/main.nf
+    embed_cells/main.nf
+    filter_embeddings/main.nf
+    aggregate_embeddings/main.nf
+    ovwt_batchwise/main.nf
+    global_variant_embeddings/main.nf
+    global_variant_distinguishability/main.nf
+    build_cp_features/main.nf
+    filter_cp_features/main.nf
+    aggregate_cp_features/main.nf
+    ovwt_batchwise_cp_features/main.nf
+    global_variant_cp_features/main.nf
+    global_variant_distinguishability_cp_features/main.nf
   src/fisseq_embeddings_pipeline/
     config/
       app.py                      # AppConfig -- vendored, + random_seed
@@ -299,26 +372,30 @@ This pipeline tracks `starcall-workflow`'s `origin/devel` branch, not
 
 ### Cell Images (`BUILD_CELL_IMAGES` output, from `starcall-workflow`)
 
-`BUILD_CELL_IMAGES` (`modules/local/build_cell_images.nf`,
+`BUILD_CELL_IMAGES` (`modules/local/build_cell_images/main.nf`,
 `build_cell_images_enumerate.py`, `build_cell_images_table.py`) is the only stage that reads
 `starcall-workflow`'s tree directly or invokes Snakemake. For every tile of
-every configured well, it forces three real `starcall-workflow` outputs to
+every configured well, it forces real `starcall-workflow` outputs to
 exist (via one `snakemake <targets>` invocation per experiment against the
 real, unredirected tree, so Snakemake's own mtime caching reuses whatever's
 already built) and reads/collects them:
 
-- **`rule stitch_tile_pt`** -- the entire stitched phenotype image for one
-  tile: `phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{corrected|raw}_pt.tif`,
-  `(num_phenotyping_cycles, num_channels, width, height)`. Collected
-  (symlinked by default, or hard-copied if `cell_images_hard_copy: true`)
-  into this stage's own per-experiment output directory.
-- **`rule stitch_tile_segmentation`** -- the tile's segmentation label
-  mask: `phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}_mask.tif`.
-  Collected the same way. (Not `rule stitch_tile_from_well_segmentation` --
-  that rule name appears only inside a dead, commented-out block in the
-  currently-tracked `origin/devel` source; confirmed by reading it
-  directly. `stitch_tile_segmentation` is the live rule producing this
-  exact output pattern.)
+- **`rule make_cell_images_bbox`** (`resources/starcall_overrides/
+  fixed_cell_images.smk`, a patched copy of `rule make_cell_images`
+  injected via `ruleorder:`/`include:` composition -- see architecture
+  decisions 17/18) -- the per-cell crop-stack pair for one tile:
+  `phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}_crops_{window}.tif`
+  (`(num_cells, num_channels, window, window)`) and
+  `{segmentation_type}_mask_crops_{window}.tif`
+  (`(num_cells, window, window)`, `uint8`, mask label `i+1` == the cell
+  table's `i`-th row, 0-based). Collected (symlinked by default, or
+  hard-copied if `cell_images_hard_copy: true`) into this stage's own
+  per-experiment output directory. Requesting this rule's output (rather
+  than the whole-tile `stitch_tile_pt`/`stitch_tile_segmentation` outputs
+  it depends on) is what lets Snakemake's own `temp()` bookkeeping delete
+  those whole-tile intermediates automatically, right after use -- no
+  whole-tile file ever reaches this pipeline's own tree, or survives in
+  `phenotyping_dir` either.
 - **`rule split_grid_table`/`drop_duplicate_cells`** -- the tile's
   segmentation-side cell table:
   `phenotyping_dir/{well}_grid{N}/tile{x}x{y}y/{segmentation_type}.csv`,
@@ -338,11 +415,12 @@ already built) and reads/collects them:
   -- same path `BUILD_CP_FEATURES` used to read directly before this
   refactor, now read here instead.
 
-`BUILD_CELL_IMAGES` does **not** force `rule make_cell_images`'s
-pre-cropped output (`{segmentation_type}_crops_{window}.tif`) to exist --
-see architecture decision 17 above. `BUILD_DATASET` still does its own
-per-cell windowed cropping from the whole-tile image (`_crop_cell`, ported
-from `make_cell_images`'s own algorithm).
+`BUILD_CELL_IMAGES` forces `make_cell_images_bbox`'s pre-cropped output
+(`{segmentation_type}_crops_{window}.tif` / `{segmentation_type}_mask_crops_{window}.tif`)
+to exist, not the real (broken) `rule make_cell_images`'s -- see
+architecture decisions 17/18 above. `BUILD_DATASET` no longer does any
+cropping of its own; it only indexes directly into these already-cropped
+stacks.
 
 `build_cell_images_table.py` then joins, per tile: the segmentation table
 to the sequencing table **by index value** (both are the same
@@ -358,8 +436,8 @@ alongside the collected tile images:
 {pipeline_dir}/cell_images/{batch_stem}/
 ├── cell_table.parquet
 ├── well1_grid12/tile0x0y/
-│   ├── raw_pt.tif          (or corrected_pt.tif)
-│   └── cells_mask.tif
+│   ├── cells_crops_224.tif       (num_cells, num_channels, window, window)
+│   └── cells_mask_crops_224.tif  (num_cells, window, window), uint8
 └── ...
 ```
 
@@ -382,14 +460,17 @@ anyone reaching for `.cells_full.csv` directly elsewhere.
 ### Cell Dataset (this pipeline's join)
 
 Per experiment: a **WebDataset** (sharded `.tar` archives, one sample per
-cell) built by cropping every tile's stitched phenotype image and
-segmentation mask (read from `BUILD_CELL_IMAGES`' output directory) around
-each cell's bbox-derived center, and repackaging each row as one sample
+cell) built by indexing directly into `BUILD_CELL_IMAGES`' already-cropped
+per-tile crop stacks (`{segtype}_crops_{window}.tif`/
+`{segtype}_mask_crops_{window}.tif`, `make_cell_images_bbox`'s own output --
+see [Cell Images](#cell-images-buildcellimages-output-from-starcall-workflow)
+above) at each cell's `crop_index`, and repackaging each row as one sample
 keyed by a unique cell id, carrying the crop array, the mask array, and
 `meta_*` fields (barcode, variant label, edit distance, well/tile, cell
-index). The real schema has no `xpos`/`ypos` columns -- only
-`bbox_x1/y1/x2/y2`; `BUILD_DATASET` computes each cell's crop center as the
-bbox midpoint, `((bbox_x1+bbox_x2)//2, (bbox_y1+bbox_y2)//2)`.
+index). No cropping happens in `BUILD_DATASET` any more -- the bbox-midpoint
+centroid fix (the real schema has no `xpos`/`ypos` columns, only
+`bbox_x1/y1/x2/y2`) now lives entirely in `make_cell_images_bbox` itself
+(architecture decision 17).
 
 ### CellProfiler feature columns (`BUILD_CP_FEATURES` input)
 

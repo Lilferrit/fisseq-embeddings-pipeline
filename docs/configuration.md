@@ -32,8 +32,8 @@ to three stages:
 - **`BUILD_CELL_IMAGES`** (starcall-workflow-facing, always runs):
   `starcall_workflow_dir`, `phenotyping_dir`, `segmentation_dir`,
   `sequencing_dir`, `wells`, `grid_size`, `segmentation_type`,
-  `use_corrected`, `sequencing_reads_params`. This is the ONLY stage that
-  touches `starcall-workflow`'s tree or invokes Snakemake -- see
+  `use_corrected`, `window`, `sequencing_reads_params`. This is the ONLY
+  stage that touches `starcall-workflow`'s tree or invokes Snakemake -- see
   [Architecture](architecture.md#cell-images-buildcellimages-output-from-starcall-workflow).
   `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` are all optional,
   each auto-resolved when omitted: `starcall_workflow_dir`'s own
@@ -44,10 +44,12 @@ to three stages:
   matching `starcall-workflow`'s own documented default). Set one
   explicitly only when that tree isn't colocated under
   `starcall_workflow_dir` at all.
-- **`BUILD_DATASET`**: `window`, `shard_maxcount`, `barcode_col_name`/
-  `aa_changes_col_name`/`edit_distance_col_name`. `cell_images_dir` (which
-  directory to read) is injected automatically from `BUILD_CELL_IMAGES`'
-  own output -- never set it yourself.
+- **`BUILD_DATASET`**: `window` (sanity-checked against the crop-stack
+  shape `BUILD_CELL_IMAGES` already collected -- see above; no cropping
+  happens in `BUILD_DATASET` itself any more), `shard_maxcount`,
+  `barcode_col_name`/`aa_changes_col_name`/`edit_distance_col_name`.
+  `cell_images_dir` (which directory to read) is injected automatically
+  from `BUILD_CELL_IMAGES`' own output -- never set it yourself.
 - **`BUILD_CP_FEATURES`** (only for `cp_features: true` entries):
   the same three `*_col_name` fields, shared with `BUILD_DATASET` since
   both read the same `cell_table.parquet`. `cell_images_dir` is injected
@@ -62,7 +64,11 @@ always the same across every experiment in a run -- `window`,
 `cellprofiler_pipeline`, `cellprofiler_cycle` -- are the exception: each
 has its own pipeline-wide default below, used for any experiment entry
 that doesn't set its own value for that key; an entry's own value always
-wins over the global default. `cell_images_hard_copy` is a *further*
+wins over the global default. `window` is routed to *both*
+`BUILD_CELL_IMAGES` and `BUILD_DATASET` this way, via two independent
+fallback blocks in `workflows/embeddings.nf` (one per stage) -- not a
+single shared mechanism, but the same global default value either way.
+`cell_images_hard_copy` is a *further*
 exception -- it's global-only, with no per-experiment override at all
 (Nextflow's `publishDir` mode must be a static value at process-definition
 time; see `params.yaml`'s own comment on this).
@@ -75,10 +81,10 @@ time; see `params.yaml`'s own comment on this).
 | `container_image` | `"fisseq-embeddings-pipeline:latest"` | all stages |
 | `cell_dino_checkpoint` | *(required)* | `EMBED_CELLS` |
 | `experiments` | `[]` (required non-empty) | `BUILD_CELL_IMAGES` (always), `BUILD_DATASET`, and `BUILD_CP_FEATURES` for any entry setting `cp_features: true` (list of per-experiment maps, each requiring `batch_stem`; see above) |
-| `window` | `224` | `BUILD_DATASET` (global default for any `experiments` entry that omits `window`; an entry's own `window` wins) |
+| `window` | `224` | `BUILD_CELL_IMAGES`, `BUILD_DATASET` (global default for any `experiments` entry that omits `window`; an entry's own `window` wins -- two independent fallback mechanisms, one per stage) |
 | `cellprofiler_pipeline` | `null` (required, here or per `cp_features: true` entry, once any experiment sets `cp_features: true`) | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_pipeline`) |
 | `cellprofiler_cycle` | `""` | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_cycle`) |
-| `cell_images_hard_copy` | `false` | `BUILD_CELL_IMAGES` (global-only, see above -- `false` symlinks collected tile images from their real `starcall-workflow` location, `true` hard-copies them) |
+| `cell_images_hard_copy` | `false` | `BUILD_CELL_IMAGES` (global-only, see above -- `false` symlinks the collected per-cell crop-stack files (`make_cell_images_bbox`'s output -- small, not whole-tile images) from their real `starcall-workflow` location, `true` hard-copies them) |
 | `snakemake_cores` | `4` | `BUILD_CELL_IMAGES` (`--cores` for its own `snakemake` invocation, distinct from Nextflow's own executor parallelism across experiments) |
 | `random_seed` | `0` | every stochastic stage |
 | `barcode_count_threshold` | `10` | `QC_FILTER` |
