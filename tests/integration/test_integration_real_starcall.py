@@ -113,9 +113,11 @@ two processes as the same kind of plain Hydra-override string as
 everything else here), so it was invisible inside their own containers
 for the identical reason -- caught the same way, by this test getting
 past the `BUILD_CELL_IMAGES` fix only to fail identically one stage
-later. A real Singularity/Apptainer profile still needs its own, separate
-bind config (same doc section) -- the `containerOptions` fix here is
-Docker-only (`-v`) syntax.
+later. All three closures now pick the bind flag off
+`workflow.containerEngine`, so a Singularity/Apptainer profile gets the
+same binds spelled `-B` instead of the `-v` that engine rejects outright
+(same doc section) -- untested here, since this test only exercises
+Docker.
 """
 
 from __future__ import annotations

@@ -166,10 +166,13 @@ decision 14).
   the real pipeline without building the image first. The production path
   is still fully containerized by default (no `-profile` flag needed).
 
-GPU-bound processes carry `label 'process_gpu'`; `nextflow.config` applies
-`containerOptions = '--gpus all'` to that label. Add executor-specific
-settings (SGE/Slurm queue, etc.) to that same `withLabel` block for your
-own deployment.
+GPU-bound processes carry `label 'process_gpu'`; `nextflow.config` gives
+that label a `containerOptions` closure that requests the GPU in the
+running engine's own dialect (`--gpus all` under Docker, `--nv` under
+Singularity/Apptainer) and skips it entirely when
+`params.cell_dino_device` is `cpu`. Add executor-specific settings
+(SGE/Slurm queue, etc.) to that same `withLabel` block for your own
+deployment.
 
 ### Docker and Singularity/Apptainer: arbitrary host paths
 
@@ -230,17 +233,30 @@ got past the `BUILD_CELL_IMAGES` fix only to fail identically at
 written). See `nextflow.config`'s own comments on these `containerOptions`
 entries for the exact paths each one covers.
 
-**Singularity/Apptainer** still needs its own, separate fix -- the
-`containerOptions` entries above use Docker-only `-v host:host` syntax
-(Singularity's equivalent is `-B`), and no Singularity/Apptainer profile
-is actually defined in this repo (the `sge`/`singularity` sketches in
-`nextflow.config` are commented-out starting points, not live profiles).
-Any real Singularity/Apptainer profile needs an explicit bind covering
-every host root your `params.yaml` paths can point into, via
-`singularity.runOptions = '-B <path>[,<path>...]'`. See
+**Singularity/Apptainer** gets these same binds: all three
+`containerOptions` closures pick the running engine's own bind flag off
+`workflow.containerEngine` (`-v src:dest` under Docker, `-B src:dest`
+under Singularity/Apptainer -- `src:dest` itself is valid for both, so the
+flag name is the only difference). They used to hard-code Docker's `-v`,
+which is a hard failure rather than a warning on the other engine: a real
+`-profile sge` run on the Fowler lab cluster (Apptainer behind a
+`singularity` symlink) died with `Error for command "exec": unknown
+shorthand flag: 'v' in -v`. `workflow.containerEngine` reports
+`singularity` whenever `singularity.enabled` is set -- even when the
+binary on `PATH` is really Apptainer -- and `apptainer` only under the
+separate `apptainer` config scope, so the closures match both names.
+
+Those three selectors are still the only place any host path is known, so
+a Singularity/Apptainer profile also wants a broad
+`singularity.runOptions = '-B <path>[,<path>...]'` covering every host
+root your `params.yaml` paths can point into; anything a task reaches
+outside those three selectors rides on `runOptions` alone. See
 `scratch/nextflow.config`'s `sge` profile (Fowler lab cluster; gitignored
 since it's a per-cluster local config, not shipped in the repo) for a
-worked example binding the lab's shared NFS root.
+worked example binding the lab's shared NFS root. Note that file is the
+*launch-directory* config, which Nextflow merges over the pipeline's own
+`nextflow.config` -- so re-declaring a `containerOptions` selector there
+shadows the engine-aware closure instead of adding to it.
 
 ## Nextflow modules
 
