@@ -1,9 +1,10 @@
 // EMBED_CELLS, the pipeline's only GPU-bound stage. container
 // "${params.container_image}" and a trailing random_seed=${params.random_seed}
 // are the two additions every module picks up versus fisseq-data-pipeline's
-// modules. The `channels=[...]`/`channel_apply_mask=[...]` list
-// interpolation below mirrors aggregate_embeddings/main.nf's `aggregators=[...]`
-// precedent.
+// modules. The `channels=[...]` list interpolation below mirrors
+// aggregate_embeddings/main.nf's `aggregators=[...]` precedent;
+// `apply_mask` is a plain scalar (one shared mask per cell, so one flag
+// covering every selected channel -- see EmbedCellsConfig).
 
 process EMBED_CELLS {
     errorStrategy 'ignore'
@@ -31,7 +32,7 @@ process EMBED_CELLS {
         patch_size=${params.cell_dino_patch_size} \\
         crop_size=${params.cell_dino_crop_size} \\
         'channels=[${params.cell_dino_channels.join(",")}]' \\
-        'channel_apply_mask=[${params.cell_dino_channel_apply_mask.join(",")}]' \\
+        apply_mask=${params.cell_dino_apply_mask} \\
         channel_pool=${params.cell_dino_channel_pool} \\
         device=${params.cell_dino_device} \\
         batch_size=${params.cell_dino_batch_size} \\

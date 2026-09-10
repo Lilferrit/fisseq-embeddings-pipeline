@@ -617,11 +617,19 @@ selects and orders which of the crop's channel indices actually get
 embedded -- a crop may legitimately carry more channels than the model
 should see (e.g. multiple imaging cycles), and different checkpoints/
 experiments may want a different subset or order.
-`EmbedCellsConfig.channel_apply_mask` (a `list[bool]`, same length as
-`channels`) independently controls, per selected channel, whether that
-channel gets the shared per-cell segmentation mask applied before
-embedding -- "shared" because `BUILD_DATASET` writes exactly one
-`mask.npy` per cell, not one per channel.
+`EmbedCellsConfig.apply_mask` (a plain `bool`, default `True`) controls
+whether the shared per-cell segmentation mask gets applied before
+embedding -- to every selected channel, or to none of them. One flag
+rather than one per channel because there is only ever one mask to
+apply: `BUILD_DATASET` writes exactly one `mask.npy` per cell, and the
+crop stack's mask sibling
+(`resources/starcall_overrides/fixed_cell_images.smk`) carries no channel
+axis at all -- it is `(num_cells, window, window)`, a per-cell boolean
+derived from the `{segmentation_type}_mask.tif` label image. This was
+previously a `list[bool]` required to match `channels` element-for-
+element, which bought the ability to mask some selected channels but not
+others -- an option no deployment used, at the cost of a length-coupling
+guard between two params.
 
 `embed_batch()` applies channel selection and per-channel masking *before*
 the bag-of-channels-vs-joint-multichannel branch above -- so, for a

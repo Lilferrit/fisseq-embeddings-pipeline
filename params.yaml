@@ -188,7 +188,7 @@ cell_dino_arch: "vit_large"
 cell_dino_patch_size: 16
 cell_dino_crop_size: 224        # must match BUILD_DATASET's per-experiment `window`
 cell_dino_channels: [0, 1, 2, 3]                          # which crop channel indices to embed, in order
-cell_dino_channel_apply_mask: [true, true, true, true]    # one bool per cell_dino_channels entry
+cell_dino_apply_mask: true    # apply the shared per-cell mask to EVERY selected channel (one mask per cell, no channel axis)
 cell_dino_channel_pool: "mean"  # mean | max | cls_concat
 cell_dino_device: "cuda"
 cell_dino_batch_size: 256

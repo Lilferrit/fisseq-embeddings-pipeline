@@ -315,7 +315,7 @@ def test_load_cell_dino_and_embed_batch_against_real_vits8_checkpoint(tmp_path: 
         patch_size=8,
         checkpoint_path=str(_REAL_CHECKPOINT_VITS8),
         channels=[0, 1, 2, 3, 4],
-        channel_apply_mask=[True, True, True, True, True],
+        apply_mask=True,
         device="cpu",
     )
 
@@ -341,7 +341,7 @@ def test_load_cell_dino_and_embed_batch_against_real_vitl16_checkpoint(tmp_path:
     a bag-of-channels vit_large/patch-16/224 checkpoint (see the module
     docstring): loads with this
     module's plain defaults (arch/patch_size/crop_size unchanged), and
-    embed_batch()'s default cfg.channels=[0,1,2,3]/channel_apply_mask
+    embed_batch()'s default cfg.channels=[0,1,2,3]/apply_mask
     selects/masks 4 of a 6-channel crop."""
     cfg = _base_cfg(
         tmp_path,
@@ -399,7 +399,7 @@ def test_embed_batch_output_shape():
         Path("."),
         channel_pool="mean",
         channels=[0, 1, 2],
-        channel_apply_mask=[False] * 3,
+        apply_mask=False,
     )
     crops = torch.arange(2 * 3 * 4 * 4, dtype=torch.float32).reshape(2, 3, 4, 4)
     masks = torch.ones(2, 4, 4, dtype=torch.uint8)
@@ -416,7 +416,7 @@ def test_embed_batch_zero_background_zeroes_masked_out_pixels():
     mask[:, :2, :] = 1  # 8 of 16 pixels "belong to" the cell
 
     masked_cfg = _base_cfg(
-        Path("."), channel_pool="mean", channels=[0, 1], channel_apply_mask=[True, True]
+        Path("."), channel_pool="mean", channels=[0, 1], apply_mask=True
     )
     masked_out = embed_batch(model, crops, mask, masked_cfg)
     # mean over 16 pixels, 8 zeroed out: (8*10 + 8*0) / 16 = 5.0
@@ -426,32 +426,31 @@ def test_embed_batch_zero_background_zeroes_masked_out_pixels():
         Path("."),
         channel_pool="mean",
         channels=[0, 1],
-        channel_apply_mask=[False, False],
+        apply_mask=False,
     )
     none_out = embed_batch(model, crops, mask, none_cfg)
     assert torch.allclose(none_out, torch.full((1, 1), 10.0))
 
 
-def test_embed_batch_channel_apply_mask_is_per_channel():
-    """The whole point of channel_apply_mask being a list, not a single
-    bool: one selected channel can get the shared mask applied while
-    another doesn't, in the same call."""
+def test_embed_batch_apply_mask_is_all_or_nothing_across_channels():
+    """cfg.apply_mask is a single bool, not one per channel: there is only
+    ever one mask to apply (BUILD_DATASET writes a single mask.npy per
+    cell, and the crop stack's mask sibling has no channel axis), so it
+    applies to every selected channel or to none. Guards against a
+    regression back to per-channel masking, where these two channels would
+    mean-pool to 7.5 instead."""
     model = _MeanPixelStub(embed_dim=1)
+    # both channels identical, so a per-channel mask would be observable:
+    # masking only one of them would pool to (5.0 + 10.0) / 2 = 7.5
     crops = torch.full((1, 2, 4, 4), 10.0)
     mask = torch.zeros(1, 4, 4, dtype=torch.uint8)
     mask[:, :2, :] = 1  # 8 of 16 pixels "belong to" the cell
 
-    cfg = _base_cfg(
-        Path("."),
-        channel_pool="mean",
-        channels=[0, 1],
-        channel_apply_mask=[True, False],
-    )
+    cfg = _base_cfg(Path("."), channel_pool="mean", channels=[0, 1], apply_mask=True)
     out = embed_batch(model, crops, mask, cfg)
 
-    # channel 0 (masked): mean = 5.0 (see test above); channel 1 (unmasked):
-    # mean = 10.0; mean-pooled across the two channels' CLS tokens = 7.5
-    assert torch.allclose(out, torch.full((1, 1), 7.5))
+    # every selected channel masked: each pools to 5.0, so does their mean
+    assert torch.allclose(out, torch.full((1, 1), 5.0))
 
 
 def test_embed_batch_selects_and_reorders_configured_channels():
@@ -471,7 +470,7 @@ def test_embed_batch_selects_and_reorders_configured_channels():
         Path("."),
         channel_pool="mean",
         channels=[3, 0],
-        channel_apply_mask=[False, False],
+        apply_mask=False,
     )
     out = embed_batch(model, crops, mask, cfg)
 
@@ -479,19 +478,9 @@ def test_embed_batch_selects_and_reorders_configured_channels():
     assert torch.allclose(out, torch.full((1, 1), (200.0 + 1.0) / 2))
 
 
-def test_embed_batch_raises_on_channels_apply_mask_length_mismatch():
-    model = _MeanPixelStub()
-    cfg = _base_cfg(Path("."), channels=[0, 1], channel_apply_mask=[True])
-
-    with pytest.raises(ValueError, match="channel_apply_mask"):
-        embed_batch(
-            model, torch.zeros(1, 2, 4, 4), torch.zeros(1, 4, 4, dtype=torch.uint8), cfg
-        )
-
-
 def test_embed_batch_raises_on_channels_out_of_range():
     model = _MeanPixelStub()
-    cfg = _base_cfg(Path("."), channels=[0, 4], channel_apply_mask=[False, False])
+    cfg = _base_cfg(Path("."), channels=[0, 4], apply_mask=False)
 
     with pytest.raises(ValueError, match="out of range"):
         embed_batch(
@@ -504,7 +493,7 @@ def test_embed_batch_channel_pool_mean_vs_max():
     # channel 0 is uniformly 1.0, channel 1 is uniformly 9.0
     crops = torch.stack([torch.full((4, 4), 1.0), torch.full((4, 4), 9.0)]).unsqueeze(0)
     mask = torch.ones(1, 4, 4, dtype=torch.uint8)
-    channels_cfg = dict(channels=[0, 1], channel_apply_mask=[False, False])
+    channels_cfg = dict(channels=[0, 1], apply_mask=False)
 
     max_out = embed_batch(
         model, crops, mask, _base_cfg(Path("."), channel_pool="max", **channels_cfg)
@@ -519,9 +508,7 @@ def test_embed_batch_channel_pool_mean_vs_max():
 
 def test_embed_batch_raises_on_unknown_channel_pool():
     model = _MeanPixelStub()
-    cfg = _base_cfg(
-        Path("."), channel_pool="bogus", channels=[0], channel_apply_mask=[False]
-    )
+    cfg = _base_cfg(Path("."), channel_pool="bogus", channels=[0], apply_mask=False)
 
     with pytest.raises(ValueError, match="Unknown channel_pool"):
         embed_batch(
@@ -556,7 +543,7 @@ def test_embed_batch_joint_multichannel_skips_split_and_pool():
             Path("."),
             channel_pool="bogus",
             channels=[0, 1],
-            channel_apply_mask=[False, False],
+            apply_mask=False,
         ),
     )  # channel_pool is irrelevant/unused in joint mode -- an invalid value must not raise
 
@@ -568,7 +555,7 @@ def test_embed_batch_raises_on_channel_count_mismatch_in_joint_mode():
     model = _MeanPixelStub(embed_dim=1, in_chans=5)
     crops = torch.zeros(1, 3, 4, 4)  # cfg.channels selects 3, model expects exactly 5
     mask = torch.ones(1, 4, 4, dtype=torch.uint8)
-    cfg = _base_cfg(Path("."), channels=[0, 1, 2], channel_apply_mask=[False] * 3)
+    cfg = _base_cfg(Path("."), channels=[0, 1, 2], apply_mask=False)
 
     with pytest.raises(ValueError, match="in_chans=5"):
         embed_batch(model, crops, mask, cfg)
@@ -592,7 +579,7 @@ def test_embed_batch_against_random_weight_real_model():
         Path("."),
         channel_pool="mean",
         channels=[0, 1, 2],
-        channel_apply_mask=[True, True, True],
+        apply_mask=True,
     )
     crops = torch.randint(0, 1000, (2, 3, CROP, CROP), dtype=torch.uint16)
     masks = (torch.rand(2, CROP, CROP) > 0.5).to(torch.uint8)
@@ -609,7 +596,7 @@ def test_embed_batch_against_random_weight_real_model():
 
 def test_main_runs_end_to_end_via_cli(tmp_path: Path):
     # 4 channels to match EmbedCellsConfig's own default channels=[0,1,2,3]
-    # -- this test doesn't override channels/channel_apply_mask, exercising
+    # -- this test doesn't override channels/apply_mask, exercising
     # those defaults through the real CLI path.
     shard_dir = _write_shard(tmp_path, n_cells=4, channels=4, crop_size=CROP)
     reference = vit_small(
