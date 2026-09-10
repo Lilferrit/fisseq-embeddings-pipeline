@@ -37,6 +37,12 @@ dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration"]
+markers = [
+    # tests/integration/conftest.py's mode switch: marked tests run only
+    # under `pytest tests/integration --container`, unmarked ones only
+    # without it. See that file for why the two are mutually exclusive.
+    "container: containerized real-starcall integration test (opt-in, needs docker + testing_data/)",
+]
 
 [tool.ruff]
 # ruff>=0.16 formats Python code fences embedded in Markdown by default,

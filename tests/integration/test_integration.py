@@ -1,12 +1,23 @@
-"""Integration test for the Nextflow pipeline. Modeled on
+"""Integration tests for the Nextflow pipeline. Modeled on
 fisseq-data-pipeline's tests/integration/test_integration.py: a synthetic
 fixture, a subprocess-driven `nextflow run` of the real pipeline
 end-to-end, and output-file/column assertions against the result -- not a
 mock of any individual stage.
 
-Skipped automatically whenever `nextflow` isn't on PATH (`shutil.which`).
-`-profile local` (nextflow.config) is what makes this runnable without a
-built Docker image -- every process here runs `python -m
+TWO MODES, mutually exclusive, selected by tests/integration/conftest.py's
+`--container` flag (see that file for why they can't run together):
+
+- `pytest tests/integration` -- the synthetic suite, `-profile local`,
+  stub `snakemake`. What CI runs.
+- `pytest tests/integration --container` -- only
+  `test_real_starcall_pipeline_produces_cell_images` (marked
+  `container`), the containerized real-starcall test at the bottom of
+  this file.
+
+Every test here is skipped automatically whenever `nextflow` isn't on
+PATH -- centralized in conftest.py's collection hook, not repeated per
+test. `-profile local` (nextflow.config) is what makes the synthetic
+suite runnable without a built Docker image -- every process here runs `python -m
 fisseq_embeddings_pipeline.<module>` directly against this repo's own
 venv, not `fisseq-embeddings-pipeline:latest`.
 
@@ -64,6 +75,7 @@ import tifffile
 import torch
 import yaml
 
+from fisseq_embeddings_pipeline.build_cell_images_enumerate import resolve_data_dir
 from fisseq_embeddings_pipeline.vendor.dinov2.models.vision_transformer import (
     vit_small,
 )
@@ -411,8 +423,6 @@ def _run_nextflow(exp_dir: Path, checkpoint_path: Path) -> subprocess.CompletedP
 
 @pytest.fixture(scope="session")
 def pipeline_outputs(tmp_path_factory):
-    if shutil.which("nextflow") is None:
-        pytest.skip("nextflow not on PATH -- see this module's docstring")
 
     exp_dir = tmp_path_factory.mktemp("nf_experiment")
     _write_synthetic_experiment(exp_dir)
@@ -484,8 +494,6 @@ def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
     plumbing, not just in-process (see
     tests/unit/test_build_cell_images_enumerate.py for the in-process
     coverage of the detection logic itself)."""
-    if shutil.which("nextflow") is None:
-        pytest.skip("nextflow not on PATH -- see this module's docstring")
 
     exp_dir = tmp_path_factory.mktemp("nf_experiment_auto_grid")
     _write_synthetic_experiment(exp_dir, include_grid_size=False)
@@ -509,8 +517,6 @@ def test_pipeline_defaults_data_dirs_under_starcall_workflow_dir_when_omitted(
     (matching starcall-workflow's own default-config.yaml naming, when no
     project config.yaml exists to say otherwise) works through the real
     Nextflow/Hydra plumbing, not just by construction."""
-    if shutil.which("nextflow") is None:
-        pytest.skip("nextflow not on PATH -- see this module's docstring")
 
     exp_dir = tmp_path_factory.mktemp("nf_experiment_default_dirs")
     _write_synthetic_experiment(exp_dir, omit_data_dirs=True)
@@ -531,8 +537,6 @@ def test_pipeline_reads_data_dirs_from_project_config_yaml_when_nonstandard(
     fixed 'phenotyping'/'sequencing' guess) through the real Nextflow/Hydra
     plumbing, the actual case this behavior exists for ("handle cases
     where the output looks different for whatever reason")."""
-    if shutil.which("nextflow") is None:
-        pytest.skip("nextflow not on PATH -- see this module's docstring")
 
     exp_dir = tmp_path_factory.mktemp("nf_experiment_custom_dirs")
     _write_synthetic_experiment(
@@ -554,11 +558,6 @@ def test_pipeline_reads_data_dirs_from_project_config_yaml_when_nonstandard(
     )
     assert cell_table.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
 
-    cell_table = pl.read_parquet(
-        exp_dir / "cell_images" / "batch1" / "cell_table.parquet"
-    )
-    assert cell_table.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
-
 
 def test_fails_fast_when_pipeline_dir_missing(tmp_path):
     """A required-with-no-default param left unset must fail with
@@ -566,8 +565,6 @@ def test_fails_fast_when_pipeline_dir_missing(tmp_path):
     specific message, not Nextflow's generic 'no such property' error --
     and it must fail before scheduling any process (no synthetic fixture
     needed here, unlike pipeline_outputs above)."""
-    if shutil.which("nextflow") is None:
-        pytest.skip("nextflow not on PATH -- see this module's docstring")
 
     result = subprocess.run(
         [
@@ -592,8 +589,6 @@ def test_fails_fast_when_pipeline_dir_missing(tmp_path):
 
 def test_fails_fast_when_cell_dino_checkpoint_missing(tmp_path):
     """Same as above, for the other required-with-no-default param."""
-    if shutil.which("nextflow") is None:
-        pytest.skip("nextflow not on PATH -- see this module's docstring")
 
     result = subprocess.run(
         [
@@ -713,8 +708,6 @@ def reproducibility_outputs(tmp_path_factory):
     second run cannot `-resume`-cache-hit the first's outputs -- comparing
     two runs that both had to fully recompute is the only way this test
     would fail if determinism actually broke."""
-    if shutil.which("nextflow") is None:
-        pytest.skip("nextflow not on PATH -- see this module's docstring")
 
     checkpoint_path = tmp_path_factory.mktemp("weights_repro") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
@@ -749,3 +742,351 @@ def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs
         np.testing.assert_allclose(
             first[col].to_numpy(), second[col].to_numpy(), err_msg=col
         )
+
+
+# ===========================================================================
+# The real-starcall test: containerized, opt-in via `--container`.
+#
+# Everything above fakes `snakemake` with a stub on PATH -- deliberately,
+# since a real run needs starcall-workflow's own heavy stack
+# (tensorflow/stardist/cellpose, in params.container_image's `ops` conda
+# env; see the root Dockerfile) plus real microscopy data, neither of
+# which belongs in the fast default suite. This is the one place that
+# actually invokes real Snakemake against real starcall-workflow data.
+#
+# Runs only under `pytest tests/integration --container`, and even then
+# self-skips (see `_skip_reason`) unless BOTH:
+#   - testing_data/lmna_t3/starcall_input/ exists -- generate it with
+#     `uv run python scripts/prepare_real_starcall_test_data.py` (~6.3GB
+#     download, cropped to a single tile per sequencing cycle). Never
+#     generated automatically here.
+#   - `docker` is on PATH, and a build of the root Dockerfile succeeds --
+#     this needs the real `ops` env, so it always runs through the default
+#     (containerized) profile, never `-profile local`.
+#
+# Slow: real background correction, cycle registration/stitching solving,
+# real stardist/cellpose segmentation, and real sequencing base-calling
+# against a real (if tiny) barcode library. Budget minutes, not seconds --
+# this is the appropriate place to pay that cost, once, deliberately,
+# rather than never paying it at all.
+#
+# It drives the pipeline exactly the way production does -- default
+# profile, real containers, real bind mounts -- deliberately not
+# special-cased for any particular host's Docker configuration (no
+# `docker cp` workaround, even though one was used to validate this
+# fixture manually during development: that path diverges from how
+# Nextflow's own Docker executor launches containers everywhere else).
+#
+# KNOWN GOTCHA, worth recognizing before filing a regression: Docker
+# Desktop's file-sharing allowlist (macOS/Windows) can silently reject
+# bind mounts of paths outside its shared-folders list. BUILD_CELL_IMAGES
+# then fails fast inside the container ("No such file or directory" on its
+# own .command.sh) and, since that process carries `errorStrategy
+# 'ignore'`, the overall `nextflow run` still exits 0 having produced
+# nothing. This test still catches it -- the cell_table.parquet read
+# raises FileNotFoundError rather than passing silently -- but the fix is
+# to add this repo's temp dirs to Docker Desktop's shared paths (or use a
+# Docker host without that restriction, e.g. native Linux/CI), not to
+# treat it as a pipeline bug.
+#
+# The arbitrary-host-path bind-mount gaps this test originally exposed
+# (BUILD_CELL_IMAGES couldn't see starcall_workflow_dir; BUILD_DATASET/
+# BUILD_CP_FEATURES couldn't see cell_images_dir, one stage later, for the
+# identical reason) are fixed in nextflow.config's three containerOptions
+# closures -- see that file's own comments and docs/nextflow.md's "Docker
+# and Singularity/Apptainer: arbitrary host paths" section. Those closures
+# now pick the bind flag off `workflow.containerEngine`, so a
+# Singularity/Apptainer profile gets `-B` instead of the `-v` that engine
+# rejects outright -- untested here, since this test only exercises
+# Docker.
+# ===========================================================================
+
+_FIXTURE_DIR = _PROJECT_ROOT / "testing_data" / "lmna_t3"
+_STARCALL_INPUT_DIR = _FIXTURE_DIR / "starcall_input"
+_CONFIG_FIXTURE = Path(__file__).parent / "fixtures" / "lmna_t3_config.yaml"
+_STARCALL_WORKFLOW_CACHE = _FIXTURE_DIR / "_starcall_workflow_checkout"
+
+_STARCALL_WORKFLOW_GIT_URL = "https://github.com/FowlerLab/starcall-workflow.git"
+
+# Matches nextflow.config's ext.starcall_overrides_dir default (the Docker
+# profile this test builds against, not -profile local) -- wrapper.smk and
+# fixed_cell_images.smk are baked into the image at this path (Dockerfile's
+# `COPY resources/ resources/`) and used from there directly, same as the
+# real BUILD_CELL_IMAGES invocation.
+_STARCALL_OVERRIDES_DIR_IN_IMAGE = (
+    "/opt/fisseq-embeddings-pipeline/resources/starcall_overrides"
+)
+
+_IMAGE_TAG = "fisseq-embeddings-pipeline:real-starcall-test"
+
+# grid_size=1 means a single "tile" covering the whole stitched image (no
+# internal chunking) -- always exactly one tile, x=0/y=0, named per
+# qc.smk's own '{:02}' formatting convention (utils.constants.TILE_DIR_RE
+# matches any digit count, but starcall-workflow itself always emits
+# zero-padded names). BUILD_CELL_IMAGES' own params["experiments"][0]
+# below must keep using this same grid_size -- see _prime_tile_grid.
+_GRID_SIZE = 1
+_TILE_NAME = "tile00x00y"
+# The four final targets build_enumeration (build_cell_images_enumerate.py)
+# would itself compute for this one tile, at that module's own defaults
+# (segmentation_type="cells", window=_WINDOW, sequencing_reads_params="") --
+# BUILD_CELL_IMAGES' Nextflow module (build_cell_images.nf) doesn't
+# override any of those for this fixture, so these are hand-mirrored here
+# rather than importing build_enumeration itself, which would need a tile
+# to already be enumerable to compute them -- exactly the precondition
+# this function exists to establish. The crop-stack pair (not the
+# whole-tile phenotype image/segmentation mask) is what
+# `make_cell_images_bbox` actually produces -- see
+# resources/starcall_overrides/ and docs/architecture.md decision 17.
+_PRIME_TARGET_SUFFIXES = (
+    ("phenotyping_dir", f"cells_crops_{_WINDOW}.tif"),
+    ("phenotyping_dir", f"cells_mask_crops_{_WINDOW}.tif"),
+    ("phenotyping_dir", "cells.csv"),
+    ("sequencing_dir", "cells_reads.csv"),
+)
+
+
+def _fixture_available() -> bool:
+    return (_STARCALL_INPUT_DIR / "well1_subset1").is_dir()
+
+
+def _docker_available() -> bool:
+    return shutil.which("docker") is not None
+
+
+def _skip_reason() -> str | None:
+    if not _fixture_available():
+        return (
+            "real starcall-workflow test data not present -- generate it with "
+            "`uv run python scripts/prepare_real_starcall_test_data.py` "
+            "(see testing_data/README.md)"
+        )
+    if not _docker_available():
+        return "docker not on PATH -- this test needs the real ops-env-bearing image"
+    if shutil.which("nextflow") is None:
+        return "nextflow not on PATH"
+    return None
+
+
+def _prepare_starcall_workflow_checkout() -> Path:
+    """A real `origin/devel` starcall-workflow checkout, cached under
+    testing_data/ (gitignored) so repeat test runs don't re-clone. This
+    is the same ref/URL the root Dockerfile's own `ops` env build uses --
+    kept as a *separate* checkout here, not that image-internal one,
+    because this one needs this fixture's own config.yaml + input/ tree
+    living alongside it as `starcall_workflow_dir`."""
+    if not (_STARCALL_WORKFLOW_CACHE / "workflow" / "Snakefile").exists():
+        _STARCALL_WORKFLOW_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--recursive",
+                "--branch",
+                "devel",
+                _STARCALL_WORKFLOW_GIT_URL,
+                str(_STARCALL_WORKFLOW_CACHE),
+            ],
+            check=True,
+            timeout=300,
+        )
+    return _STARCALL_WORKFLOW_CACHE
+
+
+def _write_starcall_workflow_dir(dest: Path) -> Path:
+    """Assembles one experiment's `starcall_workflow_dir`: a copy of the
+    cached checkout (Snakemake's `--directory` also becomes its own
+    working/lock directory -- must be per-experiment, never shared
+    concurrently, matching build_cell_images.nf's own module docstring),
+    this fixture's own config.yaml, and the prepared input/ tree."""
+    checkout = _prepare_starcall_workflow_checkout()
+    shutil.copytree(
+        checkout, dest, symlinks=True, ignore=shutil.ignore_patterns(".git")
+    )
+    shutil.copy(_CONFIG_FIXTURE, dest / "config.yaml")
+    shutil.copytree(_STARCALL_INPUT_DIR, dest / "input")
+    return dest
+
+
+def _prime_tile_grid(image: str, starcall_workflow_dir: Path, well: str) -> None:
+    """Establishes BUILD_CELL_IMAGES' own enumerate-phase precondition (see
+    this module's own docstring) for one well at `_GRID_SIZE`: a real,
+    direct Snakemake invocation -- the same image, same `ops` env,
+    `task.ext.snakemake_bin`'s own absolute path (nextflow.config) -- for
+    the concrete tile00x00y targets, run straight from a from-scratch
+    starcall-workflow checkout. Mirrors build_cell_images.nf's own
+    invocation shape exactly (including the `--` separator ending
+    `--config`'s own arg list, the conda_bin_dir PATH prefix --use-
+    conda itself needs -- both real bugs this session's manual debugging
+    against this exact fixture found and fixed there -- and pointing
+    `--snakefile` at the image's own baked-in wrapper.smk,
+    `_STARCALL_OVERRIDES_DIR_IN_IMAGE`), since this is genuinely the same
+    command BUILD_CELL_IMAGES' own script block would run, just pointed at
+    concrete paths instead of a glob-discovered list.
+    """
+    resolved_dirs = {
+        dir_key: resolve_data_dir(str(starcall_workflow_dir), dir_key, None)
+        for dir_key in ("phenotyping_dir", "segmentation_dir", "sequencing_dir")
+    }
+    grid_dir = f"{well}_grid{_GRID_SIZE}"
+    # Absolute, joined with an explicit '/' -- matching build_enumeration's
+    # own tile_dir/seq_tile_dir construction exactly (build_cell_images_
+    # enumerate.py), since these targets must resolve against the *same*
+    # --config-overridden (absolute) phenotyping_dir/sequencing_dir passed
+    # below, not starcall-workflow's own relative config.yaml defaults --
+    # a relative target here would silently mismatch every rule's
+    # (now-absolute) output pattern and fail DAG resolution outright.
+    targets = [
+        f"{resolved_dirs[dir_key]}/{grid_dir}/{_TILE_NAME}/{name}"
+        for dir_key, name in _PRIME_TARGET_SUFFIXES
+    ]
+
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{starcall_workflow_dir}:{starcall_workflow_dir}",
+            "-w",
+            str(starcall_workflow_dir),
+            image,
+            "bash",
+            "-c",
+            'export PATH="/opt/conda/bin:$PATH"; '
+            "/opt/conda/envs/ops/bin/snakemake "
+            f'--snakefile "{_STARCALL_OVERRIDES_DIR_IN_IMAGE}/wrapper.smk" '
+            f'--directory "{starcall_workflow_dir}" '
+            "--cores 4 --use-conda --conda-frontend conda --rerun-triggers mtime "
+            # Trailing '/' on each value -- see build_cell_images.nf's own
+            # comment at its matching --config invocation: workflow/rules/
+            # *.smk concatenates these directly onto '{well}_grid.../...'
+            # with no separator of its own, matching config.yaml's own
+            # always-slash-terminated defaults ('phenotyping/', etc.).
+            # starcall_workflow_dir itself gets none -- wrapper.smk's own
+            # `include:` joins onto it via os.path.join, not string
+            # concatenation.
+            f'--config phenotyping_dir="{resolved_dirs["phenotyping_dir"]}/" '
+            f'segmentation_dir="{resolved_dirs["segmentation_dir"]}/" '
+            f'sequencing_dir="{resolved_dirs["sequencing_dir"]}/" '
+            f'starcall_workflow_dir="{starcall_workflow_dir}" -- ' + " ".join(targets),
+        ],
+        check=True,
+        timeout=3600,
+    )
+
+
+def _build_image() -> str:
+    subprocess.run(
+        ["docker", "build", "-t", _IMAGE_TAG, str(_PROJECT_ROOT)],
+        check=True,
+        timeout=1800,
+    )
+    return _IMAGE_TAG
+
+
+@pytest.fixture(scope="session")
+def real_starcall_image():
+    reason = _skip_reason()
+    if reason:
+        pytest.skip(reason)
+    return _build_image()
+
+
+@pytest.mark.container
+def test_real_starcall_pipeline_produces_cell_images(
+    tmp_path_factory, real_starcall_image
+):
+    """Runs the real Nextflow pipeline (`-profile docker`, the default --
+    real containers, real bind mounts) against the real, cropped LMNA_T3
+    fixture, through BUILD_CELL_IMAGES' actual real `snakemake`
+    invocation (`task.ext.snakemake_bin`'s absolute ops-env path -- see
+    nextflow.config), all the way through EMBED_CELLS. Asserts real,
+    non-trivial output shapes -- not just that files exist -- since a
+    silently-empty cell table would defeat the point of this test."""
+    exp_dir = tmp_path_factory.mktemp("real_starcall_experiment")
+    starcall_workflow_dir = _write_starcall_workflow_dir(exp_dir / "starcall-workflow")
+    _prime_tile_grid(real_starcall_image, starcall_workflow_dir, "well1_subset1")
+
+    checkpoint_path = (
+        tmp_path_factory.mktemp("real_starcall_weights") / "checkpoint.pth"
+    )
+    _write_tiny_checkpoint(checkpoint_path)
+
+    params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
+    params["container_image"] = real_starcall_image
+    params["window"] = _WINDOW
+    # EMBED_CELLS overrides -- previously missing here entirely, since this
+    # test never got far enough (past the since-fixed BUILD_CELL_IMAGES/
+    # BUILD_DATASET bind-mount gaps -- see nextflow.config's own
+    # containerOptions comments) to reach EMBED_CELLS and notice. Without
+    # these, EMBED_CELLS runs with params.yaml's own production defaults
+    # (cell_dino_arch=vit_large, cell_dino_crop_size=224,
+    # cell_dino_device=cuda) -- a real GPU checkpoint's shape, not
+    # _write_tiny_checkpoint's `vit_small`/`img_size=_WINDOW`, and a device
+    # this (or any GPU-less) host doesn't have. Mirrors
+    # this file's own `_EXTRA_NF_PARAMS` precedent (same values,
+    # `--cell_dino_device cpu` there too) -- _WINDOW's own comment
+    # ("small enough to run fast on CPU") already says this was always the
+    # intent.
+    params["cell_dino_arch"] = "vit_small"
+    params["cell_dino_patch_size"] = 16
+    params["cell_dino_crop_size"] = _WINDOW
+    params["cell_dino_device"] = "cpu"
+    params["cell_dino_batch_size"] = 4
+    params["cell_dino_num_workers"] = 0
+    params["experiments"] = [
+        {
+            "batch_stem": "lmna_t3",
+            "starcall_workflow_dir": str(starcall_workflow_dir),
+            # 'well1_subset1', matching the fixture's actual input/ well
+            # directory name (scripts/prepare_real_starcall_test_data.py's
+            # _CROPPED_WELL) and lmna_t3_config.yaml's own `wells:` --
+            # not the source dataset's original 'well1'.
+            "wells": ["well1_subset1"],
+            "grid_size": _GRID_SIZE,
+            # phenotyping_dir/segmentation_dir/sequencing_dir omitted --
+            # resolved from starcall_workflow_dir's own config.yaml /
+            # default-config.yaml (resolve_data_dir), matching how this
+            # fixture's config.yaml was itself validated to work.
+        }
+    ]
+    params_path = exp_dir / "params.yaml"
+    with open(params_path, "w") as f:
+        yaml.safe_dump(params, f)
+
+    result = subprocess.run(
+        [
+            "nextflow",
+            "run",
+            str(_PROJECT_ROOT),
+            "-ansi-log",
+            "false",
+            "--pipeline_dir",
+            str(exp_dir),
+            "-params-file",
+            str(params_path),
+            "--cell_dino_checkpoint",
+            str(checkpoint_path),
+        ],
+        cwd=exp_dir,
+        capture_output=True,
+        text=True,
+        timeout=3600,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    cell_table = pl.read_parquet(
+        exp_dir / "cell_images" / "lmna_t3" / "cell_table.parquet"
+    )
+    assert cell_table.height > 0
+    assert {"editDistance", "bbox_x1", "crop_index"}.issubset(cell_table.columns)
+
+    metadata = pl.read_parquet(exp_dir / "dataset" / "lmna_t3" / "metadata.parquet")
+    assert metadata.height == cell_table.height
+
+    embeddings = pl.read_parquet(
+        exp_dir / "embeddings" / "lmna_t3" / "embeddings.parquet"
+    )
+    assert embeddings.height == metadata.height
+    assert any(c.startswith("emb_") for c in embeddings.columns)

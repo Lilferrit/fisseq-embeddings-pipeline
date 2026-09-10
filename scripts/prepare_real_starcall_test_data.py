@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fetches and shrinks the Fowler lab's public LMNA_T3 starcall-workflow
 testing image set into a tiny fixture for
-tests/integration/test_integration_real_starcall.py -- the one test that
+tests/integration/test_integration.py's --container mode -- the one test that
 invokes a REAL Snakemake run against real starcall-workflow data (every
 other integration test fakes that step; see this repo's docs, which flag
 "real snakemake rule execution against real starcall-workflow data hasn't

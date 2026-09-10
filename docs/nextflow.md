@@ -199,7 +199,7 @@ workDir, exactly like Singularity's `autoMounts` only covering `$HOME`,
 `pipeline_dir`'s own tree (e.g. an experiment's `phenotyping_dir` living
 under a different top-level project directory) is invisible inside the
 container under *either* engine, confirmed directly by
-`tests/integration/test_integration_real_starcall.py` failing exactly
+`tests/integration/test_integration.py`'s `--container` mode failing exactly
 this way under plain `-profile docker` before the fix below existed:
 `nextflow run` exits 0 (`BUILD_CELL_IMAGES`' `errorStrategy 'ignore'`
 swallows the container-side "No such file or directory" on

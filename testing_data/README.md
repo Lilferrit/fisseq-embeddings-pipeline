@@ -8,8 +8,8 @@ tracked things here -- see `.gitignore`).
 A shrunk fixture derived from the Fowler lab's public LMNA_T3
 starcall-workflow testing image set
 (`https://visseq.gs.washington.edu/static/LMNA_T3_testing_image_set.tar.gz`),
-used by `tests/integration/test_integration_real_starcall.py` -- the one
-integration test that invokes a **real** `snakemake` run against real
+used by `tests/integration/test_integration.py`'s `--container` mode --
+the one integration test that invokes a **real** `snakemake` run against real
 starcall-workflow data (every other integration test fakes that step with
 a stub `snakemake` on PATH; see `AGENTS.md`/`docs/architecture.md` for why
 that gap existed).
@@ -25,7 +25,8 @@ This downloads the ~6.3GB source tarball (cached under
 single tile per sequencing cycle (see that script's own docstring for
 exactly how and why) into `lmna_t3/starcall_input/`, well under 1GB.
 
-`test_integration_real_starcall.py` skips automatically if this hasn't
-been generated (or if Docker isn't available) -- it's opt-in, not run by
-default, since it needs the real `ops`-env-bearing Docker image and takes
-meaningfully longer than the rest of the suite.
+That test is opt-in twice over: it runs only under
+`uv run pytest tests/integration --container`, and even then skips
+automatically if this fixture hasn't been generated (or if Docker isn't
+available), since it needs the real `ops`-env-bearing Docker image and
+takes meaningfully longer than the rest of the suite.
