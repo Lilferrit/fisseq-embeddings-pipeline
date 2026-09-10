@@ -33,10 +33,10 @@ checkpoints this was verified against.
 
 `EmbedCellsConfig.channels` selects and orders which of the crop's channel
 indices actually get fed to the model (a crop may carry more channels than
-the model should see, e.g. multiple imaging cycles); `channel_apply_mask`
-independently controls, per selected channel, whether the shared per-cell
-segmentation mask gets applied before embedding. Both are consulted inside
-`embed_batch()`, before the bag-of-channels-vs-joint branch above.
+the model should see, e.g. multiple imaging cycles); `apply_mask` controls
+whether the shared per-cell segmentation mask gets applied before
+embedding. Both are consulted inside `embed_batch()`, before the
+bag-of-channels-vs-joint branch above.
 
 `load_embedding_dataloader()` expands a non-brace `shard_pattern` (no
 `"dataset-{000000..000042}.tar"`-style brace expression) via `glob.glob()`
@@ -131,15 +131,16 @@ class EmbedCellsConfig(AppConfig):
         ``[0, 1, 2, 3]`` (the first imaging cycle's four phenotyping
         channels, per BUILD_DATASET/starcall-workflow's own 4-channel
         default -- see docs/configuration.md).
-    channel_apply_mask : list[bool]
-        One entry per ``channels`` entry (same order, same length): whether
-        that selected channel gets ``mask.npy``-based background zeroing
-        before embedding. Every cell in this pipeline's data model has
+    apply_mask : bool
+        Whether ``mask.npy``-based background zeroing is applied before
+        embedding -- to every selected channel, or to none of them. A
+        single flag rather than one per channel because there is only ever
+        one mask to apply: every cell in this pipeline's data model has
         exactly one shared segmentation mask (BUILD_DATASET writes a
-        single ``mask.npy`` per cell, not one per channel), so this is
-        "apply the shared mask to this channel or not," not a claim that
-        different channels have their own distinct masks.
-        Defaults to ``[True, True, True, True]``.
+        single ``mask.npy`` per cell, not one per channel, and the crop
+        stack's mask sibling carries no channel axis at all -- see
+        resources/starcall_overrides/fixed_cell_images.smk). Defaults to
+        ``True``.
     channel_pool : str
         How per-channel CLS embeddings are pooled into one per-cell
         embedding: ``"mean"`` or ``"max"``. Only consulted when the loaded
@@ -160,9 +161,7 @@ class EmbedCellsConfig(AppConfig):
     patch_size: int = 16
     crop_size: int = 224
     channels: List[int] = dataclasses.field(default_factory=lambda: [0, 1, 2, 3])
-    channel_apply_mask: List[bool] = dataclasses.field(
-        default_factory=lambda: [True, True, True, True]
-    )
+    apply_mask: bool = True
     channel_pool: str = "mean"
     device: str = "cuda"
     batch_size: int = 256
@@ -177,9 +176,8 @@ def load_embedding_dataloader(cfg: EmbedCellsConfig) -> "torch.utils.data.DataLo
     writes; batching via ``.batched()``/``DataLoader(batch_size=None)``
     keeps shard-order batches (webdataset's usual pattern) rather than a
     random-access ``Dataset``, which a tar-shard format doesn't support
-    efficiently. ``mask.npy`` is always fetched -- whether/where it's
-    applied is decided in :func:`embed_batch` via ``cfg.channel_apply_mask``,
-    not here.
+    efficiently. ``mask.npy`` is always fetched -- whether it's applied is
+    decided in :func:`embed_batch` via ``cfg.apply_mask``, not here.
 
     A non-brace ``shard_pattern`` (no ``{``) is expanded via ``glob.glob``
     first -- see the module docstring for why: ``webdataset``'s own URL
@@ -426,8 +424,8 @@ def embed_batch(
     First selects/reorders ``cfg.channels`` out of the crop's full channel
     axis (a crop may carry more channels than the model should see -- e.g.
     multiple imaging cycles, per dataset.py's cycle-major flattening), then
-    per-channel-optionally applies the shared cell mask
-    (``cfg.channel_apply_mask``), then branches on the loaded model's
+    optionally applies the shared cell mask to all of them
+    (``cfg.apply_mask``), then branches on the loaded model's
     *actual* ``patch_embed.in_chans`` (not a config flag) --
     ``load_cell_dino()`` sets this from whatever the checkpoint's own
     ``patch_embed.proj.weight`` says, since not every real Cell-DINO
@@ -458,13 +456,12 @@ def embed_batch(
         Shape ``(B, crop_size, crop_size)``, ``uint8`` label mask --
         nonzero where a pixel belongs to the target cell. This pipeline's
         data model has exactly one shared mask per cell (not one per
-        channel), so this same tensor is what ``cfg.channel_apply_mask``
-        selectively applies to each selected channel. Only read at all
-        when at least one entry of
-        ``cfg.channel_apply_mask`` is ``True``.
+        channel), so this same tensor is what ``cfg.apply_mask`` applies to
+        every selected channel. Only read at all when ``cfg.apply_mask`` is
+        ``True``.
     cfg : EmbedCellsConfig
-        Supplies ``channels``, ``channel_apply_mask``, and (bag-of-channels
-        mode only) ``channel_pool``.
+        Supplies ``channels``, ``apply_mask``, and (bag-of-channels mode
+        only) ``channel_pool``.
 
     Returns
     -------
@@ -475,17 +472,10 @@ def embed_batch(
     Raises
     ------
     ValueError
-        If ``cfg.channels``/``cfg.channel_apply_mask`` don't match 1:1, if
-        ``cfg.channels`` has an index out of range for the crop, if
+        If ``cfg.channels`` has an index out of range for the crop, if
         ``cfg.channel_pool`` isn't recognized, or if the model expects a
         fixed channel count ``cfg.channels`` doesn't provide.
     """
-    if len(cfg.channel_apply_mask) != len(cfg.channels):
-        raise ValueError(
-            f"cfg.channel_apply_mask has {len(cfg.channel_apply_mask)} "
-            f"entries but cfg.channels selects {len(cfg.channels)} "
-            "channel(s) -- must be the same length, in the same order"
-        )
     if any(idx < 0 or idx >= crops.shape[1] for idx in cfg.channels):
         raise ValueError(
             f"cfg.channels={cfg.channels} out of range for a crop with "
@@ -496,15 +486,12 @@ def embed_batch(
     crops = crops.to(device=device, dtype=torch.float32)
     crops = crops[:, cfg.channels, :, :]  # select/reorder the configured channels
 
-    if any(cfg.channel_apply_mask):
+    if cfg.apply_mask:
         masks = masks.to(device=device)
-        mask_bin = (masks > 0).unsqueeze(1)  # (B, 1, H, W)
-        apply = torch.tensor(
-            cfg.channel_apply_mask, dtype=torch.bool, device=device
-        ).view(1, -1, 1, 1)
-        # zero every pixel not belonging to this cell, but only on the
-        # channels cfg.channel_apply_mask actually flags
-        crops = torch.where(apply, crops * mask_bin, crops)
+        # zero every pixel not belonging to this cell, on every selected
+        # channel -- one shared mask per cell, broadcast over the channel
+        # axis, since there is no per-channel mask to choose between
+        crops = crops * (masks > 0).unsqueeze(1)  # (B, 1, H, W)
 
     b, c, h, w = crops.shape
     in_chans = model.patch_embed.in_chans
@@ -557,7 +544,7 @@ def main(cfg: DictConfig) -> None:
             checkpoint_path=/data/channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth \\
             device=cpu \\
             'channels=[0,1,2,3]' \\
-            'channel_apply_mask=[true,true,true,true]' \\
+            apply_mask=true \\
             random_seed=0
     """
     embed_cfg: EmbedCellsConfig = OmegaConf.to_object(cfg)

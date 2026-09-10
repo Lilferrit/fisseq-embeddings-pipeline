@@ -23,7 +23,7 @@ Extends the [common config fields](#common-config-fields) below.
 | `patch_size` | `16` | ViT patch size. |
 | `crop_size` | `224` | Expected crop size -- must match `BUILD_DATASET`'s `window`. Only a fallback for model construction; doesn't constrain what crop size can actually be embedded. |
 | `channels` | `[0, 1, 2, 3]` | Which of the crop's channel indices to feed into the model, in order. |
-| `channel_apply_mask` | `[true, true, true, true]` | One entry per `channels` entry: whether that selected channel gets `mask.npy`-based background zeroing before embedding. |
+| `apply_mask` | `true` | Whether `mask.npy`-based background zeroing is applied before embedding -- to every selected channel, or to none. A single flag because there is only ever one mask per cell to apply. |
 | `channel_pool` | `"mean"` | How per-channel CLS embeddings are pooled (`"mean"` or `"max"`) -- only consulted for a bag-of-channels model. |
 | `device` | `"cuda"` | torch device string. |
 | `batch_size` | `256` | Cells per dataloader batch. |
@@ -47,7 +47,7 @@ uv run python -m fisseq_embeddings_pipeline.embed \
     checkpoint_path=/path/to/checkpoint.pth \
     device=cpu \
     'channels=[0,1,2,3]' \
-    'channel_apply_mask=[true,true,true,true]' \
+    apply_mask=true \
     random_seed=0
 ```
 

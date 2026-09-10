@@ -12,6 +12,19 @@ pooling of the cell-level embeddings via one or more of:
 - **`AUROC`** -- per-group AUROC against the synonymous reference
   distribution (`P(variant > reference) + 0.5 * P(variant == reference)`,
   not symmetrized to `[0.5, 1]`, so the sign of separation is preserved).
+- **`KSnegLogP`** / **`AUROCnegLogP`** -- `-log10(p)` for those same two
+  statistics: evidence strength against "this variant is drawn from the
+  reference distribution" rather than effect size, so larger means more
+  significant. Both are closed-form asymptotic approximations (the
+  classical limiting Kolmogorov distribution, and the tie-corrected
+  normal approximation to Mann-Whitney U) computed entirely in log space,
+  which is what keeps the most-significant hits finite instead of
+  underflowing to `-inf`. Two caveats: they are **raw, uncorrected**
+  per-(variant, dimension) p-values with no multiple-testing correction,
+  and they are imprecise near `p = 1` (`-log10(p)` near 0) -- don't read
+  precision into small values. Both cost meaningfully more than their
+  base statistic (~5.6x for KS, ~2.9x for AUROC), so neither is in the
+  default `aggregate_methods`; opt in explicitly.
 
 Every aggregator, including mean/median, excludes control (synonymous,
 untagged) rows before grouping by variant -- required structurally for
@@ -21,7 +34,7 @@ unaffected (never classified as synonymous) -- only genuinely-synonymous
 variant labels drop out of the per-variant output, since they exist only
 to define the reference baseline.
 
-When `aggregators` is exactly `["median"]` (the default), output embedding
+When `aggregators` is exactly `["median"]`, output embedding
 columns are bare `emb_0000..emb_{D-1}`; any other selection (multiple
 methods, or a single non-median method) suffixes each column by its
 aggregator (`emb_0000_mean`, `emb_0000_KS`, ...).
@@ -36,11 +49,11 @@ Extends the [common config fields](#common-config-fields) below.
 | `filtered_keys_file` | **required** | Path to `FILTER_EMBEDDINGS`' `filtered_keys.parquet`. |
 | `normalizer_file` | **required** | Path to `FILTER_EMBEDDINGS`' `normalizer.parquet`. |
 | `label_column` | `"meta_aa_changes"` | Name of the variant label column. |
-| `aggregators` | `["median"]` | One or more of `"mean"`, `"median"`, `"KS"`, `"AUROC"`. |
+| `aggregators` | `["median", "KS", "AUROC"]` | One or more of `"mean"`, `"median"`, `"KS"`, `"AUROC"`, `"KSnegLogP"`, `"AUROCnegLogP"`. |
 
 ## Output file
 
-`aggregate.parquet` -- one row per non-control variant. With the default
+`aggregate.parquet` -- one row per non-control variant. With
 `aggregators=["median"]`: `emb_0000..emb_{D-1}` (variant-level,
 median-pooled and synonymous-corrected) plus `meta_num_cells`,
 `meta_barcode_num_unique`, etc.

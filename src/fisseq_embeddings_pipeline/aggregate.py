@@ -1,15 +1,25 @@
 """AGGREGATE_EMBEDDINGS.
 
 Adapted from fisseq-data-pipeline's aggregate.py, generalized to support any
-combination of mean, median, KS, and AUROC aggregation -- mirroring
-fisseq-data-pipeline's BaseAggregator/ReferenceBasedAggregator class
-hierarchy (vendored here, trimmed down: no per_barcode, no block_list, no
-WT-null-bootstrap null_statistic_transform/null_comparison_statistic
-machinery -- per-dimension reproducibility filtering doesn't obviously
-translate to dense, non-interpretable embedding dimensions the way it does
-to named morphological features, and MAD/std/signedKS/QQ/*negLogP aren't
-needed here; add another BaseAggregator subclass + a _AGGREGATORS entry if
-one of those is ever needed later).
+combination of mean, median, KS, AUROC, KSnegLogP and AUROCnegLogP
+aggregation -- mirroring fisseq-data-pipeline's BaseAggregator/
+ReferenceBasedAggregator class hierarchy (vendored here, trimmed down: no
+per_barcode, no block_list, no WT-null-bootstrap
+null_statistic_transform/null_comparison_statistic machinery --
+per-dimension reproducibility filtering doesn't obviously translate to
+dense, non-interpretable embedding dimensions the way it does to named
+morphological features, and MAD/std/signedKS/QQ aren't needed here; add
+another BaseAggregator subclass + a _AGGREGATORS entry if one of those is
+ever needed later).
+
+The two ``*negLogP`` aggregators report ``-log10(p)`` for the same KS and
+AUROC statistics their parent classes compute -- evidence strength rather
+than effect size. Both are closed-form asymptotic approximations (no
+permutation, no resampling, so no seed), and both are registered but
+deliberately left out of ``params.aggregate_methods``' default: they cost
+~5.6x and ~2.9x their base statistic respectively. Neither applies any
+multiple-testing correction -- these are raw per-(variant, dimension)
+p-values, and this pipeline aggregates over a great many dimensions.
 
 Every aggregator, including mean/median, excludes control (synonymous,
 untagged) rows before grouping by variant -- matching fisseq-data-pipeline's
@@ -49,11 +59,13 @@ including AGGREGATE_EMBEDDINGS' own new default, ``("median", "KS",
 import abc
 import dataclasses
 import logging
+import math
 import pathlib
 from collections import Counter
 from typing import ClassVar, List, Optional, Sequence
 
 import hydra
+import numpy as np
 import polars as pl
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, DictConfig, OmegaConf
@@ -336,6 +348,118 @@ class KSAggregator(ReferenceBasedAggregator):
         return result.alias(alias)
 
 
+class KSNegLogPValueAggregator(KSAggregator):
+    """
+    Computes ``-log10(p)`` of the two-sample Kolmogorov-Smirnov statistic
+    against the reference distribution, for each embedding dimension.
+
+    Reports evidence strength against the null hypothesis "this variant
+    group's values are drawn from the same distribution as the reference
+    control" -- larger values mean more significant departures. Reuses the
+    exact same KS D-statistic as :class:`KSAggregator` (via
+    :meth:`KSAggregator._ks_stat_expr`) rather than recomputing it; only
+    the D -> p-value conversion is new.
+
+    The p-value comes from the asymptotic (large-sample / "limiting")
+    two-sided Kolmogorov distribution -- the classical closed form
+    ``Q(x) = 2 * sum_{k=1}^inf (-1)^(k-1) exp(-2 k^2 x^2)`` with
+    ``x = D * sqrt(n_e)``, ``n_e = n_group * n_ref / (n_group + n_ref)``
+    -- not an exact finite-sample distribution. Same conceptual caveat as
+    scipy's ``ks_2samp(..., mode='asymp')``, and appropriate here given
+    the per-variant cell counts this pipeline works with. Numerically
+    this is the classical limiting distribution (equivalent to
+    ``scipy.stats.kstwobign.sf(D * sqrt(n_e))``), which is *not* the same
+    number as scipy's own ``kstwo.sf``-based asymp p-value
+    (``ks_2samp``'s default 'asymp' mode uses a more refined
+    finite-sample algorithm from Marsaglia et al. that can differ by tens
+    of percent in ``p`` even at n in the hundreds, since the classical KS
+    limit theorem converges slowly) -- see tests/unit/test_aggregate.py
+    for a direct comparison of the two.
+
+    The truncated alternating series is reliable in the significant/
+    large-D regime this aggregator exists to rank variants by, but is
+    numerically imprecise very close to D=0 (p near 1, ``-log10(p)`` near
+    0). Not a problem in practice -- near-null variants aren't the ones
+    being ranked by this statistic -- but don't read precision into
+    values near 0.
+
+    Costs roughly 5.6x the base :class:`KSAggregator`'s time and ~134MB
+    additional peak RSS (measured in fisseq-data-pipeline, 300 labels x
+    300 features x 30 cells/group), dominated by the ``k_terms``-wide
+    logsumexp series evaluated per (label, feature) pair. That is why
+    this is not in ``params.aggregate_methods``' default -- opt in
+    explicitly. On embedding dimensions (many more columns than named
+    CellProfiler features) budget accordingly; ``k_terms`` is exposed
+    below if it ever needs lowering.
+    """
+
+    _stat_suffix = "_KSnegLogP"
+
+    @staticmethod
+    def _neg_log10_kolmogorov_pvalue_expr(
+        d: pl.Expr, n_e: pl.Expr, k_terms: int = 100
+    ) -> pl.Expr:
+        """
+        ``-log10(p)`` for the two-sided asymptotic KS p-value, computed
+        via logsumexp over the alternating Kolmogorov series to stay
+        finite for small p (large ``D * sqrt(n_e)``), where naively
+        summing ``exp(...)`` terms in linear space underflows to exactly
+        0.0 and produces ``-log10(0)`` = null/inf well before the true
+        p-value is small enough to stop mattering for ranking hits.
+
+        Writing ``S = sum_{k=1}^{k_terms} (-1)^(k-1) exp(-2 k^2 n_e D^2)``
+        and ``m`` for the k=1 term's exponent (the largest, i.e. least
+        negative, since the exponent is monotonically decreasing in k):
+        every term factors as ``sign_k * exp(m) * exp(exponent_k - m)``,
+        so ``S = exp(m) * R`` where
+        ``R = sum_k sign_k * exp(exponent_k - m)``. Each
+        ``exp(exponent_k - m)`` is bounded in ``(0, 1]`` (since
+        ``exponent_k - m <= 0``), so ``R`` is a well-conditioned O(1) sum
+        safe to compute in linear space, while ``m`` itself -- the only
+        part that can be arbitrarily large in magnitude -- is never
+        exponentiated: ``log10(p) = log10(2) + m / ln(10) + log10(R)`` is
+        computed directly from ``m`` and ``log10(R)``, both finite.
+
+        Validated against ``scipy.stats.kstwobign.sf(D * sqrt(n_e))`` in
+        tests/unit/test_aggregate.py.
+        """
+        ks = np.arange(1, k_terms + 1, dtype=np.float64)
+        # Compile-time literals (not per-row): k^2 and the alternating
+        # sign for k=1..k_terms, each a 1-row List(Float64) that
+        # broadcasts row-wise against the N-row `m`-derived exprs below.
+        k_sq = pl.lit(pl.Series([(ks**2).tolist()]))
+        sign = pl.lit(pl.Series([((-1.0) ** (ks - 1)).tolist()]))
+
+        m = -2.0 * n_e * d.pow(2)  # k=1 exponent; largest (least negative)
+        exponents = k_sq * m
+        rel = exponents - m  # <= 0 elementwise, safe to exponentiate
+        r_terms = sign * rel.list.eval(pl.element().exp())
+        big_r = r_terms.list.sum()
+
+        ln10 = np.log(10.0)
+        neg_log10_p = -(np.log10(2.0) + m / ln10 + big_r.log10())
+        # Clamps float noise near D~0 (p slightly > 1) and the degenerate
+        # D=0 case, where the alternating series is a near-zero
+        # oscillation (Grandi's-series-like) rather than a clean sum --
+        # -log10(p) can never legitimately be negative (p <= 1 always).
+        return neg_log10_p.clip(lower_bound=0.0)
+
+    def _feature_expr(self, feat: str) -> pl.Expr:
+        alias = f"{feat}{self._stat_suffix}"
+        ks_stat, n_group, n_ref = self._ks_stat_expr(feat)
+        n_e = n_group * n_ref / (n_group + n_ref)
+        neg_log10_p = self._neg_log10_kolmogorov_pvalue_expr(ks_stat, n_e)
+
+        result = (
+            pl.when(n_ref == 0)
+            .then(None)
+            .when(n_group == 0)
+            .then(None)
+            .otherwise(neg_log10_p)
+        )
+        return result.alias(alias)
+
+
 class AUROCAggregator(ReferenceBasedAggregator):
     """
     Computes per-group AUROC against the reference distribution for each
@@ -396,14 +520,219 @@ class AUROCAggregator(ReferenceBasedAggregator):
         return result.alias(alias)
 
 
+class AUROCNegLogPValueAggregator(AUROCAggregator):
+    """
+    Computes ``-log10(p)`` of the AUROC / Mann-Whitney U statistic against
+    the reference distribution, for each embedding dimension.
+
+    Reports evidence strength against the null hypothesis "this variant
+    group's values are drawn from the same distribution as the reference
+    control" -- larger values mean more significant departures. Reuses the
+    exact same rank-sum/U statistic as :class:`AUROCAggregator` (via
+    :meth:`AUROCAggregator._auroc_u_expr` and
+    :meth:`AUROCAggregator._auroc_ranks_expr`) rather than recomputing
+    ranks or U independently; only the U -> p-value conversion is new.
+
+    The p-value comes from the standard asymptotic-normal approximation
+    to the Mann-Whitney U distribution with a tie correction
+    (``tie_term = sum over tie-groups of (t^3 - t)``, ``t`` = each tied
+    value's group size)::
+
+        N = n_group + n_ref
+        mu_U = n_group * n_ref / 2
+        sigma2_U = (n_group * n_ref / 12) * ((N + 1) - tie_term / (N * (N - 1)))
+        z = (U - mu_U) / sqrt(sigma2_U)
+        p = 2 * (1 - Phi(|z|))
+
+    Deliberately **no continuity correction** (unlike
+    ``scipy.stats.mannwhitneyu``'s default ``use_continuity=True``) --
+    this is the plain textbook asymptotic-normal formula above.
+    tests/unit/test_aggregate.py compares against
+    ``mannwhitneyu(..., use_continuity=False)`` for agreement; the
+    continuity-corrected default differs by a fixed 0.5 shift toward
+    ``mu_U``, which matters more for small samples than the per-variant
+    cell counts this pipeline works with.
+
+    Polars has no built-in normal CDF, so ``Phi`` comes from a rational
+    approximation to ``erfc`` -- see :meth:`_log_erfc_expr`. Critically,
+    the final p-value stays in **log space end to end** (see
+    :meth:`_neg_log10_two_sided_normal_pvalue_expr`): naively computing
+    ``Phi(z)`` in linear space and then ``-log10(2*(1-Phi(|z|)))``
+    underflows to exactly 0.0 (-> null/-inf) for exactly the
+    most-significant, large-|z| hits this aggregator exists to rank.
+
+    Costs roughly 2.9x the base :class:`AUROCAggregator`'s time (measured
+    in fisseq-data-pipeline, 300 labels x 300 features x 30 cells/group),
+    from the extra :meth:`_prep_exprs` pass for the tie-correction term;
+    no measurable additional peak RSS at that scale. Not in
+    ``params.aggregate_methods``' default -- opt in explicitly.
+    """
+
+    _stat_suffix = "_AUROCnegLogP"
+
+    @staticmethod
+    def _u_col(feat: str) -> str:
+        return f"__aurocnlp_u__{feat}"
+
+    @staticmethod
+    def _ngroup_col(feat: str) -> str:
+        return f"__aurocnlp_ngroup__{feat}"
+
+    @staticmethod
+    def _nref_col(feat: str) -> str:
+        return f"__aurocnlp_nref__{feat}"
+
+    @staticmethod
+    def _tieterm_col(feat: str) -> str:
+        return f"__aurocnlp_tieterm__{feat}"
+
+    def _prep_exprs(self, feat: str) -> list[pl.Expr]:
+        """
+        Materializes, once per dimension, the quantities
+        :meth:`_feature_expr` needs more than once downstream (``u``,
+        ``n_group``, ``n_ref``, ``tie_term``) -- see
+        :meth:`BaseAggregator._prep_exprs` for why this hoisting is
+        required for performance, not just style (Polars does not CSE
+        list subexpressions inside one ``.select()``). This is the first
+        aggregator in this repo to use that hook.
+
+        ``tie_term`` uses the identity
+        ``sum_groups(t^3 - t) == sum_elements(tie_size(x_i)^2 - 1)``,
+        computed natively from per-element min/max rank without any
+        groupby or ``value_counts`` inside ``list.eval``: a tied run's
+        every element shares the same ``[rank_min, rank_max]`` window, so
+        ``tie_size = rank_max - rank_min + 1`` recovers each element's
+        tie-group size directly. tests/unit/test_aggregate.py verifies
+        the identity against a ``collections.Counter`` reference.
+        """
+        u, n_group, n_ref = self._auroc_u_expr(feat)
+        combined, _ranks, _n_group, _n_ref = self._auroc_ranks_expr(feat)
+        rank_min = combined.list.eval(pl.element().rank(method="min"))
+        rank_max = combined.list.eval(pl.element().rank(method="max"))
+        # rank(...) is UInt32-typed; cast to Float64 first (elementwise
+        # multiply, not `**`/`pow`, since Polars' `pow` doesn't support a
+        # List-typed base).
+        tie_size = (rank_max - rank_min + 1).list.eval(pl.element().cast(pl.Float64))
+        tie_term = (tie_size * tie_size - 1).list.sum()
+        return [
+            u.alias(self._u_col(feat)),
+            n_group.alias(self._ngroup_col(feat)),
+            n_ref.alias(self._nref_col(feat)),
+            tie_term.alias(self._tieterm_col(feat)),
+        ]
+
+    @staticmethod
+    def _log_erfc_expr(x: pl.Expr) -> pl.Expr:
+        """
+        Natural log of ``erfc(x)`` for ``x >= 0``, via the Numerical
+        Recipes rational/Chebyshev approximation (Press, Teukolsky,
+        Vetterling & Flannery, *Numerical Recipes*, 3rd ed., S6.2.2,
+        "erfcc"; documented fractional error < 1.2e-7 across the entire
+        domain -- not just a tail expansion). That bound is why this
+        module's p-value tests use ~1e-5/1e-6 tolerances rather than
+        1e-9.
+
+        Kept in log space throughout -- never forms ``erfc(x)`` or
+        ``exp(-x^2)`` directly -- because for the ``|z| > 5`` tails this
+        is meant to serve, ``exp(-x^2)`` itself underflows to 0.0 in
+        float64 (around ``x > ~26``) long before the true p-value stops
+        mattering for ranking hits.
+        """
+        t = 1.0 / (1.0 + 0.5 * x)
+        poly = -1.26551223 + t * (
+            1.00002368
+            + t
+            * (
+                0.37409196
+                + t
+                * (
+                    0.09678418
+                    + t
+                    * (
+                        -0.18628806
+                        + t
+                        * (
+                            0.27886807
+                            + t
+                            * (
+                                -1.13520398
+                                + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277))
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        return t.log() + (-x.pow(2) + poly)
+
+    @staticmethod
+    def _standard_normal_cdf_expr(z: pl.Expr) -> pl.Expr:
+        """
+        Rational approximation to ``Phi(z)``, built from
+        :meth:`_log_erfc_expr` (see there for the citation and peak error
+        bound). Provided for standalone testing/verification against
+        ``scipy.stats.norm.cdf`` --
+        :meth:`_neg_log10_two_sided_normal_pvalue_expr` does not call it;
+        that stays in log space end to end instead.
+        """
+        a = z.abs() / math.sqrt(2.0)
+        log_erfc_a = AUROCNegLogPValueAggregator._log_erfc_expr(a)
+        erfc_a = log_erfc_a.exp()
+        erfc_z_over_sqrt2 = pl.when(z >= 0).then(erfc_a).otherwise(2.0 - erfc_a)
+        return 1.0 - 0.5 * erfc_z_over_sqrt2
+
+    @staticmethod
+    def _neg_log10_two_sided_normal_pvalue_expr(z: pl.Expr) -> pl.Expr:
+        """
+        ``-log10(2 * (1 - Phi(|z|))) == -log10(erfc(|z| / sqrt(2)))``,
+        computed by staying in log space via :meth:`_log_erfc_expr` end
+        to end -- never forming ``Phi(z)`` or ``1 - Phi(z)`` in linear
+        space, which is exactly what underflows to 0.0 (-> null/-inf) for
+        the large-``|z|`` hits this aggregator ranks by most.
+        """
+        a = z.abs() / math.sqrt(2.0)
+        log_erfc_a = AUROCNegLogPValueAggregator._log_erfc_expr(a)
+        neg_log10_p = -log_erfc_a / math.log(10.0)
+        # -log10(p) can never legitimately be negative (p <= 1 always);
+        # this guards float noise near z~0 (p slightly > 1).
+        return neg_log10_p.clip(lower_bound=0.0)
+
+    def _feature_expr(self, feat: str) -> pl.Expr:
+        alias = f"{feat}{self._stat_suffix}"
+        u = pl.col(self._u_col(feat))
+        n_group = pl.col(self._ngroup_col(feat))
+        n_ref = pl.col(self._nref_col(feat))
+        tie_term = pl.col(self._tieterm_col(feat))
+
+        n = n_group + n_ref
+        mu_u = n_group * n_ref / 2.0
+        sigma2_u = (n_group * n_ref / 12.0) * ((n + 1) - tie_term / (n * (n - 1)))
+        z = (u - mu_u) / sigma2_u.sqrt()
+        neg_log10_p = self._neg_log10_two_sided_normal_pvalue_expr(z)
+
+        result = (
+            pl.when(n_ref == 0)
+            .then(None)
+            .when(n_group == 0)
+            .then(None)
+            .otherwise(neg_log10_p)
+        )
+        return result.alias(alias)
+
+
 # Named aggregation methods this pipeline supports -- matches
-# fisseq-data-pipeline's own aggregator-name dispatch (a subset: mean,
-# median, KS, AUROC only, per this module's docstring).
+# fisseq-data-pipeline's own aggregator-name dispatch (a subset: no
+# MAD/std/signedKS/QQ, per this module's docstring). The two *negLogP
+# entries are registered but deliberately absent from
+# params.aggregate_methods' default: they cost ~5.6x (KS) and ~2.9x
+# (AUROC) their base statistic, so they're an explicit opt-in.
 _AGGREGATORS: dict[str, type[BaseAggregator]] = {
     "mean": MeanAggregator,
     "median": MedianAggregator,
     "KS": KSAggregator,
     "AUROC": AUROCAggregator,
+    "KSnegLogP": KSNegLogPValueAggregator,
+    "AUROCnegLogP": AUROCNegLogPValueAggregator,
 }
 
 
@@ -436,7 +765,8 @@ def aggregate_embeddings(
         Name of the column identifying variant labels.
     aggregators : Sequence[str]
         Aggregation method(s) to run, in the given order. One or more of
-        ``"mean"``, ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to
+        ``"mean"``, ``"median"``, ``"KS"``, ``"AUROC"``, ``"KSnegLogP"``,
+        ``"AUROCnegLogP"``. Defaults to
         ``("median",)``.
     feature_selector : pl.Expr
         Polars selector identifying feature columns, forwarded to each
@@ -518,9 +848,12 @@ class AggregateEmbeddingsConfig(AppConfig):
     label_column : str
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     aggregators : List[str]
-        Aggregation method(s) to run, in order. One or more of ``"mean"``,
-        ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to
-        ``["median", "KS", "AUROC"]`` -- note this means output columns are
+        Aggregation method(s) to run, in order. One or more of
+        ``"mean"``, ``"median"``, ``"KS"``, ``"AUROC"``, ``"KSnegLogP"``,
+        ``"AUROCnegLogP"``. Defaults to
+        ``["median", "KS", "AUROC"]`` (the two ``*negLogP`` methods are
+        available but off by default -- see the module docstring for their
+        cost) -- note this means output columns are
         suffixed by method (``emb_0000_median``, ``emb_0000_KS``,
         ``emb_0000_AUROC``, ...) by default; only the exact single-element
         selection ``["median"]`` produces bare ``emb_0000..emb_{D-1}``

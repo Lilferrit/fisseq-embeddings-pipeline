@@ -124,6 +124,7 @@ see **CI** below for what runs where.
 uv sync --group dev
 uv run pytest tests/unit                      # fast, no nextflow/GPU needed
 uv run pytest tests/integration                # needs `nextflow` on PATH
+uv run pytest tests/integration --container    # real-starcall instead; needs docker + testing_data/
 uv run ruff check --fix . && uv run ruff format .
 uv run pre-commit run --all-files
 ```
@@ -144,12 +145,16 @@ actual pretrained-checkpoint output quality — at the cost of a few
 seconds of real (CPU) compute per run. No GPU or real checkpoint is
 needed to run `tests/integration` anywhere, including CI.
 
-`tests/integration/test_integration_real_starcall.py` is the one
-exception to all of the above: it invokes a **real** `snakemake` run
-against real starcall-workflow data (every other test fakes that step
-with a stub `snakemake` on PATH), through a real build of the root
-Dockerfile. Opt-in only — self-skips unless `testing_data/lmna_t3/` has
-been populated (`uv run python scripts/prepare_real_starcall_test_data.py`,
+`uv run pytest tests/integration --container` is the one exception to
+all of the above. The integration suite has two mutually exclusive modes
+(see `tests/integration/conftest.py`): bare `pytest tests/integration`
+runs the 16 synthetic `-profile local` tests, and `--container` instead
+runs only `test_real_starcall_pipeline_produces_cell_images`, which
+invokes a **real** `snakemake` run against real starcall-workflow data
+(every other test fakes that step with a stub `snakemake` on PATH),
+through a real build of the root Dockerfile. Opt-in only — even with
+`--container` it self-skips unless `testing_data/lmna_t3/` has been
+populated (`uv run python scripts/prepare_real_starcall_test_data.py`,
 downloads ~6.3GB) and `docker`/`nextflow` are on PATH; not run in CI.
 Needs a Docker daemon that can bind-mount this repo's own temp
 directories — Docker Desktop's file-sharing allowlist can silently block

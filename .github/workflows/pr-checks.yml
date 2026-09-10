@@ -54,8 +54,10 @@ jobs:
 
       # The integration suite drives the real Nextflow pipeline
       # (tests/integration/test_integration.py, -profile local -- no
-      # Docker image needed); without nextflow on PATH it's skipped
-      # entirely (shutil.which), but install it so the suite actually
+      # Docker image needed; the containerized real-starcall test is
+      # skipped unless --container is passed, which it isn't here);
+      # without nextflow on PATH it's skipped
+      # entirely (conftest.py's collection hook), but install it so the suite actually
       # runs, not just no-ops green.
       - name: Set up Java
         uses: actions/setup-java@v4

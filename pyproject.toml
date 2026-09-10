@@ -37,6 +37,12 @@ dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration"]
+markers = [
+    # tests/integration/conftest.py's mode switch: marked tests run only
+    # under `pytest tests/integration --container`, unmarked ones only
+    # without it. See that file for why the two are mutually exclusive.
+    "container: containerized real-starcall integration test (opt-in, needs docker + testing_data/)",
+]
 
 [tool.ruff]
 # ruff>=0.16 formats Python code fences embedded in Markdown by default,
@@ -71,4 +77,10 @@ dev = [
     "pre-commit>=4.5.1",
     "pytest>=8.4.1",
     "ruff>=0.15.12",
+    # Ground-truth oracle for tests/unit/test_aggregate.py's p-value
+    # aggregators (kstwobign.sf / mannwhitneyu / norm.cdf / erfc). Not a
+    # runtime dependency -- KSnegLogP/AUROCnegLogP are pure Polars. It
+    # already resolved transitively via scikit-learn, but a direct import
+    # deserves a direct declaration.
+    "scipy>=1.16.1",
 ]

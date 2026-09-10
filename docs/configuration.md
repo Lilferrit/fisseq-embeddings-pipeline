@@ -94,7 +94,7 @@ time; see `params.yaml`'s own comment on this).
 | `cell_dino_patch_size` | `16` | `EMBED_CELLS` |
 | `cell_dino_crop_size` | `224` | `EMBED_CELLS` (must match `BUILD_DATASET`'s per-experiment `window`) |
 | `cell_dino_channels` | `[0, 1, 2, 3]` | `EMBED_CELLS` |
-| `cell_dino_channel_apply_mask` | `[true, true, true, true]` | `EMBED_CELLS` |
+| `cell_dino_apply_mask` | `true` | `EMBED_CELLS` |
 | `cell_dino_channel_pool` | `"mean"` | `EMBED_CELLS` |
 | `cell_dino_device` | `"cuda"` | `EMBED_CELLS` |
 | `cell_dino_batch_size` | `256` | `EMBED_CELLS` |
