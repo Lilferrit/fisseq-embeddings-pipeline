@@ -6,7 +6,8 @@ Thin Hydra entry point reusing aggregate.py's
 directly, passing ``FEATURE_SELECTOR`` (CellProfiler-shaped: exclude
 ``meta_*``) instead of AGGREGATE_EMBEDDINGS' default
 ``EMBEDDING_SELECTOR`` -- see aggregate.py's module docstring for why this
-requires no fork of the mean/median/KS/AUROC Polars implementation.
+requires no fork of the mean/median/KS/AUROC/*negLogP Polars
+implementation.
 
 Unlike AGGREGATE_EMBEDDINGS (whose default is now
 ``["median", "KS", "AUROC"]``), this stage's default stays ``["median"]``
@@ -54,8 +55,9 @@ class AggregateCpFeaturesConfig(AppConfig):
     label_column : str
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     aggregators : List[str]
-        Aggregation method(s) to run, in order. One or more of ``"mean"``,
-        ``"median"``, ``"KS"``, ``"AUROC"``. Defaults to ``["median"]`` --
+        Aggregation method(s) to run, in order. One or more of
+        ``"mean"``, ``"median"``, ``"KS"``, ``"AUROC"``, ``"KSnegLogP"``,
+        ``"AUROCnegLogP"``. Defaults to ``["median"]`` --
         output columns are bare for this exact default; any other
         selection produces suffixed columns (see
         :func:`~fisseq_embeddings_pipeline.aggregate.aggregate_embeddings`).

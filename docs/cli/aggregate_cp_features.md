@@ -4,7 +4,8 @@
 process `AGGREGATE_CP_FEATURES`) is the CellProfiler-feature analog of
 `AGGREGATE_EMBEDDINGS`: it reconstructs the QC-passed, synonymous-corrected
 CellProfiler feature table and computes per-variant pooling via one or
-more of `mean`/`median`/`KS`/`AUROC` -- the same aggregator classes,
+more of `mean`/`median`/`KS`/`AUROC`/`KSnegLogP`/`AUROCnegLogP` -- the
+same aggregator classes,
 called with `feature_selector=FEATURE_SELECTOR` instead of
 `AGGREGATE_EMBEDDINGS`' default `EMBEDDING_SELECTOR` (see
 [aggregate](aggregate.md) for the aggregator semantics themselves, which
@@ -26,7 +27,7 @@ Extends the [common config fields](#common-config-fields) below.
 | `filtered_keys_file` | **required** | Path to `FILTER_CP_FEATURES`' `filtered_keys.parquet`. |
 | `normalizer_file` | **required** | Path to `FILTER_CP_FEATURES`' `normalizer.parquet`. |
 | `label_column` | `"meta_aa_changes"` | Name of the variant label column. |
-| `aggregators` | `["median"]` | One or more of `"mean"`, `"median"`, `"KS"`, `"AUROC"`. |
+| `aggregators` | `["median"]` | One or more of `"mean"`, `"median"`, `"KS"`, `"AUROC"`, `"KSnegLogP"`, `"AUROCnegLogP"`. |
 
 ## Output file
 

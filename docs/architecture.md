@@ -610,6 +610,31 @@ and `::test_load_cell_dino_and_embed_batch_against_real_vitl16_checkpoint`
 (skipped automatically when the checkpoint file isn't present, e.g. in
 CI, since `weights/` is gitignored).
 
+### 5a. Aggregator inventory, and why the p-value ones are opt-in
+
+`aggregate.py` ports six of `fisseq-data-pipeline`'s ten aggregators:
+`mean`, `median`, `KS`, `AUROC`, plus `KSnegLogP`/`AUROCnegLogP`. The last
+two report `-log10(p)` for the same KS D-statistic and Mann-Whitney U
+their parent classes compute -- evidence strength rather than effect size
+-- reusing the parents' `_ks_stat_expr`/`_auroc_u_expr` rather than
+recomputing. Both are closed-form asymptotic approximations (the classical
+limiting Kolmogorov distribution; the tie-corrected normal approximation
+to U), so both are deterministic and need no seed, and both stay in log
+space end to end: computed naively, the most significant hits -- exactly
+the ones worth ranking -- underflow to `-inf`.
+
+They are registered but absent from `params.aggregate_methods`' default,
+because they cost ~5.6x (KS) and ~2.9x (AUROC) their base statistic, which
+matters more here than in the sibling repo: this pipeline aggregates over
+dense embedding dimensions, far more columns than named CellProfiler
+features. Two properties to keep in mind when reading the output: no
+multiple-testing correction is applied (these are raw per-(variant,
+dimension) p-values), and precision degrades near `p = 1`. `MAD`, `std`,
+`signedKS` and `QQ` remain unported; the WT-null bootstrap those
+aggregators feed in the sibling repo has no counterpart here, so the
+sibling's `null_statistic_transform` opt-outs on the two p-value classes
+were dropped rather than ported.
+
 ### 6. Configurable input channels and per-channel masking
 
 `EmbedCellsConfig.channels` (a `list[int]`, default `[0, 1, 2, 3]`)
