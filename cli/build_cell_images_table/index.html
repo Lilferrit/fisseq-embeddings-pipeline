@@ -12,7 +12,7 @@
         <link rel="prev" href="../build_cell_images_enumerate/">
       
       
-        <link rel="next" href="../dataset/">
+        <link rel="next" href="../cell_metadata/">
       
       
         
@@ -765,6 +765,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Metadata (BUILD_CELL_METADATA)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dataset/" class="md-nav__link">
         
   
@@ -1252,6 +1280,34 @@
     
   
     build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cell_metadata
   
 
     
@@ -1810,8 +1866,8 @@
 <h1 id="cell-images-phase-3-build-table-build_cell_images">Cell Images, Phase 3: Build Table (<code>BUILD_CELL_IMAGES</code>)<a class="headerlink" href="#cell-images-phase-3-build-table-build_cell_images" title="Permanent link">&para;</a></h1>
 <p><code>python -m fisseq_embeddings_pipeline.build_cell_images_table</code> is the
 third of <code>BUILD_CELL_IMAGES</code>' three phases (Nextflow process
-<code>BUILD_CELL_IMAGES</code>, <code>modules/local/build_cell_images.nf</code>), run after
-<code>build_cell_images.nf</code>'s own <code>snakemake</code> invocation (phase 2 -- the one
+<code>BUILD_CELL_IMAGES</code>, <code>modules/local/build_cell_images/main.nf</code>), run after
+<code>build_cell_images/main.nf</code>'s own <code>snakemake</code> invocation (phase 2 -- the one
 step needing the <code>ops</code> conda env baked into the root <code>Dockerfile</code>) has
 materialized every tile's segmentation/reads/CellProfiler CSVs.</p>
 <p>It reads <code>manifest</code> (written by phase 1,

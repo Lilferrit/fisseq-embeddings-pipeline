@@ -754,6 +754,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Metadata (BUILD_CELL_METADATA)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dataset/" class="md-nav__link">
         
   
@@ -1241,6 +1269,34 @@
     
   
     build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cell_metadata
   
 
     
@@ -1788,7 +1844,7 @@
 <h1 id="cell-images-phase-1-enumerate-build_cell_images">Cell Images, Phase 1: Enumerate (<code>BUILD_CELL_IMAGES</code>)<a class="headerlink" href="#cell-images-phase-1-enumerate-build_cell_images" title="Permanent link">&para;</a></h1>
 <p><code>python -m fisseq_embeddings_pipeline.build_cell_images_enumerate</code> is the
 first of <code>BUILD_CELL_IMAGES</code>' three phases (Nextflow process
-<code>BUILD_CELL_IMAGES</code>, <code>modules/local/build_cell_images.nf</code>). It resolves
+<code>BUILD_CELL_IMAGES</code>, <code>modules/local/build_cell_images/main.nf</code>). It resolves
 each well's tile grid size (explicit override or auto-detected from
 <code>phenotyping_dir</code>'s own <code>{well}_grid&lt;N&gt;</code> directory naming) and enumerates
 that well's existing tile directories directly against
@@ -1796,19 +1852,22 @@ that well's existing tile directories directly against
 the rest of the stage consumes:</p>
 <ul>
 <li><code>targets_out</code> (<code>targets.txt</code>) -- one Snakemake target file path per
-  line, forcing the whole-tile phenotype image, segmentation mask,
-  segmentation cell table, and sequencing reads table to exist for every
-  discovered tile (plus the CellProfiler CSV, if <code>cp_features</code> is set).
-  <code>build_cell_images.nf</code>'s own <code>snakemake ... $(cat targets.txt)</code> step
-  consumes this.</li>
+  line, forcing the per-tile crop-stack pair (<code>{segmentation_type}_crops_{window}.tif</code> /
+  <code>{segmentation_type}_mask_crops_{window}.tif</code>, produced by
+  <code>make_cell_images_bbox</code> -- see <code>resources/starcall_overrides/</code>), the
+  segmentation cell table, and the sequencing reads table to exist for
+  every discovered tile (plus the CellProfiler CSV, if <code>cp_features</code> is
+  set). <code>build_cell_images/main.nf</code>'s own <code>snakemake ... $(cat targets.txt)</code>
+  step consumes this.</li>
 <li><code>manifest_out</code> (<code>tiles_manifest.csv</code>) -- drives phase 3
-  (<a href="../build_cell_images_table/"><code>build_cell_images_table</code></a>).</li>
+  (<a href="../build_cell_images_table/"><code>build_cell_images_table</code></a>); columns
+  include <code>crops_tif</code>/<code>mask_crops_tif</code>.</li>
 <li><code>symlinks_out</code> (<code>symlinks.txt</code>) -- a <code>relative_path&lt;TAB&gt;absolute_path</code>
-  TSV of just the two per-tile image files, driving <code>build_cell_images.nf</code>'s
-  own symlink-collection loop.</li>
+  TSV of just the two per-tile crop-stack files, driving
+  <code>build_cell_images/main.nf</code>'s own symlink-collection loop.</li>
 </ul>
 <p>This module runs against <code>starcall-workflow</code>'s tree directly -- the only
-place in the pipeline besides <code>build_cell_images.nf</code>'s own <code>snakemake</code>
+place in the pipeline besides <code>build_cell_images/main.nf</code>'s own <code>snakemake</code>
 invocation that does so; see
 <a href="../../architecture/#cell-images-buildcellimages-output-from-starcall-workflow">Architecture</a>.</p>
 <h2 id="config-fields">Config fields<a class="headerlink" href="#config-fields" title="Permanent link">&para;</a></h2>
@@ -1850,7 +1909,12 @@ invocation that does so; see
 <tr>
 <td><code>use_corrected</code></td>
 <td><code>false</code></td>
-<td>Target <code>corrected_pt.tif</code> instead of <code>raw_pt.tif</code>.</td>
+<td>No longer read by this stage's own target/manifest generation -- <code>make_cell_images_bbox</code>'s crop-stack output filename doesn't distinguish raw vs. corrected; that choice is <code>get_phenotyping_pt</code>'s own, driven by the target starcall-workflow project's <code>config.yaml</code> instead. Kept only for config-schema symmetry.</td>
+</tr>
+<tr>
+<td><code>window</code></td>
+<td><strong>required</strong></td>
+<td>Crop size requested from <code>make_cell_images_bbox</code> -- embedded in the requested target filename (<code>{segmentation_type}_crops_{window}.tif</code>). Must match <code>dataset</code>'s own <code>window</code>.</td>
 </tr>
 <tr>
 <td><code>sequencing_reads_params</code></td>
@@ -1895,7 +1959,8 @@ invocation that does so; see
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">phenotyping_dir</span><span class="o">=</span>/data/experiment1/phenotyping<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">sequencing_dir</span><span class="o">=</span>/data/experiment1/sequencing<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="s1">'wells=[well1,well2]'</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">segmentation_type</span><span class="o">=</span>cells
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">segmentation_type</span><span class="o">=</span>cells<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nv">window</span><span class="o">=</span><span class="m">224</span>
 </code></pre></div>
 <h2 id="common-config-fields">Common config fields<a class="headerlink" href="#common-config-fields" title="Permanent link">&para;</a></h2>
 <p>Every CLI tool's config extends <code>AppConfig</code>, which supplies:</p>

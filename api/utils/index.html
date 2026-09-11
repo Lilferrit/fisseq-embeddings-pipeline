@@ -667,6 +667,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Metadata (BUILD_CELL_METADATA)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/dataset/" class="md-nav__link">
         
   
@@ -1159,6 +1187,34 @@
     
   
     build_cell_images_table
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cell_metadata
   
 
     
@@ -1804,6 +1860,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#fisseq_embeddings_pipeline.utils.cell_table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cell_table
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="cell_table">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fisseq_embeddings_pipeline.utils.cell_table.cell_metadata_exprs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cell_metadata_exprs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#fisseq_embeddings_pipeline.utils.batches" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2285,6 +2369,34 @@
     <span class="md-ellipsis">
       
         get_aggregate_meta_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fisseq_embeddings_pipeline.utils.cell_table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cell_table
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="cell_table">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fisseq_embeddings_pipeline.utils.cell_table.cell_metadata_exprs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cell_metadata_exprs
       
     </span>
   </a>
@@ -4169,6 +4281,274 @@ is present in the input.</p>
 <a id="__codelineno-0-68" name="__codelineno-0-68"></a>        <span class="p">)</span>
 <a id="__codelineno-0-69" name="__codelineno-0-69"></a>
 <a id="__codelineno-0-70" name="__codelineno-0-70"></a>    <span class="k">return</span> <span class="n">label_lgb</span><span class="o">.</span><span class="n">agg</span><span class="p">(</span><span class="n">agg_exprs</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-module">
+
+
+
+<h3 id="fisseq_embeddings_pipeline.utils.cell_table" class="doc doc-heading">
+            <span class="doc doc-object-name doc-module-name">fisseq_embeddings_pipeline.utils.cell_table</span>
+
+
+<a href="#fisseq_embeddings_pipeline.utils.cell_table" class="headerlink" title="Permanent link">&para;</a></h3>
+
+    <div class="doc doc-contents first">
+
+        <p>Shared projection of BUILD_CELL_IMAGES' <code>cell_table.parquet</code>.</p>
+<p><code>cell_table.parquet</code> (built by <code>build_cell_images_table.py</code>) carries
+starcall-workflow's own, unprefixed column names (<code>well</code>, <code>tile</code>,
+<code>tile_cell_index</code>, plus whatever the aux table calls the barcode/
+amino-acid-changes/edit-distance columns). Three stages need the same
+seven-column <code>meta_*</code> projection out of it -- BUILD_CELL_METADATA
+(<code>cell_metadata.py</code>, the QC_FILTER input), BUILD_CP_FEATURES
+(<code>cp_features.py</code>, alongside its CellProfiler columns), and
+BUILD_DATASET (<code>dataset.py</code>, as each cell's <code>meta.json</code>) -- and those
+seven columns are exactly <code>filter.py</code>'s <code>JOIN_KEYS</code> plus the three
+genotype fields <code>qcfilter.py</code> thresholds on. They must not drift, so
+the projection lives here once rather than being restated per stage.</p>
+<p>Not to be confused with <code>utils/metadata.py</code>, which is the vendored
+<em>per-variant</em> aggregation helper (<code>get_aggregate_meta_data</code>).</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="fisseq_embeddings_pipeline.utils.cell_table.cell_metadata_exprs" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">cell_metadata_exprs</span>
+
+
+<a href="#fisseq_embeddings_pipeline.utils.cell_table.cell_metadata_exprs" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">cell_metadata_exprs</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">batch_stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">barcode_col_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">aa_changes_col_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">edit_distance_col_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">pl</span><span class="o">.</span><span class="n">Expr</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Build the <code>meta_*</code> projection expressions for a cell table.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>batch_stem</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>This experiment's identifier, written into every row as
+<code>meta_batch</code> -- a literal, since <code>cell_table.parquet</code> covers
+exactly one experiment and doesn't carry it as a column.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>barcode_col_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Name of the barcode column in the cell table (e.g. <code>"upBarcode"</code>).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>aa_changes_col_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Name of the amino-acid-changes column (e.g. <code>"aaChanges"</code>).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>edit_distance_col_name</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Name of the edit-distance column (e.g. <code>"editDistance"</code>).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<span title="polars.Expr">Expr</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Seven expressions, in <code>CELL_METADATA_SCHEMA</code> order, suitable for
+a <code>select()</code> against <code>cell_table.parquet</code> -- optionally
+followed by further expressions (BUILD_CP_FEATURES appends its
+CellProfiler feature columns).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src/fisseq_embeddings_pipeline/utils/cell_table.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-44">44</a></span>
+<span class="normal"><a href="#__codelineno-0-45">45</a></span>
+<span class="normal"><a href="#__codelineno-0-46">46</a></span>
+<span class="normal"><a href="#__codelineno-0-47">47</a></span>
+<span class="normal"><a href="#__codelineno-0-48">48</a></span>
+<span class="normal"><a href="#__codelineno-0-49">49</a></span>
+<span class="normal"><a href="#__codelineno-0-50">50</a></span>
+<span class="normal"><a href="#__codelineno-0-51">51</a></span>
+<span class="normal"><a href="#__codelineno-0-52">52</a></span>
+<span class="normal"><a href="#__codelineno-0-53">53</a></span>
+<span class="normal"><a href="#__codelineno-0-54">54</a></span>
+<span class="normal"><a href="#__codelineno-0-55">55</a></span>
+<span class="normal"><a href="#__codelineno-0-56">56</a></span>
+<span class="normal"><a href="#__codelineno-0-57">57</a></span>
+<span class="normal"><a href="#__codelineno-0-58">58</a></span>
+<span class="normal"><a href="#__codelineno-0-59">59</a></span>
+<span class="normal"><a href="#__codelineno-0-60">60</a></span>
+<span class="normal"><a href="#__codelineno-0-61">61</a></span>
+<span class="normal"><a href="#__codelineno-0-62">62</a></span>
+<span class="normal"><a href="#__codelineno-0-63">63</a></span>
+<span class="normal"><a href="#__codelineno-0-64">64</a></span>
+<span class="normal"><a href="#__codelineno-0-65">65</a></span>
+<span class="normal"><a href="#__codelineno-0-66">66</a></span>
+<span class="normal"><a href="#__codelineno-0-67">67</a></span>
+<span class="normal"><a href="#__codelineno-0-68">68</a></span>
+<span class="normal"><a href="#__codelineno-0-69">69</a></span>
+<span class="normal"><a href="#__codelineno-0-70">70</a></span>
+<span class="normal"><a href="#__codelineno-0-71">71</a></span>
+<span class="normal"><a href="#__codelineno-0-72">72</a></span>
+<span class="normal"><a href="#__codelineno-0-73">73</a></span>
+<span class="normal"><a href="#__codelineno-0-74">74</a></span>
+<span class="normal"><a href="#__codelineno-0-75">75</a></span>
+<span class="normal"><a href="#__codelineno-0-76">76</a></span>
+<span class="normal"><a href="#__codelineno-0-77">77</a></span>
+<span class="normal"><a href="#__codelineno-0-78">78</a></span>
+<span class="normal"><a href="#__codelineno-0-79">79</a></span>
+<span class="normal"><a href="#__codelineno-0-80">80</a></span>
+<span class="normal"><a href="#__codelineno-0-81">81</a></span>
+<span class="normal"><a href="#__codelineno-0-82">82</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-44" name="__codelineno-0-44"></a><span class="k">def</span><span class="w"> </span><span class="nf">cell_metadata_exprs</span><span class="p">(</span>
+<a id="__codelineno-0-45" name="__codelineno-0-45"></a>    <span class="n">batch_stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-46" name="__codelineno-0-46"></a>    <span class="n">barcode_col_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-47" name="__codelineno-0-47"></a>    <span class="n">aa_changes_col_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-48" name="__codelineno-0-48"></a>    <span class="n">edit_distance_col_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-49" name="__codelineno-0-49"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">pl</span><span class="o">.</span><span class="n">Expr</span><span class="p">]:</span>
+<a id="__codelineno-0-50" name="__codelineno-0-50"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="__codelineno-0-51" name="__codelineno-0-51"></a><span class="sd">    Build the ``meta_*`` projection expressions for a cell table.</span>
+<a id="__codelineno-0-52" name="__codelineno-0-52"></a>
+<a id="__codelineno-0-53" name="__codelineno-0-53"></a><span class="sd">    Parameters</span>
+<a id="__codelineno-0-54" name="__codelineno-0-54"></a><span class="sd">    ----------</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55"></a><span class="sd">    batch_stem : str</span>
+<a id="__codelineno-0-56" name="__codelineno-0-56"></a><span class="sd">        This experiment's identifier, written into every row as</span>
+<a id="__codelineno-0-57" name="__codelineno-0-57"></a><span class="sd">        ``meta_batch`` -- a literal, since ``cell_table.parquet`` covers</span>
+<a id="__codelineno-0-58" name="__codelineno-0-58"></a><span class="sd">        exactly one experiment and doesn't carry it as a column.</span>
+<a id="__codelineno-0-59" name="__codelineno-0-59"></a><span class="sd">    barcode_col_name : str</span>
+<a id="__codelineno-0-60" name="__codelineno-0-60"></a><span class="sd">        Name of the barcode column in the cell table (e.g. ``"upBarcode"``).</span>
+<a id="__codelineno-0-61" name="__codelineno-0-61"></a><span class="sd">    aa_changes_col_name : str</span>
+<a id="__codelineno-0-62" name="__codelineno-0-62"></a><span class="sd">        Name of the amino-acid-changes column (e.g. ``"aaChanges"``).</span>
+<a id="__codelineno-0-63" name="__codelineno-0-63"></a><span class="sd">    edit_distance_col_name : str</span>
+<a id="__codelineno-0-64" name="__codelineno-0-64"></a><span class="sd">        Name of the edit-distance column (e.g. ``"editDistance"``).</span>
+<a id="__codelineno-0-65" name="__codelineno-0-65"></a>
+<a id="__codelineno-0-66" name="__codelineno-0-66"></a><span class="sd">    Returns</span>
+<a id="__codelineno-0-67" name="__codelineno-0-67"></a><span class="sd">    -------</span>
+<a id="__codelineno-0-68" name="__codelineno-0-68"></a><span class="sd">    list[pl.Expr]</span>
+<a id="__codelineno-0-69" name="__codelineno-0-69"></a><span class="sd">        Seven expressions, in ``CELL_METADATA_SCHEMA`` order, suitable for</span>
+<a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">        a ``select()`` against ``cell_table.parquet`` -- optionally</span>
+<a id="__codelineno-0-71" name="__codelineno-0-71"></a><span class="sd">        followed by further expressions (BUILD_CP_FEATURES appends its</span>
+<a id="__codelineno-0-72" name="__codelineno-0-72"></a><span class="sd">        CellProfiler feature columns).</span>
+<a id="__codelineno-0-73" name="__codelineno-0-73"></a><span class="sd">    """</span>
+<a id="__codelineno-0-74" name="__codelineno-0-74"></a>    <span class="k">return</span> <span class="p">[</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75"></a>        <span class="n">pl</span><span class="o">.</span><span class="n">lit</span><span class="p">(</span><span class="n">batch_stem</span><span class="p">)</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="n">META_BATCH_COL</span><span class="p">),</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76"></a>        <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">"well"</span><span class="p">)</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="n">META_WELL_COL</span><span class="p">),</span>
+<a id="__codelineno-0-77" name="__codelineno-0-77"></a>        <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">"tile"</span><span class="p">)</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="n">META_TILE_COL</span><span class="p">),</span>
+<a id="__codelineno-0-78" name="__codelineno-0-78"></a>        <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">"tile_cell_index"</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">Int64</span><span class="p">)</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="n">META_CELL_INDEX_COL</span><span class="p">),</span>
+<a id="__codelineno-0-79" name="__codelineno-0-79"></a>        <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="n">barcode_col_name</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">String</span><span class="p">)</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="n">META_BARCODE_COL</span><span class="p">),</span>
+<a id="__codelineno-0-80" name="__codelineno-0-80"></a>        <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="n">aa_changes_col_name</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">String</span><span class="p">)</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="n">META_AA_CHANGES_COL</span><span class="p">),</span>
+<a id="__codelineno-0-81" name="__codelineno-0-81"></a>        <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="n">edit_distance_col_name</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">pl</span><span class="o">.</span><span class="n">Int64</span><span class="p">)</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="n">META_EDIT_DISTANCE_COL</span><span class="p">),</span>
+<a id="__codelineno-0-82" name="__codelineno-0-82"></a>    <span class="p">]</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

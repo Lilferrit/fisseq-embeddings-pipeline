@@ -669,6 +669,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Metadata (BUILD_CELL_METADATA)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/dataset/" class="md-nav__link">
         
   
@@ -1311,6 +1339,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cell_metadata
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dataset/" class="md-nav__link">
         
   
@@ -1910,16 +1966,22 @@ and enumerates existing tile directories directly against
 starcall-workflow's own <code>phenotyping_dir</code> tree, then writes:</p>
 <ul>
 <li><code>targets_out</code>: one Snakemake target file path per line, forcing the
-  whole-tile phenotype image, segmentation mask, segmentation cell table,
-  and sequencing reads table to exist for every discovered tile (plus the
-  CellProfiler CSV, if <code>cp_features</code> is set) -- consumed by the Nextflow
-  module's own <code>snakemake ... $(cat targets.txt)</code> invocation.</li>
+  per-tile crop-stack pair (<code>{segmentation_type}_crops_{window}.tif</code> /
+  <code>{segmentation_type}_mask_crops_{window}.tif</code>, produced by
+  <code>make_cell_images_bbox</code> -- see <code>resources/starcall_overrides/</code>), the
+  segmentation cell table, and the sequencing reads table to exist for
+  every discovered tile (plus the CellProfiler CSV, if <code>cp_features</code> is
+  set) -- consumed by the Nextflow module's own <code>snakemake ...
+  $(cat targets.txt)</code> invocation. Requesting the crop-stack pair (not the
+  whole-tile phenotype image/segmentation mask directly) is what lets
+  Snakemake's ordinary <code>temp()</code> bookkeeping delete those whole-tile
+  intermediates right after use -- see <code>docs/architecture.md</code> decision 17.</li>
 <li><code>manifest_out</code>: a CSV (<code>well,tile,segmentation_csv,reads_csv,
-  cellprofiler_csv,pt_tif,mask_tif</code>) driving phase 3
+  cellprofiler_csv,crops_tif,mask_crops_tif</code>) driving phase 3
   (<code>build_cell_images_table.py</code>).</li>
 <li><code>symlinks_out</code>: a TSV (<code>relative_path&lt;TAB&gt;absolute_path</code>) of just the two
-  per-tile image files, for the Nextflow module's own symlink-collection
-  loop (phase 2's tail end).</li>
+  per-tile crop-stack files, for the Nextflow module's own
+  symlink-collection loop (phase 2's tail end).</li>
 </ul>
 <p>Until this stage's Docker image merged starcall-workflow's own <code>ops</code> conda
 env into this repo's main image (see the root <code>Dockerfile</code>), this logic
@@ -2087,8 +2149,34 @@ explicitly only when that tree isn't colocated under
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Whether to target <code>corrected_pt.tif</code> instead of <code>raw_pt.tif</code>.
+                <p>No longer read by this stage's own target/manifest generation
+(<code>make_cell_images_bbox</code>'s crop-stack output filename doesn't
+distinguish raw vs. corrected -- that choice is
+<code>make_cell_images_bbox</code>'s own <code>get_phenotyping_pt</code> input function,
+driven entirely by the target starcall-workflow project's own
+<code>config.yaml</code>/<code>default-config.yaml</code> <code>phenotyping.use_corrected</code>
+key, not by anything this stage passes in). Kept only for
+config-schema/backward-compat symmetry with the other stages that
+still reference <code>use_corrected</code> in their own docstrings; set the
+project's own <code>config.yaml</code> directly if you need corrected images.
 Defaults to <code>False</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="fisseq_embeddings_pipeline.build_cell_images_enumerate.BuildCellImagesEnumerateConfig.window">window</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Crop size requested from <code>make_cell_images_bbox</code> -- embedded in
+the requested target filename
+(<code>{segmentation_type}_crops_{window}.tif</code>), so this stage needs it
+even though it never crops anything itself. Must match
+<code>BuildDatasetConfig.window</code> (the same global <code>params.window</code>
+default routes to both -- see <code>workflows/embeddings.nf</code>'s
+<code>cell_images_field_includes</code>).</p>
               </div>
             </td>
           </tr>
@@ -2168,13 +2256,7 @@ this module's own resolution logic in Groovy.</p>
 
               <details class="mkdocstrings-source">
                 <summary>Source code in <code>src/fisseq_embeddings_pipeline/build_cell_images_enumerate.py</code></summary>
-                <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-108">108</a></span>
-<span class="normal"><a href="#__codelineno-0-109">109</a></span>
-<span class="normal"><a href="#__codelineno-0-110">110</a></span>
-<span class="normal"><a href="#__codelineno-0-111">111</a></span>
-<span class="normal"><a href="#__codelineno-0-112">112</a></span>
-<span class="normal"><a href="#__codelineno-0-113">113</a></span>
-<span class="normal"><a href="#__codelineno-0-114">114</a></span>
+                <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-114">114</a></span>
 <span class="normal"><a href="#__codelineno-0-115">115</a></span>
 <span class="normal"><a href="#__codelineno-0-116">116</a></span>
 <span class="normal"><a href="#__codelineno-0-117">117</a></span>
@@ -2238,77 +2320,119 @@ this module's own resolution logic in Groovy.</p>
 <span class="normal"><a href="#__codelineno-0-175">175</a></span>
 <span class="normal"><a href="#__codelineno-0-176">176</a></span>
 <span class="normal"><a href="#__codelineno-0-177">177</a></span>
-<span class="normal"><a href="#__codelineno-0-178">178</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-108" name="__codelineno-0-108"></a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
-<a id="__codelineno-0-109" name="__codelineno-0-109"></a><span class="k">class</span><span class="w"> </span><span class="nc">BuildCellImagesEnumerateConfig</span><span class="p">(</span><span class="n">AppConfig</span><span class="p">):</span>
-<a id="__codelineno-0-110" name="__codelineno-0-110"></a><span class="w">    </span><span class="sd">"""</span>
-<a id="__codelineno-0-111" name="__codelineno-0-111"></a><span class="sd">    Hydra structured configuration for BUILD_CELL_IMAGES' enumerate phase.</span>
-<a id="__codelineno-0-112" name="__codelineno-0-112"></a>
-<a id="__codelineno-0-113" name="__codelineno-0-113"></a><span class="sd">    Extends AppConfig (output_dir, output_root, log_level, random_seed);</span>
-<a id="__codelineno-0-114" name="__codelineno-0-114"></a><span class="sd">    this stage's own logic doesn't consume random_seed itself, but every</span>
-<a id="__codelineno-0-115" name="__codelineno-0-115"></a><span class="sd">    stage config inherits it uniformly.</span>
-<a id="__codelineno-0-116" name="__codelineno-0-116"></a>
-<a id="__codelineno-0-117" name="__codelineno-0-117"></a><span class="sd">    Attributes</span>
-<a id="__codelineno-0-118" name="__codelineno-0-118"></a><span class="sd">    ----------</span>
-<a id="__codelineno-0-119" name="__codelineno-0-119"></a><span class="sd">    starcall_workflow_dir : str</span>
-<a id="__codelineno-0-120" name="__codelineno-0-120"></a><span class="sd">        The Snakemake checkout/working directory this experiment's</span>
-<a id="__codelineno-0-121" name="__codelineno-0-121"></a><span class="sd">        `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` default</span>
-<a id="__codelineno-0-122" name="__codelineno-0-122"></a><span class="sd">        under, and whose own project config (`config.yaml`/</span>
-<a id="__codelineno-0-123" name="__codelineno-0-123"></a><span class="sd">        `default-config.yaml`) is consulted first -- see</span>
-<a id="__codelineno-0-124" name="__codelineno-0-124"></a><span class="sd">        :func:`resolve_data_dir`.</span>
-<a id="__codelineno-0-125" name="__codelineno-0-125"></a><span class="sd">    phenotyping_dir, segmentation_dir, sequencing_dir : str or None</span>
-<a id="__codelineno-0-126" name="__codelineno-0-126"></a><span class="sd">        starcall-workflow's own per-experiment output trees (real,</span>
-<a id="__codelineno-0-127" name="__codelineno-0-127"></a><span class="sd">        unredirected paths -- see build_cell_images.nf's module docstring</span>
-<a id="__codelineno-0-128" name="__codelineno-0-128"></a><span class="sd">        on why). All optional: ``None`` (the default) resolves via</span>
-<a id="__codelineno-0-129" name="__codelineno-0-129"></a><span class="sd">        :func:`resolve_data_dir` against `starcall_workflow_dir`; set one</span>
-<a id="__codelineno-0-130" name="__codelineno-0-130"></a><span class="sd">        explicitly only when that tree isn't colocated under</span>
-<a id="__codelineno-0-131" name="__codelineno-0-131"></a><span class="sd">        `starcall_workflow_dir`.</span>
-<a id="__codelineno-0-132" name="__codelineno-0-132"></a><span class="sd">    wells : list[str]</span>
-<a id="__codelineno-0-133" name="__codelineno-0-133"></a><span class="sd">        Wells to enumerate.</span>
-<a id="__codelineno-0-134" name="__codelineno-0-134"></a><span class="sd">    grid_size : int or None</span>
-<a id="__codelineno-0-135" name="__codelineno-0-135"></a><span class="sd">        Explicit override, or ``None`` to auto-detect per well (see</span>
-<a id="__codelineno-0-136" name="__codelineno-0-136"></a><span class="sd">        :func:`resolve_grid_size`).</span>
-<a id="__codelineno-0-137" name="__codelineno-0-137"></a><span class="sd">    segmentation_type : str</span>
-<a id="__codelineno-0-138" name="__codelineno-0-138"></a><span class="sd">        Defaults to ``"cells"``.</span>
-<a id="__codelineno-0-139" name="__codelineno-0-139"></a><span class="sd">    use_corrected : bool</span>
-<a id="__codelineno-0-140" name="__codelineno-0-140"></a><span class="sd">        Whether to target `corrected_pt.tif` instead of `raw_pt.tif`.</span>
-<a id="__codelineno-0-141" name="__codelineno-0-141"></a><span class="sd">        Defaults to ``False``.</span>
-<a id="__codelineno-0-142" name="__codelineno-0-142"></a><span class="sd">    sequencing_reads_params : str</span>
-<a id="__codelineno-0-143" name="__codelineno-0-143"></a><span class="sd">        Suffix threaded into the reads CSV filename</span>
-<a id="__codelineno-0-144" name="__codelineno-0-144"></a><span class="sd">        (`{segmentation_type}_reads{sequencing_reads_params}.csv`).</span>
-<a id="__codelineno-0-145" name="__codelineno-0-145"></a><span class="sd">        Defaults to ``""``.</span>
-<a id="__codelineno-0-146" name="__codelineno-0-146"></a><span class="sd">    cp_features : bool</span>
-<a id="__codelineno-0-147" name="__codelineno-0-147"></a><span class="sd">        Whether to also target this experiment's CellProfiler CSV.</span>
-<a id="__codelineno-0-148" name="__codelineno-0-148"></a><span class="sd">        Defaults to ``False``.</span>
-<a id="__codelineno-0-149" name="__codelineno-0-149"></a><span class="sd">    cellprofiler_cycle, cellprofiler_pipeline : str</span>
-<a id="__codelineno-0-150" name="__codelineno-0-150"></a><span class="sd">        Threaded into the CellProfiler CSV filename when `cp_features` is</span>
-<a id="__codelineno-0-151" name="__codelineno-0-151"></a><span class="sd">        set. Default to ``""``.</span>
-<a id="__codelineno-0-152" name="__codelineno-0-152"></a><span class="sd">    targets_out, manifest_out, symlinks_out : str</span>
-<a id="__codelineno-0-153" name="__codelineno-0-153"></a><span class="sd">        Output filenames, written under `output_dir`.</span>
-<a id="__codelineno-0-154" name="__codelineno-0-154"></a><span class="sd">    resolved_dirs_out : str</span>
-<a id="__codelineno-0-155" name="__codelineno-0-155"></a><span class="sd">        Output filename (under `output_dir`) for the fully-resolved</span>
-<a id="__codelineno-0-156" name="__codelineno-0-156"></a><span class="sd">        `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` -- a</span>
-<a id="__codelineno-0-157" name="__codelineno-0-157"></a><span class="sd">        shell-sourceable `key='value'` file, one line per key, so</span>
-<a id="__codelineno-0-158" name="__codelineno-0-158"></a><span class="sd">        `build_cell_images.nf`'s own `snakemake` invocation (phase 2) uses</span>
-<a id="__codelineno-0-159" name="__codelineno-0-159"></a><span class="sd">        the exact same resolved paths as this phase, without duplicating</span>
-<a id="__codelineno-0-160" name="__codelineno-0-160"></a><span class="sd">        this module's own resolution logic in Groovy.</span>
-<a id="__codelineno-0-161" name="__codelineno-0-161"></a><span class="sd">    """</span>
-<a id="__codelineno-0-162" name="__codelineno-0-162"></a>
-<a id="__codelineno-0-163" name="__codelineno-0-163"></a>    <span class="n">starcall_workflow_dir</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">MISSING</span>
-<a id="__codelineno-0-164" name="__codelineno-0-164"></a>    <span class="n">phenotyping_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-165" name="__codelineno-0-165"></a>    <span class="n">segmentation_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-166" name="__codelineno-0-166"></a>    <span class="n">sequencing_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-167" name="__codelineno-0-167"></a>    <span class="n">wells</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">MISSING</span>
-<a id="__codelineno-0-168" name="__codelineno-0-168"></a>    <span class="n">grid_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-169" name="__codelineno-0-169"></a>    <span class="n">segmentation_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"cells"</span>
-<a id="__codelineno-0-170" name="__codelineno-0-170"></a>    <span class="n">use_corrected</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
-<a id="__codelineno-0-171" name="__codelineno-0-171"></a>    <span class="n">sequencing_reads_params</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
-<a id="__codelineno-0-172" name="__codelineno-0-172"></a>    <span class="n">cp_features</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
-<a id="__codelineno-0-173" name="__codelineno-0-173"></a>    <span class="n">cellprofiler_cycle</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
-<a id="__codelineno-0-174" name="__codelineno-0-174"></a>    <span class="n">cellprofiler_pipeline</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
-<a id="__codelineno-0-175" name="__codelineno-0-175"></a>    <span class="n">targets_out</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"targets.txt"</span>
-<a id="__codelineno-0-176" name="__codelineno-0-176"></a>    <span class="n">manifest_out</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"tiles_manifest.csv"</span>
-<a id="__codelineno-0-177" name="__codelineno-0-177"></a>    <span class="n">symlinks_out</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"symlinks.txt"</span>
-<a id="__codelineno-0-178" name="__codelineno-0-178"></a>    <span class="n">resolved_dirs_out</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"resolved_dirs.env"</span>
+<span class="normal"><a href="#__codelineno-0-178">178</a></span>
+<span class="normal"><a href="#__codelineno-0-179">179</a></span>
+<span class="normal"><a href="#__codelineno-0-180">180</a></span>
+<span class="normal"><a href="#__codelineno-0-181">181</a></span>
+<span class="normal"><a href="#__codelineno-0-182">182</a></span>
+<span class="normal"><a href="#__codelineno-0-183">183</a></span>
+<span class="normal"><a href="#__codelineno-0-184">184</a></span>
+<span class="normal"><a href="#__codelineno-0-185">185</a></span>
+<span class="normal"><a href="#__codelineno-0-186">186</a></span>
+<span class="normal"><a href="#__codelineno-0-187">187</a></span>
+<span class="normal"><a href="#__codelineno-0-188">188</a></span>
+<span class="normal"><a href="#__codelineno-0-189">189</a></span>
+<span class="normal"><a href="#__codelineno-0-190">190</a></span>
+<span class="normal"><a href="#__codelineno-0-191">191</a></span>
+<span class="normal"><a href="#__codelineno-0-192">192</a></span>
+<span class="normal"><a href="#__codelineno-0-193">193</a></span>
+<span class="normal"><a href="#__codelineno-0-194">194</a></span>
+<span class="normal"><a href="#__codelineno-0-195">195</a></span>
+<span class="normal"><a href="#__codelineno-0-196">196</a></span>
+<span class="normal"><a href="#__codelineno-0-197">197</a></span>
+<span class="normal"><a href="#__codelineno-0-198">198</a></span>
+<span class="normal"><a href="#__codelineno-0-199">199</a></span>
+<span class="normal"><a href="#__codelineno-0-200">200</a></span>
+<span class="normal"><a href="#__codelineno-0-201">201</a></span>
+<span class="normal"><a href="#__codelineno-0-202">202</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-114" name="__codelineno-0-114"></a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<a id="__codelineno-0-115" name="__codelineno-0-115"></a><span class="k">class</span><span class="w"> </span><span class="nc">BuildCellImagesEnumerateConfig</span><span class="p">(</span><span class="n">AppConfig</span><span class="p">):</span>
+<a id="__codelineno-0-116" name="__codelineno-0-116"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="__codelineno-0-117" name="__codelineno-0-117"></a><span class="sd">    Hydra structured configuration for BUILD_CELL_IMAGES' enumerate phase.</span>
+<a id="__codelineno-0-118" name="__codelineno-0-118"></a>
+<a id="__codelineno-0-119" name="__codelineno-0-119"></a><span class="sd">    Extends AppConfig (output_dir, output_root, log_level, random_seed);</span>
+<a id="__codelineno-0-120" name="__codelineno-0-120"></a><span class="sd">    this stage's own logic doesn't consume random_seed itself, but every</span>
+<a id="__codelineno-0-121" name="__codelineno-0-121"></a><span class="sd">    stage config inherits it uniformly.</span>
+<a id="__codelineno-0-122" name="__codelineno-0-122"></a>
+<a id="__codelineno-0-123" name="__codelineno-0-123"></a><span class="sd">    Attributes</span>
+<a id="__codelineno-0-124" name="__codelineno-0-124"></a><span class="sd">    ----------</span>
+<a id="__codelineno-0-125" name="__codelineno-0-125"></a><span class="sd">    starcall_workflow_dir : str</span>
+<a id="__codelineno-0-126" name="__codelineno-0-126"></a><span class="sd">        The Snakemake checkout/working directory this experiment's</span>
+<a id="__codelineno-0-127" name="__codelineno-0-127"></a><span class="sd">        `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` default</span>
+<a id="__codelineno-0-128" name="__codelineno-0-128"></a><span class="sd">        under, and whose own project config (`config.yaml`/</span>
+<a id="__codelineno-0-129" name="__codelineno-0-129"></a><span class="sd">        `default-config.yaml`) is consulted first -- see</span>
+<a id="__codelineno-0-130" name="__codelineno-0-130"></a><span class="sd">        :func:`resolve_data_dir`.</span>
+<a id="__codelineno-0-131" name="__codelineno-0-131"></a><span class="sd">    phenotyping_dir, segmentation_dir, sequencing_dir : str or None</span>
+<a id="__codelineno-0-132" name="__codelineno-0-132"></a><span class="sd">        starcall-workflow's own per-experiment output trees (real,</span>
+<a id="__codelineno-0-133" name="__codelineno-0-133"></a><span class="sd">        unredirected paths -- see build_cell_images.nf's module docstring</span>
+<a id="__codelineno-0-134" name="__codelineno-0-134"></a><span class="sd">        on why). All optional: ``None`` (the default) resolves via</span>
+<a id="__codelineno-0-135" name="__codelineno-0-135"></a><span class="sd">        :func:`resolve_data_dir` against `starcall_workflow_dir`; set one</span>
+<a id="__codelineno-0-136" name="__codelineno-0-136"></a><span class="sd">        explicitly only when that tree isn't colocated under</span>
+<a id="__codelineno-0-137" name="__codelineno-0-137"></a><span class="sd">        `starcall_workflow_dir`.</span>
+<a id="__codelineno-0-138" name="__codelineno-0-138"></a><span class="sd">    wells : list[str]</span>
+<a id="__codelineno-0-139" name="__codelineno-0-139"></a><span class="sd">        Wells to enumerate.</span>
+<a id="__codelineno-0-140" name="__codelineno-0-140"></a><span class="sd">    grid_size : int or None</span>
+<a id="__codelineno-0-141" name="__codelineno-0-141"></a><span class="sd">        Explicit override, or ``None`` to auto-detect per well (see</span>
+<a id="__codelineno-0-142" name="__codelineno-0-142"></a><span class="sd">        :func:`resolve_grid_size`).</span>
+<a id="__codelineno-0-143" name="__codelineno-0-143"></a><span class="sd">    segmentation_type : str</span>
+<a id="__codelineno-0-144" name="__codelineno-0-144"></a><span class="sd">        Defaults to ``"cells"``.</span>
+<a id="__codelineno-0-145" name="__codelineno-0-145"></a><span class="sd">    use_corrected : bool</span>
+<a id="__codelineno-0-146" name="__codelineno-0-146"></a><span class="sd">        No longer read by this stage's own target/manifest generation</span>
+<a id="__codelineno-0-147" name="__codelineno-0-147"></a><span class="sd">        (`make_cell_images_bbox`'s crop-stack output filename doesn't</span>
+<a id="__codelineno-0-148" name="__codelineno-0-148"></a><span class="sd">        distinguish raw vs. corrected -- that choice is</span>
+<a id="__codelineno-0-149" name="__codelineno-0-149"></a><span class="sd">        `make_cell_images_bbox`'s own `get_phenotyping_pt` input function,</span>
+<a id="__codelineno-0-150" name="__codelineno-0-150"></a><span class="sd">        driven entirely by the target starcall-workflow project's own</span>
+<a id="__codelineno-0-151" name="__codelineno-0-151"></a><span class="sd">        `config.yaml`/`default-config.yaml` `phenotyping.use_corrected`</span>
+<a id="__codelineno-0-152" name="__codelineno-0-152"></a><span class="sd">        key, not by anything this stage passes in). Kept only for</span>
+<a id="__codelineno-0-153" name="__codelineno-0-153"></a><span class="sd">        config-schema/backward-compat symmetry with the other stages that</span>
+<a id="__codelineno-0-154" name="__codelineno-0-154"></a><span class="sd">        still reference `use_corrected` in their own docstrings; set the</span>
+<a id="__codelineno-0-155" name="__codelineno-0-155"></a><span class="sd">        project's own `config.yaml` directly if you need corrected images.</span>
+<a id="__codelineno-0-156" name="__codelineno-0-156"></a><span class="sd">        Defaults to ``False``.</span>
+<a id="__codelineno-0-157" name="__codelineno-0-157"></a><span class="sd">    window : int</span>
+<a id="__codelineno-0-158" name="__codelineno-0-158"></a><span class="sd">        Crop size requested from `make_cell_images_bbox` -- embedded in</span>
+<a id="__codelineno-0-159" name="__codelineno-0-159"></a><span class="sd">        the requested target filename</span>
+<a id="__codelineno-0-160" name="__codelineno-0-160"></a><span class="sd">        (`{segmentation_type}_crops_{window}.tif`), so this stage needs it</span>
+<a id="__codelineno-0-161" name="__codelineno-0-161"></a><span class="sd">        even though it never crops anything itself. Must match</span>
+<a id="__codelineno-0-162" name="__codelineno-0-162"></a><span class="sd">        `BuildDatasetConfig.window` (the same global `params.window`</span>
+<a id="__codelineno-0-163" name="__codelineno-0-163"></a><span class="sd">        default routes to both -- see `workflows/embeddings.nf`'s</span>
+<a id="__codelineno-0-164" name="__codelineno-0-164"></a><span class="sd">        `cell_images_field_includes`).</span>
+<a id="__codelineno-0-165" name="__codelineno-0-165"></a><span class="sd">    sequencing_reads_params : str</span>
+<a id="__codelineno-0-166" name="__codelineno-0-166"></a><span class="sd">        Suffix threaded into the reads CSV filename</span>
+<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="sd">        (`{segmentation_type}_reads{sequencing_reads_params}.csv`).</span>
+<a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">        Defaults to ``""``.</span>
+<a id="__codelineno-0-169" name="__codelineno-0-169"></a><span class="sd">    cp_features : bool</span>
+<a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">        Whether to also target this experiment's CellProfiler CSV.</span>
+<a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">        Defaults to ``False``.</span>
+<a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">    cellprofiler_cycle, cellprofiler_pipeline : str</span>
+<a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">        Threaded into the CellProfiler CSV filename when `cp_features` is</span>
+<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="sd">        set. Default to ``""``.</span>
+<a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">    targets_out, manifest_out, symlinks_out : str</span>
+<a id="__codelineno-0-176" name="__codelineno-0-176"></a><span class="sd">        Output filenames, written under `output_dir`.</span>
+<a id="__codelineno-0-177" name="__codelineno-0-177"></a><span class="sd">    resolved_dirs_out : str</span>
+<a id="__codelineno-0-178" name="__codelineno-0-178"></a><span class="sd">        Output filename (under `output_dir`) for the fully-resolved</span>
+<a id="__codelineno-0-179" name="__codelineno-0-179"></a><span class="sd">        `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` -- a</span>
+<a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">        shell-sourceable `key='value'` file, one line per key, so</span>
+<a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="sd">        `build_cell_images.nf`'s own `snakemake` invocation (phase 2) uses</span>
+<a id="__codelineno-0-182" name="__codelineno-0-182"></a><span class="sd">        the exact same resolved paths as this phase, without duplicating</span>
+<a id="__codelineno-0-183" name="__codelineno-0-183"></a><span class="sd">        this module's own resolution logic in Groovy.</span>
+<a id="__codelineno-0-184" name="__codelineno-0-184"></a><span class="sd">    """</span>
+<a id="__codelineno-0-185" name="__codelineno-0-185"></a>
+<a id="__codelineno-0-186" name="__codelineno-0-186"></a>    <span class="n">starcall_workflow_dir</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">MISSING</span>
+<a id="__codelineno-0-187" name="__codelineno-0-187"></a>    <span class="n">phenotyping_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-188" name="__codelineno-0-188"></a>    <span class="n">segmentation_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-189" name="__codelineno-0-189"></a>    <span class="n">sequencing_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-190" name="__codelineno-0-190"></a>    <span class="n">wells</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">MISSING</span>
+<a id="__codelineno-0-191" name="__codelineno-0-191"></a>    <span class="n">grid_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-192" name="__codelineno-0-192"></a>    <span class="n">segmentation_type</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"cells"</span>
+<a id="__codelineno-0-193" name="__codelineno-0-193"></a>    <span class="n">use_corrected</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<a id="__codelineno-0-194" name="__codelineno-0-194"></a>    <span class="n">window</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">MISSING</span>
+<a id="__codelineno-0-195" name="__codelineno-0-195"></a>    <span class="n">sequencing_reads_params</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
+<a id="__codelineno-0-196" name="__codelineno-0-196"></a>    <span class="n">cp_features</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<a id="__codelineno-0-197" name="__codelineno-0-197"></a>    <span class="n">cellprofiler_cycle</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
+<a id="__codelineno-0-198" name="__codelineno-0-198"></a>    <span class="n">cellprofiler_pipeline</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
+<a id="__codelineno-0-199" name="__codelineno-0-199"></a>    <span class="n">targets_out</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"targets.txt"</span>
+<a id="__codelineno-0-200" name="__codelineno-0-200"></a>    <span class="n">manifest_out</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"tiles_manifest.csv"</span>
+<a id="__codelineno-0-201" name="__codelineno-0-201"></a>    <span class="n">symlinks_out</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"symlinks.txt"</span>
+<a id="__codelineno-0-202" name="__codelineno-0-202"></a>    <span class="n">resolved_dirs_out</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"resolved_dirs.env"</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
@@ -2348,7 +2472,7 @@ this module's own resolution logic in Groovy.</p>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">wells</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">grid_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">segmentation_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">use_corrected</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">window</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">sequencing_reads_params</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">cp_features</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">cellprofiler_cycle</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
@@ -2379,10 +2503,10 @@ this module's own resolution logic in Groovy.</p>
                 <p><code>{"targets": [...], "manifest_rows": [...], "symlinks": [...]}</code>
 -- see :func:<code>main</code>'s docstring for what each becomes on disk.
 <code>symlinks</code> entries are <code>(relative_path, absolute_path)</code> pairs
-for just the two per-tile image files (not the CSVs -- those are
-read directly by <code>build_cell_images_table.py</code>, never re-exposed
-as files of their own; see <code>build_cell_images.nf</code>'s Phase 3
-comment).</p>
+for just the two per-tile crop-stack files (not the CSVs -- those
+are read directly by <code>build_cell_images_table.py</code>, never
+re-exposed as files of their own; see <code>build_cell_images.nf</code>'s
+Phase 3 comment).</p>
               </div>
             </td>
           </tr>
@@ -2392,31 +2516,7 @@ comment).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/fisseq_embeddings_pipeline/build_cell_images_enumerate.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-300">300</a></span>
-<span class="normal"><a href="#__codelineno-0-301">301</a></span>
-<span class="normal"><a href="#__codelineno-0-302">302</a></span>
-<span class="normal"><a href="#__codelineno-0-303">303</a></span>
-<span class="normal"><a href="#__codelineno-0-304">304</a></span>
-<span class="normal"><a href="#__codelineno-0-305">305</a></span>
-<span class="normal"><a href="#__codelineno-0-306">306</a></span>
-<span class="normal"><a href="#__codelineno-0-307">307</a></span>
-<span class="normal"><a href="#__codelineno-0-308">308</a></span>
-<span class="normal"><a href="#__codelineno-0-309">309</a></span>
-<span class="normal"><a href="#__codelineno-0-310">310</a></span>
-<span class="normal"><a href="#__codelineno-0-311">311</a></span>
-<span class="normal"><a href="#__codelineno-0-312">312</a></span>
-<span class="normal"><a href="#__codelineno-0-313">313</a></span>
-<span class="normal"><a href="#__codelineno-0-314">314</a></span>
-<span class="normal"><a href="#__codelineno-0-315">315</a></span>
-<span class="normal"><a href="#__codelineno-0-316">316</a></span>
-<span class="normal"><a href="#__codelineno-0-317">317</a></span>
-<span class="normal"><a href="#__codelineno-0-318">318</a></span>
-<span class="normal"><a href="#__codelineno-0-319">319</a></span>
-<span class="normal"><a href="#__codelineno-0-320">320</a></span>
-<span class="normal"><a href="#__codelineno-0-321">321</a></span>
-<span class="normal"><a href="#__codelineno-0-322">322</a></span>
-<span class="normal"><a href="#__codelineno-0-323">323</a></span>
-<span class="normal"><a href="#__codelineno-0-324">324</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-324">324</a></span>
 <span class="normal"><a href="#__codelineno-0-325">325</a></span>
 <span class="normal"><a href="#__codelineno-0-326">326</a></span>
 <span class="normal"><a href="#__codelineno-0-327">327</a></span>
@@ -2463,78 +2563,102 @@ comment).</p>
 <span class="normal"><a href="#__codelineno-0-368">368</a></span>
 <span class="normal"><a href="#__codelineno-0-369">369</a></span>
 <span class="normal"><a href="#__codelineno-0-370">370</a></span>
-<span class="normal"><a href="#__codelineno-0-371">371</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-300" name="__codelineno-0-300"></a><span class="k">def</span><span class="w"> </span><span class="nf">build_enumeration</span><span class="p">(</span>
-<a id="__codelineno-0-301" name="__codelineno-0-301"></a>    <span class="n">phenotyping_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-302" name="__codelineno-0-302"></a>    <span class="n">sequencing_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-303" name="__codelineno-0-303"></a>    <span class="n">wells</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
-<a id="__codelineno-0-304" name="__codelineno-0-304"></a>    <span class="n">grid_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span>
-<a id="__codelineno-0-305" name="__codelineno-0-305"></a>    <span class="n">segmentation_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-306" name="__codelineno-0-306"></a>    <span class="n">use_corrected</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
-<a id="__codelineno-0-307" name="__codelineno-0-307"></a>    <span class="n">sequencing_reads_params</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-308" name="__codelineno-0-308"></a>    <span class="n">cp_features</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
-<a id="__codelineno-0-309" name="__codelineno-0-309"></a>    <span class="n">cellprofiler_cycle</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-310" name="__codelineno-0-310"></a>    <span class="n">cellprofiler_pipeline</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-311" name="__codelineno-0-311"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
-<a id="__codelineno-0-312" name="__codelineno-0-312"></a><span class="w">    </span><span class="sd">"""Build the full target list + tile manifest for one experiment.</span>
-<a id="__codelineno-0-313" name="__codelineno-0-313"></a>
-<a id="__codelineno-0-314" name="__codelineno-0-314"></a><span class="sd">    Returns</span>
-<a id="__codelineno-0-315" name="__codelineno-0-315"></a><span class="sd">    -------</span>
-<a id="__codelineno-0-316" name="__codelineno-0-316"></a><span class="sd">    dict</span>
-<a id="__codelineno-0-317" name="__codelineno-0-317"></a><span class="sd">        ``{"targets": [...], "manifest_rows": [...], "symlinks": [...]}``</span>
-<a id="__codelineno-0-318" name="__codelineno-0-318"></a><span class="sd">        -- see :func:`main`'s docstring for what each becomes on disk.</span>
-<a id="__codelineno-0-319" name="__codelineno-0-319"></a><span class="sd">        ``symlinks`` entries are ``(relative_path, absolute_path)`` pairs</span>
-<a id="__codelineno-0-320" name="__codelineno-0-320"></a><span class="sd">        for just the two per-tile image files (not the CSVs -- those are</span>
-<a id="__codelineno-0-321" name="__codelineno-0-321"></a><span class="sd">        read directly by ``build_cell_images_table.py``, never re-exposed</span>
-<a id="__codelineno-0-322" name="__codelineno-0-322"></a><span class="sd">        as files of their own; see ``build_cell_images.nf``'s Phase 3</span>
-<a id="__codelineno-0-323" name="__codelineno-0-323"></a><span class="sd">        comment).</span>
-<a id="__codelineno-0-324" name="__codelineno-0-324"></a><span class="sd">    """</span>
-<a id="__codelineno-0-325" name="__codelineno-0-325"></a>    <span class="n">pt_filename</span> <span class="o">=</span> <span class="s2">"corrected_pt.tif"</span> <span class="k">if</span> <span class="n">use_corrected</span> <span class="k">else</span> <span class="s2">"raw_pt.tif"</span>
-<a id="__codelineno-0-326" name="__codelineno-0-326"></a>    <span class="n">targets</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
-<a id="__codelineno-0-327" name="__codelineno-0-327"></a>    <span class="n">manifest_rows</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
-<a id="__codelineno-0-328" name="__codelineno-0-328"></a>    <span class="n">symlinks</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
-<a id="__codelineno-0-329" name="__codelineno-0-329"></a>
-<a id="__codelineno-0-330" name="__codelineno-0-330"></a>    <span class="k">for</span> <span class="n">well</span> <span class="ow">in</span> <span class="n">wells</span><span class="p">:</span>
-<a id="__codelineno-0-331" name="__codelineno-0-331"></a>        <span class="n">resolved_grid_size</span> <span class="o">=</span> <span class="n">resolve_grid_size</span><span class="p">(</span><span class="n">phenotyping_dir</span><span class="p">,</span> <span class="n">well</span><span class="p">,</span> <span class="n">grid_size</span><span class="p">)</span>
-<a id="__codelineno-0-332" name="__codelineno-0-332"></a>        <span class="k">for</span> <span class="n">tile</span> <span class="ow">in</span> <span class="n">enumerate_tile_names</span><span class="p">(</span><span class="n">phenotyping_dir</span><span class="p">,</span> <span class="n">well</span><span class="p">,</span> <span class="n">resolved_grid_size</span><span class="p">):</span>
-<a id="__codelineno-0-333" name="__codelineno-0-333"></a>            <span class="n">grid_dir</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">well</span><span class="si">}</span><span class="s2">_grid</span><span class="si">{</span><span class="n">resolved_grid_size</span><span class="si">}</span><span class="s2">"</span>
-<a id="__codelineno-0-334" name="__codelineno-0-334"></a>            <span class="n">tile_dir</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">phenotyping_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">grid_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tile</span><span class="si">}</span><span class="s2">"</span>
-<a id="__codelineno-0-335" name="__codelineno-0-335"></a>            <span class="n">seq_tile_dir</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">sequencing_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">grid_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tile</span><span class="si">}</span><span class="s2">"</span>
-<a id="__codelineno-0-336" name="__codelineno-0-336"></a>
-<a id="__codelineno-0-337" name="__codelineno-0-337"></a>            <span class="n">pt_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tile_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">pt_filename</span><span class="si">}</span><span class="s2">"</span>
-<a id="__codelineno-0-338" name="__codelineno-0-338"></a>            <span class="n">mask_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tile_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">segmentation_type</span><span class="si">}</span><span class="s2">_mask.tif"</span>
-<a id="__codelineno-0-339" name="__codelineno-0-339"></a>            <span class="n">seg_csv</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tile_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">segmentation_type</span><span class="si">}</span><span class="s2">.csv"</span>
-<a id="__codelineno-0-340" name="__codelineno-0-340"></a>            <span class="n">reads_csv</span> <span class="o">=</span> <span class="p">(</span>
-<a id="__codelineno-0-341" name="__codelineno-0-341"></a>                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">seq_tile_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">segmentation_type</span><span class="si">}</span><span class="s2">_reads"</span>
-<a id="__codelineno-0-342" name="__codelineno-0-342"></a>                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">sequencing_reads_params</span><span class="si">}</span><span class="s2">.csv"</span>
-<a id="__codelineno-0-343" name="__codelineno-0-343"></a>            <span class="p">)</span>
-<a id="__codelineno-0-344" name="__codelineno-0-344"></a>
-<a id="__codelineno-0-345" name="__codelineno-0-345"></a>            <span class="n">targets</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">pt_path</span><span class="p">,</span> <span class="n">mask_path</span><span class="p">,</span> <span class="n">seg_csv</span><span class="p">,</span> <span class="n">reads_csv</span><span class="p">])</span>
-<a id="__codelineno-0-346" name="__codelineno-0-346"></a>            <span class="n">symlinks</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">grid_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tile</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">pt_filename</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="n">pt_path</span><span class="p">))</span>
-<a id="__codelineno-0-347" name="__codelineno-0-347"></a>            <span class="n">symlinks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
-<a id="__codelineno-0-348" name="__codelineno-0-348"></a>                <span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">grid_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tile</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">segmentation_type</span><span class="si">}</span><span class="s2">_mask.tif"</span><span class="p">,</span> <span class="n">mask_path</span><span class="p">)</span>
-<a id="__codelineno-0-349" name="__codelineno-0-349"></a>            <span class="p">)</span>
-<a id="__codelineno-0-350" name="__codelineno-0-350"></a>
-<a id="__codelineno-0-351" name="__codelineno-0-351"></a>            <span class="n">cp_csv</span> <span class="o">=</span> <span class="s2">""</span>
-<a id="__codelineno-0-352" name="__codelineno-0-352"></a>            <span class="k">if</span> <span class="n">cp_features</span><span class="p">:</span>
-<a id="__codelineno-0-353" name="__codelineno-0-353"></a>                <span class="n">cp_csv</span> <span class="o">=</span> <span class="p">(</span>
-<a id="__codelineno-0-354" name="__codelineno-0-354"></a>                    <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tile_dir</span><span class="si">}</span><span class="s2">/cellprofiler</span><span class="si">{</span><span class="n">cellprofiler_cycle</span><span class="si">}</span><span class="s2">_"</span>
-<a id="__codelineno-0-355" name="__codelineno-0-355"></a>                    <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">cellprofiler_pipeline</span><span class="si">}</span><span class="s2">.csv"</span>
-<a id="__codelineno-0-356" name="__codelineno-0-356"></a>                <span class="p">)</span>
-<a id="__codelineno-0-357" name="__codelineno-0-357"></a>                <span class="n">targets</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cp_csv</span><span class="p">)</span>
-<a id="__codelineno-0-358" name="__codelineno-0-358"></a>
-<a id="__codelineno-0-359" name="__codelineno-0-359"></a>            <span class="n">manifest_rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
-<a id="__codelineno-0-360" name="__codelineno-0-360"></a>                <span class="p">{</span>
-<a id="__codelineno-0-361" name="__codelineno-0-361"></a>                    <span class="s2">"well"</span><span class="p">:</span> <span class="n">well</span><span class="p">,</span>
-<a id="__codelineno-0-362" name="__codelineno-0-362"></a>                    <span class="s2">"tile"</span><span class="p">:</span> <span class="n">tile</span><span class="p">,</span>
-<a id="__codelineno-0-363" name="__codelineno-0-363"></a>                    <span class="s2">"segmentation_csv"</span><span class="p">:</span> <span class="n">seg_csv</span><span class="p">,</span>
-<a id="__codelineno-0-364" name="__codelineno-0-364"></a>                    <span class="s2">"reads_csv"</span><span class="p">:</span> <span class="n">reads_csv</span><span class="p">,</span>
-<a id="__codelineno-0-365" name="__codelineno-0-365"></a>                    <span class="s2">"cellprofiler_csv"</span><span class="p">:</span> <span class="n">cp_csv</span><span class="p">,</span>
-<a id="__codelineno-0-366" name="__codelineno-0-366"></a>                    <span class="s2">"pt_tif"</span><span class="p">:</span> <span class="n">pt_path</span><span class="p">,</span>
-<a id="__codelineno-0-367" name="__codelineno-0-367"></a>                    <span class="s2">"mask_tif"</span><span class="p">:</span> <span class="n">mask_path</span><span class="p">,</span>
-<a id="__codelineno-0-368" name="__codelineno-0-368"></a>                <span class="p">}</span>
-<a id="__codelineno-0-369" name="__codelineno-0-369"></a>            <span class="p">)</span>
-<a id="__codelineno-0-370" name="__codelineno-0-370"></a>
-<a id="__codelineno-0-371" name="__codelineno-0-371"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">"targets"</span><span class="p">:</span> <span class="n">targets</span><span class="p">,</span> <span class="s2">"manifest_rows"</span><span class="p">:</span> <span class="n">manifest_rows</span><span class="p">,</span> <span class="s2">"symlinks"</span><span class="p">:</span> <span class="n">symlinks</span><span class="p">}</span>
+<span class="normal"><a href="#__codelineno-0-371">371</a></span>
+<span class="normal"><a href="#__codelineno-0-372">372</a></span>
+<span class="normal"><a href="#__codelineno-0-373">373</a></span>
+<span class="normal"><a href="#__codelineno-0-374">374</a></span>
+<span class="normal"><a href="#__codelineno-0-375">375</a></span>
+<span class="normal"><a href="#__codelineno-0-376">376</a></span>
+<span class="normal"><a href="#__codelineno-0-377">377</a></span>
+<span class="normal"><a href="#__codelineno-0-378">378</a></span>
+<span class="normal"><a href="#__codelineno-0-379">379</a></span>
+<span class="normal"><a href="#__codelineno-0-380">380</a></span>
+<span class="normal"><a href="#__codelineno-0-381">381</a></span>
+<span class="normal"><a href="#__codelineno-0-382">382</a></span>
+<span class="normal"><a href="#__codelineno-0-383">383</a></span>
+<span class="normal"><a href="#__codelineno-0-384">384</a></span>
+<span class="normal"><a href="#__codelineno-0-385">385</a></span>
+<span class="normal"><a href="#__codelineno-0-386">386</a></span>
+<span class="normal"><a href="#__codelineno-0-387">387</a></span>
+<span class="normal"><a href="#__codelineno-0-388">388</a></span>
+<span class="normal"><a href="#__codelineno-0-389">389</a></span>
+<span class="normal"><a href="#__codelineno-0-390">390</a></span>
+<span class="normal"><a href="#__codelineno-0-391">391</a></span>
+<span class="normal"><a href="#__codelineno-0-392">392</a></span>
+<span class="normal"><a href="#__codelineno-0-393">393</a></span>
+<span class="normal"><a href="#__codelineno-0-394">394</a></span>
+<span class="normal"><a href="#__codelineno-0-395">395</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-324" name="__codelineno-0-324"></a><span class="k">def</span><span class="w"> </span><span class="nf">build_enumeration</span><span class="p">(</span>
+<a id="__codelineno-0-325" name="__codelineno-0-325"></a>    <span class="n">phenotyping_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-326" name="__codelineno-0-326"></a>    <span class="n">sequencing_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-327" name="__codelineno-0-327"></a>    <span class="n">wells</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+<a id="__codelineno-0-328" name="__codelineno-0-328"></a>    <span class="n">grid_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span>
+<a id="__codelineno-0-329" name="__codelineno-0-329"></a>    <span class="n">segmentation_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-330" name="__codelineno-0-330"></a>    <span class="n">window</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+<a id="__codelineno-0-331" name="__codelineno-0-331"></a>    <span class="n">sequencing_reads_params</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-332" name="__codelineno-0-332"></a>    <span class="n">cp_features</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+<a id="__codelineno-0-333" name="__codelineno-0-333"></a>    <span class="n">cellprofiler_cycle</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-334" name="__codelineno-0-334"></a>    <span class="n">cellprofiler_pipeline</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-335" name="__codelineno-0-335"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<a id="__codelineno-0-336" name="__codelineno-0-336"></a><span class="w">    </span><span class="sd">"""Build the full target list + tile manifest for one experiment.</span>
+<a id="__codelineno-0-337" name="__codelineno-0-337"></a>
+<a id="__codelineno-0-338" name="__codelineno-0-338"></a><span class="sd">    Returns</span>
+<a id="__codelineno-0-339" name="__codelineno-0-339"></a><span class="sd">    -------</span>
+<a id="__codelineno-0-340" name="__codelineno-0-340"></a><span class="sd">    dict</span>
+<a id="__codelineno-0-341" name="__codelineno-0-341"></a><span class="sd">        ``{"targets": [...], "manifest_rows": [...], "symlinks": [...]}``</span>
+<a id="__codelineno-0-342" name="__codelineno-0-342"></a><span class="sd">        -- see :func:`main`'s docstring for what each becomes on disk.</span>
+<a id="__codelineno-0-343" name="__codelineno-0-343"></a><span class="sd">        ``symlinks`` entries are ``(relative_path, absolute_path)`` pairs</span>
+<a id="__codelineno-0-344" name="__codelineno-0-344"></a><span class="sd">        for just the two per-tile crop-stack files (not the CSVs -- those</span>
+<a id="__codelineno-0-345" name="__codelineno-0-345"></a><span class="sd">        are read directly by ``build_cell_images_table.py``, never</span>
+<a id="__codelineno-0-346" name="__codelineno-0-346"></a><span class="sd">        re-exposed as files of their own; see ``build_cell_images.nf``'s</span>
+<a id="__codelineno-0-347" name="__codelineno-0-347"></a><span class="sd">        Phase 3 comment).</span>
+<a id="__codelineno-0-348" name="__codelineno-0-348"></a><span class="sd">    """</span>
+<a id="__codelineno-0-349" name="__codelineno-0-349"></a>    <span class="n">targets</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-0-350" name="__codelineno-0-350"></a>    <span class="n">manifest_rows</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-0-351" name="__codelineno-0-351"></a>    <span class="n">symlinks</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-0-352" name="__codelineno-0-352"></a>
+<a id="__codelineno-0-353" name="__codelineno-0-353"></a>    <span class="k">for</span> <span class="n">well</span> <span class="ow">in</span> <span class="n">wells</span><span class="p">:</span>
+<a id="__codelineno-0-354" name="__codelineno-0-354"></a>        <span class="n">resolved_grid_size</span> <span class="o">=</span> <span class="n">resolve_grid_size</span><span class="p">(</span><span class="n">phenotyping_dir</span><span class="p">,</span> <span class="n">well</span><span class="p">,</span> <span class="n">grid_size</span><span class="p">)</span>
+<a id="__codelineno-0-355" name="__codelineno-0-355"></a>        <span class="k">for</span> <span class="n">tile</span> <span class="ow">in</span> <span class="n">enumerate_tile_names</span><span class="p">(</span><span class="n">phenotyping_dir</span><span class="p">,</span> <span class="n">well</span><span class="p">,</span> <span class="n">resolved_grid_size</span><span class="p">):</span>
+<a id="__codelineno-0-356" name="__codelineno-0-356"></a>            <span class="n">grid_dir</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">well</span><span class="si">}</span><span class="s2">_grid</span><span class="si">{</span><span class="n">resolved_grid_size</span><span class="si">}</span><span class="s2">"</span>
+<a id="__codelineno-0-357" name="__codelineno-0-357"></a>            <span class="n">tile_dir</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">phenotyping_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">grid_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tile</span><span class="si">}</span><span class="s2">"</span>
+<a id="__codelineno-0-358" name="__codelineno-0-358"></a>            <span class="n">seq_tile_dir</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">sequencing_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">grid_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tile</span><span class="si">}</span><span class="s2">"</span>
+<a id="__codelineno-0-359" name="__codelineno-0-359"></a>
+<a id="__codelineno-0-360" name="__codelineno-0-360"></a>            <span class="n">crops_filename</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">segmentation_type</span><span class="si">}</span><span class="s2">_crops_</span><span class="si">{</span><span class="n">window</span><span class="si">}</span><span class="s2">.tif"</span>
+<a id="__codelineno-0-361" name="__codelineno-0-361"></a>            <span class="n">mask_crops_filename</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">segmentation_type</span><span class="si">}</span><span class="s2">_mask_crops_</span><span class="si">{</span><span class="n">window</span><span class="si">}</span><span class="s2">.tif"</span>
+<a id="__codelineno-0-362" name="__codelineno-0-362"></a>            <span class="n">crops_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tile_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">crops_filename</span><span class="si">}</span><span class="s2">"</span>
+<a id="__codelineno-0-363" name="__codelineno-0-363"></a>            <span class="n">mask_crops_path</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tile_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">mask_crops_filename</span><span class="si">}</span><span class="s2">"</span>
+<a id="__codelineno-0-364" name="__codelineno-0-364"></a>            <span class="n">seg_csv</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tile_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">segmentation_type</span><span class="si">}</span><span class="s2">.csv"</span>
+<a id="__codelineno-0-365" name="__codelineno-0-365"></a>            <span class="n">reads_csv</span> <span class="o">=</span> <span class="p">(</span>
+<a id="__codelineno-0-366" name="__codelineno-0-366"></a>                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">seq_tile_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">segmentation_type</span><span class="si">}</span><span class="s2">_reads</span><span class="si">{</span><span class="n">sequencing_reads_params</span><span class="si">}</span><span class="s2">.csv"</span>
+<a id="__codelineno-0-367" name="__codelineno-0-367"></a>            <span class="p">)</span>
+<a id="__codelineno-0-368" name="__codelineno-0-368"></a>
+<a id="__codelineno-0-369" name="__codelineno-0-369"></a>            <span class="n">targets</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">crops_path</span><span class="p">,</span> <span class="n">mask_crops_path</span><span class="p">,</span> <span class="n">seg_csv</span><span class="p">,</span> <span class="n">reads_csv</span><span class="p">])</span>
+<a id="__codelineno-0-370" name="__codelineno-0-370"></a>            <span class="n">symlinks</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">grid_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tile</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">crops_filename</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="n">crops_path</span><span class="p">))</span>
+<a id="__codelineno-0-371" name="__codelineno-0-371"></a>            <span class="n">symlinks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+<a id="__codelineno-0-372" name="__codelineno-0-372"></a>                <span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">grid_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">tile</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">mask_crops_filename</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span> <span class="n">mask_crops_path</span><span class="p">)</span>
+<a id="__codelineno-0-373" name="__codelineno-0-373"></a>            <span class="p">)</span>
+<a id="__codelineno-0-374" name="__codelineno-0-374"></a>
+<a id="__codelineno-0-375" name="__codelineno-0-375"></a>            <span class="n">cp_csv</span> <span class="o">=</span> <span class="s2">""</span>
+<a id="__codelineno-0-376" name="__codelineno-0-376"></a>            <span class="k">if</span> <span class="n">cp_features</span><span class="p">:</span>
+<a id="__codelineno-0-377" name="__codelineno-0-377"></a>                <span class="n">cp_csv</span> <span class="o">=</span> <span class="p">(</span>
+<a id="__codelineno-0-378" name="__codelineno-0-378"></a>                    <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">tile_dir</span><span class="si">}</span><span class="s2">/cellprofiler</span><span class="si">{</span><span class="n">cellprofiler_cycle</span><span class="si">}</span><span class="s2">_"</span>
+<a id="__codelineno-0-379" name="__codelineno-0-379"></a>                    <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">cellprofiler_pipeline</span><span class="si">}</span><span class="s2">.csv"</span>
+<a id="__codelineno-0-380" name="__codelineno-0-380"></a>                <span class="p">)</span>
+<a id="__codelineno-0-381" name="__codelineno-0-381"></a>                <span class="n">targets</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cp_csv</span><span class="p">)</span>
+<a id="__codelineno-0-382" name="__codelineno-0-382"></a>
+<a id="__codelineno-0-383" name="__codelineno-0-383"></a>            <span class="n">manifest_rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+<a id="__codelineno-0-384" name="__codelineno-0-384"></a>                <span class="p">{</span>
+<a id="__codelineno-0-385" name="__codelineno-0-385"></a>                    <span class="s2">"well"</span><span class="p">:</span> <span class="n">well</span><span class="p">,</span>
+<a id="__codelineno-0-386" name="__codelineno-0-386"></a>                    <span class="s2">"tile"</span><span class="p">:</span> <span class="n">tile</span><span class="p">,</span>
+<a id="__codelineno-0-387" name="__codelineno-0-387"></a>                    <span class="s2">"segmentation_csv"</span><span class="p">:</span> <span class="n">seg_csv</span><span class="p">,</span>
+<a id="__codelineno-0-388" name="__codelineno-0-388"></a>                    <span class="s2">"reads_csv"</span><span class="p">:</span> <span class="n">reads_csv</span><span class="p">,</span>
+<a id="__codelineno-0-389" name="__codelineno-0-389"></a>                    <span class="s2">"cellprofiler_csv"</span><span class="p">:</span> <span class="n">cp_csv</span><span class="p">,</span>
+<a id="__codelineno-0-390" name="__codelineno-0-390"></a>                    <span class="s2">"crops_tif"</span><span class="p">:</span> <span class="n">crops_path</span><span class="p">,</span>
+<a id="__codelineno-0-391" name="__codelineno-0-391"></a>                    <span class="s2">"mask_crops_tif"</span><span class="p">:</span> <span class="n">mask_crops_path</span><span class="p">,</span>
+<a id="__codelineno-0-392" name="__codelineno-0-392"></a>                <span class="p">}</span>
+<a id="__codelineno-0-393" name="__codelineno-0-393"></a>            <span class="p">)</span>
+<a id="__codelineno-0-394" name="__codelineno-0-394"></a>
+<a id="__codelineno-0-395" name="__codelineno-0-395"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">"targets"</span><span class="p">:</span> <span class="n">targets</span><span class="p">,</span> <span class="s2">"manifest_rows"</span><span class="p">:</span> <span class="n">manifest_rows</span><span class="p">,</span> <span class="s2">"symlinks"</span><span class="p">:</span> <span class="n">symlinks</span><span class="p">}</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2567,39 +2691,39 @@ reproducibility of file ordering).</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/fisseq_embeddings_pipeline/build_cell_images_enumerate.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-281">281</a></span>
-<span class="normal"><a href="#__codelineno-0-282">282</a></span>
-<span class="normal"><a href="#__codelineno-0-283">283</a></span>
-<span class="normal"><a href="#__codelineno-0-284">284</a></span>
-<span class="normal"><a href="#__codelineno-0-285">285</a></span>
-<span class="normal"><a href="#__codelineno-0-286">286</a></span>
-<span class="normal"><a href="#__codelineno-0-287">287</a></span>
-<span class="normal"><a href="#__codelineno-0-288">288</a></span>
-<span class="normal"><a href="#__codelineno-0-289">289</a></span>
-<span class="normal"><a href="#__codelineno-0-290">290</a></span>
-<span class="normal"><a href="#__codelineno-0-291">291</a></span>
-<span class="normal"><a href="#__codelineno-0-292">292</a></span>
-<span class="normal"><a href="#__codelineno-0-293">293</a></span>
-<span class="normal"><a href="#__codelineno-0-294">294</a></span>
-<span class="normal"><a href="#__codelineno-0-295">295</a></span>
-<span class="normal"><a href="#__codelineno-0-296">296</a></span>
-<span class="normal"><a href="#__codelineno-0-297">297</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-281" name="__codelineno-0-281"></a><span class="k">def</span><span class="w"> </span><span class="nf">enumerate_tile_names</span><span class="p">(</span><span class="n">phenotyping_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">well</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">grid_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
-<a id="__codelineno-0-282" name="__codelineno-0-282"></a><span class="w">    </span><span class="sd">"""List tile directory names (e.g. ``tile0x0y``) for one well/grid_size.</span>
-<a id="__codelineno-0-283" name="__codelineno-0-283"></a>
-<a id="__codelineno-0-284" name="__codelineno-0-284"></a><span class="sd">    Globs ``{phenotyping_dir}/{well}_grid{grid_size}/tile*x*y`` and keeps</span>
-<a id="__codelineno-0-285" name="__codelineno-0-285"></a><span class="sd">    only directory names matching ``TILE_DIR_RE``, sorted lexically</span>
-<a id="__codelineno-0-286" name="__codelineno-0-286"></a><span class="sd">    (numeric tile ordering is handled by the caller, which iterates</span>
-<a id="__codelineno-0-287" name="__codelineno-0-287"></a><span class="sd">    wells/tiles in a fixed, deterministic order for target-list/manifest</span>
-<a id="__codelineno-0-288" name="__codelineno-0-288"></a><span class="sd">    generation -- exact tile order doesn't affect correctness here, only</span>
-<a id="__codelineno-0-289" name="__codelineno-0-289"></a><span class="sd">    reproducibility of file ordering).</span>
-<a id="__codelineno-0-290" name="__codelineno-0-290"></a><span class="sd">    """</span>
-<a id="__codelineno-0-291" name="__codelineno-0-291"></a>    <span class="n">tiles</span> <span class="o">=</span> <span class="p">[]</span>
-<a id="__codelineno-0-292" name="__codelineno-0-292"></a>    <span class="n">pattern</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">phenotyping_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">well</span><span class="si">}</span><span class="s2">_grid</span><span class="si">{</span><span class="n">grid_size</span><span class="si">}</span><span class="s2">/tile*x*y"</span>
-<a id="__codelineno-0-293" name="__codelineno-0-293"></a>    <span class="k">for</span> <span class="n">tile_dir</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">pattern</span><span class="p">)):</span>
-<a id="__codelineno-0-294" name="__codelineno-0-294"></a>        <span class="n">name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">tile_dir</span><span class="p">)</span>
-<a id="__codelineno-0-295" name="__codelineno-0-295"></a>        <span class="k">if</span> <span class="n">TILE_DIR_RE</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
-<a id="__codelineno-0-296" name="__codelineno-0-296"></a>            <span class="n">tiles</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-<a id="__codelineno-0-297" name="__codelineno-0-297"></a>    <span class="k">return</span> <span class="n">tiles</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-305">305</a></span>
+<span class="normal"><a href="#__codelineno-0-306">306</a></span>
+<span class="normal"><a href="#__codelineno-0-307">307</a></span>
+<span class="normal"><a href="#__codelineno-0-308">308</a></span>
+<span class="normal"><a href="#__codelineno-0-309">309</a></span>
+<span class="normal"><a href="#__codelineno-0-310">310</a></span>
+<span class="normal"><a href="#__codelineno-0-311">311</a></span>
+<span class="normal"><a href="#__codelineno-0-312">312</a></span>
+<span class="normal"><a href="#__codelineno-0-313">313</a></span>
+<span class="normal"><a href="#__codelineno-0-314">314</a></span>
+<span class="normal"><a href="#__codelineno-0-315">315</a></span>
+<span class="normal"><a href="#__codelineno-0-316">316</a></span>
+<span class="normal"><a href="#__codelineno-0-317">317</a></span>
+<span class="normal"><a href="#__codelineno-0-318">318</a></span>
+<span class="normal"><a href="#__codelineno-0-319">319</a></span>
+<span class="normal"><a href="#__codelineno-0-320">320</a></span>
+<span class="normal"><a href="#__codelineno-0-321">321</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-305" name="__codelineno-0-305"></a><span class="k">def</span><span class="w"> </span><span class="nf">enumerate_tile_names</span><span class="p">(</span><span class="n">phenotyping_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">well</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">grid_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<a id="__codelineno-0-306" name="__codelineno-0-306"></a><span class="w">    </span><span class="sd">"""List tile directory names (e.g. ``tile0x0y``) for one well/grid_size.</span>
+<a id="__codelineno-0-307" name="__codelineno-0-307"></a>
+<a id="__codelineno-0-308" name="__codelineno-0-308"></a><span class="sd">    Globs ``{phenotyping_dir}/{well}_grid{grid_size}/tile*x*y`` and keeps</span>
+<a id="__codelineno-0-309" name="__codelineno-0-309"></a><span class="sd">    only directory names matching ``TILE_DIR_RE``, sorted lexically</span>
+<a id="__codelineno-0-310" name="__codelineno-0-310"></a><span class="sd">    (numeric tile ordering is handled by the caller, which iterates</span>
+<a id="__codelineno-0-311" name="__codelineno-0-311"></a><span class="sd">    wells/tiles in a fixed, deterministic order for target-list/manifest</span>
+<a id="__codelineno-0-312" name="__codelineno-0-312"></a><span class="sd">    generation -- exact tile order doesn't affect correctness here, only</span>
+<a id="__codelineno-0-313" name="__codelineno-0-313"></a><span class="sd">    reproducibility of file ordering).</span>
+<a id="__codelineno-0-314" name="__codelineno-0-314"></a><span class="sd">    """</span>
+<a id="__codelineno-0-315" name="__codelineno-0-315"></a>    <span class="n">tiles</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-0-316" name="__codelineno-0-316"></a>    <span class="n">pattern</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">phenotyping_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">well</span><span class="si">}</span><span class="s2">_grid</span><span class="si">{</span><span class="n">grid_size</span><span class="si">}</span><span class="s2">/tile*x*y"</span>
+<a id="__codelineno-0-317" name="__codelineno-0-317"></a>    <span class="k">for</span> <span class="n">tile_dir</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">pattern</span><span class="p">)):</span>
+<a id="__codelineno-0-318" name="__codelineno-0-318"></a>        <span class="n">name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">tile_dir</span><span class="p">)</span>
+<a id="__codelineno-0-319" name="__codelineno-0-319"></a>        <span class="k">if</span> <span class="n">TILE_DIR_RE</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<a id="__codelineno-0-320" name="__codelineno-0-320"></a>            <span class="n">tiles</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+<a id="__codelineno-0-321" name="__codelineno-0-321"></a>    <span class="k">return</span> <span class="n">tiles</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2636,31 +2760,7 @@ targets/manifest/symlinks.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/fisseq_embeddings_pipeline/build_cell_images_enumerate.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-378">378</a></span>
-<span class="normal"><a href="#__codelineno-0-379">379</a></span>
-<span class="normal"><a href="#__codelineno-0-380">380</a></span>
-<span class="normal"><a href="#__codelineno-0-381">381</a></span>
-<span class="normal"><a href="#__codelineno-0-382">382</a></span>
-<span class="normal"><a href="#__codelineno-0-383">383</a></span>
-<span class="normal"><a href="#__codelineno-0-384">384</a></span>
-<span class="normal"><a href="#__codelineno-0-385">385</a></span>
-<span class="normal"><a href="#__codelineno-0-386">386</a></span>
-<span class="normal"><a href="#__codelineno-0-387">387</a></span>
-<span class="normal"><a href="#__codelineno-0-388">388</a></span>
-<span class="normal"><a href="#__codelineno-0-389">389</a></span>
-<span class="normal"><a href="#__codelineno-0-390">390</a></span>
-<span class="normal"><a href="#__codelineno-0-391">391</a></span>
-<span class="normal"><a href="#__codelineno-0-392">392</a></span>
-<span class="normal"><a href="#__codelineno-0-393">393</a></span>
-<span class="normal"><a href="#__codelineno-0-394">394</a></span>
-<span class="normal"><a href="#__codelineno-0-395">395</a></span>
-<span class="normal"><a href="#__codelineno-0-396">396</a></span>
-<span class="normal"><a href="#__codelineno-0-397">397</a></span>
-<span class="normal"><a href="#__codelineno-0-398">398</a></span>
-<span class="normal"><a href="#__codelineno-0-399">399</a></span>
-<span class="normal"><a href="#__codelineno-0-400">400</a></span>
-<span class="normal"><a href="#__codelineno-0-401">401</a></span>
-<span class="normal"><a href="#__codelineno-0-402">402</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-402">402</a></span>
 <span class="normal"><a href="#__codelineno-0-403">403</a></span>
 <span class="normal"><a href="#__codelineno-0-404">404</a></span>
 <span class="normal"><a href="#__codelineno-0-405">405</a></span>
@@ -2711,82 +2811,104 @@ targets/manifest/symlinks.</p>
 <span class="normal"><a href="#__codelineno-0-450">450</a></span>
 <span class="normal"><a href="#__codelineno-0-451">451</a></span>
 <span class="normal"><a href="#__codelineno-0-452">452</a></span>
-<span class="normal"><a href="#__codelineno-0-453">453</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-378" name="__codelineno-0-378"></a><span class="nd">@hydra</span><span class="o">.</span><span class="n">main</span><span class="p">(</span>
-<a id="__codelineno-0-379" name="__codelineno-0-379"></a>    <span class="n">version_base</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-380" name="__codelineno-0-380"></a>    <span class="n">config_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-381" name="__codelineno-0-381"></a>    <span class="n">config_name</span><span class="o">=</span><span class="s2">"build_cell_images_enumerate_main"</span><span class="p">,</span>
-<a id="__codelineno-0-382" name="__codelineno-0-382"></a><span class="p">)</span>
-<a id="__codelineno-0-383" name="__codelineno-0-383"></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">cfg</span><span class="p">:</span> <span class="n">DictConfig</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-384" name="__codelineno-0-384"></a><span class="w">    </span><span class="sd">"""</span>
-<a id="__codelineno-0-385" name="__codelineno-0-385"></a><span class="sd">    Hydra entry point: resolve grid sizes, enumerate tiles, write</span>
-<a id="__codelineno-0-386" name="__codelineno-0-386"></a><span class="sd">    targets/manifest/symlinks.</span>
-<a id="__codelineno-0-387" name="__codelineno-0-387"></a>
-<a id="__codelineno-0-388" name="__codelineno-0-388"></a><span class="sd">    Configuration</span>
-<a id="__codelineno-0-389" name="__codelineno-0-389"></a><span class="sd">    -------------</span>
-<a id="__codelineno-0-390" name="__codelineno-0-390"></a><span class="sd">    Override any field on the command line, e.g.::</span>
-<a id="__codelineno-0-391" name="__codelineno-0-391"></a>
-<a id="__codelineno-0-392" name="__codelineno-0-392"></a><span class="sd">        python -m fisseq_embeddings_pipeline.build_cell_images_enumerate \\</span>
-<a id="__codelineno-0-393" name="__codelineno-0-393"></a><span class="sd">            output_dir=./out \\</span>
-<a id="__codelineno-0-394" name="__codelineno-0-394"></a><span class="sd">            starcall_workflow_dir=/data/experiment1 \\</span>
-<a id="__codelineno-0-395" name="__codelineno-0-395"></a><span class="sd">            'wells=[well1,well2]' \\</span>
-<a id="__codelineno-0-396" name="__codelineno-0-396"></a><span class="sd">            segmentation_type=cells</span>
-<a id="__codelineno-0-397" name="__codelineno-0-397"></a><span class="sd">    """</span>
-<a id="__codelineno-0-398" name="__codelineno-0-398"></a>    <span class="n">enum_cfg</span><span class="p">:</span> <span class="n">BuildCellImagesEnumerateConfig</span> <span class="o">=</span> <span class="n">OmegaConf</span><span class="o">.</span><span class="n">to_object</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
-<a id="__codelineno-0-399" name="__codelineno-0-399"></a>
-<a id="__codelineno-0-400" name="__codelineno-0-400"></a>    <span class="n">output_dir</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">output_dir</span><span class="p">)</span>
-<a id="__codelineno-0-401" name="__codelineno-0-401"></a>    <span class="n">output_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-0-402" name="__codelineno-0-402"></a>    <span class="n">enum_cfg</span><span class="o">.</span><span class="n">output_dir</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">output_dir</span><span class="p">)</span>
-<a id="__codelineno-0-403" name="__codelineno-0-403"></a>    <span class="n">setup_logging</span><span class="p">(</span><span class="n">enum_cfg</span><span class="p">,</span> <span class="s2">"build_cell_images_enumerate"</span><span class="p">)</span>
-<a id="__codelineno-0-404" name="__codelineno-0-404"></a>
-<a id="__codelineno-0-405" name="__codelineno-0-405"></a>    <span class="n">resolved_dirs</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-0-406" name="__codelineno-0-406"></a>        <span class="n">dir_key</span><span class="p">:</span> <span class="n">resolve_data_dir</span><span class="p">(</span>
-<a id="__codelineno-0-407" name="__codelineno-0-407"></a>            <span class="n">enum_cfg</span><span class="o">.</span><span class="n">starcall_workflow_dir</span><span class="p">,</span> <span class="n">dir_key</span><span class="p">,</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">enum_cfg</span><span class="p">,</span> <span class="n">dir_key</span><span class="p">)</span>
-<a id="__codelineno-0-408" name="__codelineno-0-408"></a>        <span class="p">)</span>
-<a id="__codelineno-0-409" name="__codelineno-0-409"></a>        <span class="k">for</span> <span class="n">dir_key</span> <span class="ow">in</span> <span class="n">_RESOLVED_DIR_KEYS</span>
-<a id="__codelineno-0-410" name="__codelineno-0-410"></a>    <span class="p">}</span>
-<a id="__codelineno-0-411" name="__codelineno-0-411"></a>    <span class="n">resolved_dirs_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="n">enum_cfg</span><span class="o">.</span><span class="n">resolved_dirs_out</span>
-<a id="__codelineno-0-412" name="__codelineno-0-412"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">resolved_dirs_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-<a id="__codelineno-0-413" name="__codelineno-0-413"></a>        <span class="k">for</span> <span class="n">dir_key</span> <span class="ow">in</span> <span class="n">_RESOLVED_DIR_KEYS</span><span class="p">:</span>
-<a id="__codelineno-0-414" name="__codelineno-0-414"></a>            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">dir_key</span><span class="si">}</span><span class="s2">='</span><span class="si">{</span><span class="n">resolved_dirs</span><span class="p">[</span><span class="n">dir_key</span><span class="p">]</span><span class="si">}</span><span class="s2">'</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-0-415" name="__codelineno-0-415"></a>    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Resolved starcall-workflow directories: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">resolved_dirs</span><span class="p">)</span>
-<a id="__codelineno-0-416" name="__codelineno-0-416"></a>
-<a id="__codelineno-0-417" name="__codelineno-0-417"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">build_enumeration</span><span class="p">(</span>
-<a id="__codelineno-0-418" name="__codelineno-0-418"></a>        <span class="n">phenotyping_dir</span><span class="o">=</span><span class="n">resolved_dirs</span><span class="p">[</span><span class="s2">"phenotyping_dir"</span><span class="p">],</span>
-<a id="__codelineno-0-419" name="__codelineno-0-419"></a>        <span class="n">sequencing_dir</span><span class="o">=</span><span class="n">resolved_dirs</span><span class="p">[</span><span class="s2">"sequencing_dir"</span><span class="p">],</span>
-<a id="__codelineno-0-420" name="__codelineno-0-420"></a>        <span class="n">wells</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">wells</span><span class="p">,</span>
-<a id="__codelineno-0-421" name="__codelineno-0-421"></a>        <span class="n">grid_size</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">grid_size</span><span class="p">,</span>
-<a id="__codelineno-0-422" name="__codelineno-0-422"></a>        <span class="n">segmentation_type</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">segmentation_type</span><span class="p">,</span>
-<a id="__codelineno-0-423" name="__codelineno-0-423"></a>        <span class="n">use_corrected</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">use_corrected</span><span class="p">,</span>
-<a id="__codelineno-0-424" name="__codelineno-0-424"></a>        <span class="n">sequencing_reads_params</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">sequencing_reads_params</span><span class="p">,</span>
-<a id="__codelineno-0-425" name="__codelineno-0-425"></a>        <span class="n">cp_features</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">cp_features</span><span class="p">,</span>
-<a id="__codelineno-0-426" name="__codelineno-0-426"></a>        <span class="n">cellprofiler_cycle</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">cellprofiler_cycle</span><span class="p">,</span>
-<a id="__codelineno-0-427" name="__codelineno-0-427"></a>        <span class="n">cellprofiler_pipeline</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">cellprofiler_pipeline</span><span class="p">,</span>
-<a id="__codelineno-0-428" name="__codelineno-0-428"></a>    <span class="p">)</span>
-<a id="__codelineno-0-429" name="__codelineno-0-429"></a>
-<a id="__codelineno-0-430" name="__codelineno-0-430"></a>    <span class="n">targets_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="n">enum_cfg</span><span class="o">.</span><span class="n">targets_out</span>
-<a id="__codelineno-0-431" name="__codelineno-0-431"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">targets_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-<a id="__codelineno-0-432" name="__codelineno-0-432"></a>        <span class="k">for</span> <span class="n">target</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">"targets"</span><span class="p">]:</span>
-<a id="__codelineno-0-433" name="__codelineno-0-433"></a>            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">target</span> <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-0-434" name="__codelineno-0-434"></a>
-<a id="__codelineno-0-435" name="__codelineno-0-435"></a>    <span class="n">manifest_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="n">enum_cfg</span><span class="o">.</span><span class="n">manifest_out</span>
-<a id="__codelineno-0-436" name="__codelineno-0-436"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">manifest_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">""</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-<a id="__codelineno-0-437" name="__codelineno-0-437"></a>        <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="n">_MANIFEST_FIELDNAMES</span><span class="p">)</span>
-<a id="__codelineno-0-438" name="__codelineno-0-438"></a>        <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
-<a id="__codelineno-0-439" name="__codelineno-0-439"></a>        <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">"manifest_rows"</span><span class="p">])</span>
+<span class="normal"><a href="#__codelineno-0-453">453</a></span>
+<span class="normal"><a href="#__codelineno-0-454">454</a></span>
+<span class="normal"><a href="#__codelineno-0-455">455</a></span>
+<span class="normal"><a href="#__codelineno-0-456">456</a></span>
+<span class="normal"><a href="#__codelineno-0-457">457</a></span>
+<span class="normal"><a href="#__codelineno-0-458">458</a></span>
+<span class="normal"><a href="#__codelineno-0-459">459</a></span>
+<span class="normal"><a href="#__codelineno-0-460">460</a></span>
+<span class="normal"><a href="#__codelineno-0-461">461</a></span>
+<span class="normal"><a href="#__codelineno-0-462">462</a></span>
+<span class="normal"><a href="#__codelineno-0-463">463</a></span>
+<span class="normal"><a href="#__codelineno-0-464">464</a></span>
+<span class="normal"><a href="#__codelineno-0-465">465</a></span>
+<span class="normal"><a href="#__codelineno-0-466">466</a></span>
+<span class="normal"><a href="#__codelineno-0-467">467</a></span>
+<span class="normal"><a href="#__codelineno-0-468">468</a></span>
+<span class="normal"><a href="#__codelineno-0-469">469</a></span>
+<span class="normal"><a href="#__codelineno-0-470">470</a></span>
+<span class="normal"><a href="#__codelineno-0-471">471</a></span>
+<span class="normal"><a href="#__codelineno-0-472">472</a></span>
+<span class="normal"><a href="#__codelineno-0-473">473</a></span>
+<span class="normal"><a href="#__codelineno-0-474">474</a></span>
+<span class="normal"><a href="#__codelineno-0-475">475</a></span>
+<span class="normal"><a href="#__codelineno-0-476">476</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-402" name="__codelineno-0-402"></a><span class="nd">@hydra</span><span class="o">.</span><span class="n">main</span><span class="p">(</span>
+<a id="__codelineno-0-403" name="__codelineno-0-403"></a>    <span class="n">version_base</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-404" name="__codelineno-0-404"></a>    <span class="n">config_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-405" name="__codelineno-0-405"></a>    <span class="n">config_name</span><span class="o">=</span><span class="s2">"build_cell_images_enumerate_main"</span><span class="p">,</span>
+<a id="__codelineno-0-406" name="__codelineno-0-406"></a><span class="p">)</span>
+<a id="__codelineno-0-407" name="__codelineno-0-407"></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">cfg</span><span class="p">:</span> <span class="n">DictConfig</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-408" name="__codelineno-0-408"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="__codelineno-0-409" name="__codelineno-0-409"></a><span class="sd">    Hydra entry point: resolve grid sizes, enumerate tiles, write</span>
+<a id="__codelineno-0-410" name="__codelineno-0-410"></a><span class="sd">    targets/manifest/symlinks.</span>
+<a id="__codelineno-0-411" name="__codelineno-0-411"></a>
+<a id="__codelineno-0-412" name="__codelineno-0-412"></a><span class="sd">    Configuration</span>
+<a id="__codelineno-0-413" name="__codelineno-0-413"></a><span class="sd">    -------------</span>
+<a id="__codelineno-0-414" name="__codelineno-0-414"></a><span class="sd">    Override any field on the command line, e.g.::</span>
+<a id="__codelineno-0-415" name="__codelineno-0-415"></a>
+<a id="__codelineno-0-416" name="__codelineno-0-416"></a><span class="sd">        python -m fisseq_embeddings_pipeline.build_cell_images_enumerate \\</span>
+<a id="__codelineno-0-417" name="__codelineno-0-417"></a><span class="sd">            output_dir=./out \\</span>
+<a id="__codelineno-0-418" name="__codelineno-0-418"></a><span class="sd">            starcall_workflow_dir=/data/experiment1 \\</span>
+<a id="__codelineno-0-419" name="__codelineno-0-419"></a><span class="sd">            'wells=[well1,well2]' \\</span>
+<a id="__codelineno-0-420" name="__codelineno-0-420"></a><span class="sd">            segmentation_type=cells</span>
+<a id="__codelineno-0-421" name="__codelineno-0-421"></a><span class="sd">    """</span>
+<a id="__codelineno-0-422" name="__codelineno-0-422"></a>    <span class="n">enum_cfg</span><span class="p">:</span> <span class="n">BuildCellImagesEnumerateConfig</span> <span class="o">=</span> <span class="n">OmegaConf</span><span class="o">.</span><span class="n">to_object</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
+<a id="__codelineno-0-423" name="__codelineno-0-423"></a>
+<a id="__codelineno-0-424" name="__codelineno-0-424"></a>    <span class="n">output_dir</span> <span class="o">=</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span><span class="p">(</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">output_dir</span><span class="p">)</span>
+<a id="__codelineno-0-425" name="__codelineno-0-425"></a>    <span class="n">output_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-426" name="__codelineno-0-426"></a>    <span class="n">enum_cfg</span><span class="o">.</span><span class="n">output_dir</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">output_dir</span><span class="p">)</span>
+<a id="__codelineno-0-427" name="__codelineno-0-427"></a>    <span class="n">setup_logging</span><span class="p">(</span><span class="n">enum_cfg</span><span class="p">,</span> <span class="s2">"build_cell_images_enumerate"</span><span class="p">)</span>
+<a id="__codelineno-0-428" name="__codelineno-0-428"></a>
+<a id="__codelineno-0-429" name="__codelineno-0-429"></a>    <span class="n">resolved_dirs</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-0-430" name="__codelineno-0-430"></a>        <span class="n">dir_key</span><span class="p">:</span> <span class="n">resolve_data_dir</span><span class="p">(</span>
+<a id="__codelineno-0-431" name="__codelineno-0-431"></a>            <span class="n">enum_cfg</span><span class="o">.</span><span class="n">starcall_workflow_dir</span><span class="p">,</span> <span class="n">dir_key</span><span class="p">,</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">enum_cfg</span><span class="p">,</span> <span class="n">dir_key</span><span class="p">)</span>
+<a id="__codelineno-0-432" name="__codelineno-0-432"></a>        <span class="p">)</span>
+<a id="__codelineno-0-433" name="__codelineno-0-433"></a>        <span class="k">for</span> <span class="n">dir_key</span> <span class="ow">in</span> <span class="n">_RESOLVED_DIR_KEYS</span>
+<a id="__codelineno-0-434" name="__codelineno-0-434"></a>    <span class="p">}</span>
+<a id="__codelineno-0-435" name="__codelineno-0-435"></a>    <span class="n">resolved_dirs_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="n">enum_cfg</span><span class="o">.</span><span class="n">resolved_dirs_out</span>
+<a id="__codelineno-0-436" name="__codelineno-0-436"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">resolved_dirs_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+<a id="__codelineno-0-437" name="__codelineno-0-437"></a>        <span class="k">for</span> <span class="n">dir_key</span> <span class="ow">in</span> <span class="n">_RESOLVED_DIR_KEYS</span><span class="p">:</span>
+<a id="__codelineno-0-438" name="__codelineno-0-438"></a>            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">dir_key</span><span class="si">}</span><span class="s2">='</span><span class="si">{</span><span class="n">resolved_dirs</span><span class="p">[</span><span class="n">dir_key</span><span class="p">]</span><span class="si">}</span><span class="s2">'</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-0-439" name="__codelineno-0-439"></a>    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Resolved starcall-workflow directories: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">resolved_dirs</span><span class="p">)</span>
 <a id="__codelineno-0-440" name="__codelineno-0-440"></a>
-<a id="__codelineno-0-441" name="__codelineno-0-441"></a>    <span class="n">symlinks_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="n">enum_cfg</span><span class="o">.</span><span class="n">symlinks_out</span>
-<a id="__codelineno-0-442" name="__codelineno-0-442"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">symlinks_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-<a id="__codelineno-0-443" name="__codelineno-0-443"></a>        <span class="k">for</span> <span class="n">rel_path</span><span class="p">,</span> <span class="n">abs_path</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">"symlinks"</span><span class="p">]:</span>
-<a id="__codelineno-0-444" name="__codelineno-0-444"></a>            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">rel_path</span><span class="si">}</span><span class="se">\t</span><span class="si">{</span><span class="n">abs_path</span><span class="si">}</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-0-445" name="__codelineno-0-445"></a>
-<a id="__codelineno-0-446" name="__codelineno-0-446"></a>    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
-<a id="__codelineno-0-447" name="__codelineno-0-447"></a>        <span class="s2">"Enumerated </span><span class="si">%d</span><span class="s2"> tile(s) across </span><span class="si">%d</span><span class="s2"> well(s); wrote </span><span class="si">%d</span><span class="s2"> Snakemake "</span>
-<a id="__codelineno-0-448" name="__codelineno-0-448"></a>        <span class="s2">"target(s) to </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span>
-<a id="__codelineno-0-449" name="__codelineno-0-449"></a>        <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">"manifest_rows"</span><span class="p">]),</span>
-<a id="__codelineno-0-450" name="__codelineno-0-450"></a>        <span class="nb">len</span><span class="p">(</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">wells</span><span class="p">),</span>
-<a id="__codelineno-0-451" name="__codelineno-0-451"></a>        <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">"targets"</span><span class="p">]),</span>
-<a id="__codelineno-0-452" name="__codelineno-0-452"></a>        <span class="n">targets_path</span><span class="p">,</span>
-<a id="__codelineno-0-453" name="__codelineno-0-453"></a>    <span class="p">)</span>
+<a id="__codelineno-0-441" name="__codelineno-0-441"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">build_enumeration</span><span class="p">(</span>
+<a id="__codelineno-0-442" name="__codelineno-0-442"></a>        <span class="n">phenotyping_dir</span><span class="o">=</span><span class="n">resolved_dirs</span><span class="p">[</span><span class="s2">"phenotyping_dir"</span><span class="p">],</span>
+<a id="__codelineno-0-443" name="__codelineno-0-443"></a>        <span class="n">sequencing_dir</span><span class="o">=</span><span class="n">resolved_dirs</span><span class="p">[</span><span class="s2">"sequencing_dir"</span><span class="p">],</span>
+<a id="__codelineno-0-444" name="__codelineno-0-444"></a>        <span class="n">wells</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">wells</span><span class="p">,</span>
+<a id="__codelineno-0-445" name="__codelineno-0-445"></a>        <span class="n">grid_size</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">grid_size</span><span class="p">,</span>
+<a id="__codelineno-0-446" name="__codelineno-0-446"></a>        <span class="n">segmentation_type</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">segmentation_type</span><span class="p">,</span>
+<a id="__codelineno-0-447" name="__codelineno-0-447"></a>        <span class="n">window</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">window</span><span class="p">,</span>
+<a id="__codelineno-0-448" name="__codelineno-0-448"></a>        <span class="n">sequencing_reads_params</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">sequencing_reads_params</span><span class="p">,</span>
+<a id="__codelineno-0-449" name="__codelineno-0-449"></a>        <span class="n">cp_features</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">cp_features</span><span class="p">,</span>
+<a id="__codelineno-0-450" name="__codelineno-0-450"></a>        <span class="n">cellprofiler_cycle</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">cellprofiler_cycle</span><span class="p">,</span>
+<a id="__codelineno-0-451" name="__codelineno-0-451"></a>        <span class="n">cellprofiler_pipeline</span><span class="o">=</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">cellprofiler_pipeline</span><span class="p">,</span>
+<a id="__codelineno-0-452" name="__codelineno-0-452"></a>    <span class="p">)</span>
+<a id="__codelineno-0-453" name="__codelineno-0-453"></a>
+<a id="__codelineno-0-454" name="__codelineno-0-454"></a>    <span class="n">targets_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="n">enum_cfg</span><span class="o">.</span><span class="n">targets_out</span>
+<a id="__codelineno-0-455" name="__codelineno-0-455"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">targets_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+<a id="__codelineno-0-456" name="__codelineno-0-456"></a>        <span class="k">for</span> <span class="n">target</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">"targets"</span><span class="p">]:</span>
+<a id="__codelineno-0-457" name="__codelineno-0-457"></a>            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">target</span> <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-0-458" name="__codelineno-0-458"></a>
+<a id="__codelineno-0-459" name="__codelineno-0-459"></a>    <span class="n">manifest_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="n">enum_cfg</span><span class="o">.</span><span class="n">manifest_out</span>
+<a id="__codelineno-0-460" name="__codelineno-0-460"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">manifest_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">""</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+<a id="__codelineno-0-461" name="__codelineno-0-461"></a>        <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="n">_MANIFEST_FIELDNAMES</span><span class="p">)</span>
+<a id="__codelineno-0-462" name="__codelineno-0-462"></a>        <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+<a id="__codelineno-0-463" name="__codelineno-0-463"></a>        <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">"manifest_rows"</span><span class="p">])</span>
+<a id="__codelineno-0-464" name="__codelineno-0-464"></a>
+<a id="__codelineno-0-465" name="__codelineno-0-465"></a>    <span class="n">symlinks_path</span> <span class="o">=</span> <span class="n">output_dir</span> <span class="o">/</span> <span class="n">enum_cfg</span><span class="o">.</span><span class="n">symlinks_out</span>
+<a id="__codelineno-0-466" name="__codelineno-0-466"></a>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">symlinks_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+<a id="__codelineno-0-467" name="__codelineno-0-467"></a>        <span class="k">for</span> <span class="n">rel_path</span><span class="p">,</span> <span class="n">abs_path</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">"symlinks"</span><span class="p">]:</span>
+<a id="__codelineno-0-468" name="__codelineno-0-468"></a>            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">rel_path</span><span class="si">}</span><span class="se">\t</span><span class="si">{</span><span class="n">abs_path</span><span class="si">}</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-0-469" name="__codelineno-0-469"></a>
+<a id="__codelineno-0-470" name="__codelineno-0-470"></a>    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+<a id="__codelineno-0-471" name="__codelineno-0-471"></a>        <span class="s2">"Enumerated </span><span class="si">%d</span><span class="s2"> tile(s) across </span><span class="si">%d</span><span class="s2"> well(s); wrote </span><span class="si">%d</span><span class="s2"> Snakemake target(s) to </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span>
+<a id="__codelineno-0-472" name="__codelineno-0-472"></a>        <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">"manifest_rows"</span><span class="p">]),</span>
+<a id="__codelineno-0-473" name="__codelineno-0-473"></a>        <span class="nb">len</span><span class="p">(</span><span class="n">enum_cfg</span><span class="o">.</span><span class="n">wells</span><span class="p">),</span>
+<a id="__codelineno-0-474" name="__codelineno-0-474"></a>        <span class="nb">len</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">"targets"</span><span class="p">]),</span>
+<a id="__codelineno-0-475" name="__codelineno-0-475"></a>        <span class="n">targets_path</span><span class="p">,</span>
+<a id="__codelineno-0-476" name="__codelineno-0-476"></a>    <span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2870,29 +2992,7 @@ reason", not just the documented-default case):</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/fisseq_embeddings_pipeline/build_cell_images_enumerate.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-224">224</a></span>
-<span class="normal"><a href="#__codelineno-0-225">225</a></span>
-<span class="normal"><a href="#__codelineno-0-226">226</a></span>
-<span class="normal"><a href="#__codelineno-0-227">227</a></span>
-<span class="normal"><a href="#__codelineno-0-228">228</a></span>
-<span class="normal"><a href="#__codelineno-0-229">229</a></span>
-<span class="normal"><a href="#__codelineno-0-230">230</a></span>
-<span class="normal"><a href="#__codelineno-0-231">231</a></span>
-<span class="normal"><a href="#__codelineno-0-232">232</a></span>
-<span class="normal"><a href="#__codelineno-0-233">233</a></span>
-<span class="normal"><a href="#__codelineno-0-234">234</a></span>
-<span class="normal"><a href="#__codelineno-0-235">235</a></span>
-<span class="normal"><a href="#__codelineno-0-236">236</a></span>
-<span class="normal"><a href="#__codelineno-0-237">237</a></span>
-<span class="normal"><a href="#__codelineno-0-238">238</a></span>
-<span class="normal"><a href="#__codelineno-0-239">239</a></span>
-<span class="normal"><a href="#__codelineno-0-240">240</a></span>
-<span class="normal"><a href="#__codelineno-0-241">241</a></span>
-<span class="normal"><a href="#__codelineno-0-242">242</a></span>
-<span class="normal"><a href="#__codelineno-0-243">243</a></span>
-<span class="normal"><a href="#__codelineno-0-244">244</a></span>
-<span class="normal"><a href="#__codelineno-0-245">245</a></span>
-<span class="normal"><a href="#__codelineno-0-246">246</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-246">246</a></span>
 <span class="normal"><a href="#__codelineno-0-247">247</a></span>
 <span class="normal"><a href="#__codelineno-0-248">248</a></span>
 <span class="normal"><a href="#__codelineno-0-249">249</a></span>
@@ -2924,61 +3024,87 @@ reason", not just the documented-default case):</p>
 <span class="normal"><a href="#__codelineno-0-275">275</a></span>
 <span class="normal"><a href="#__codelineno-0-276">276</a></span>
 <span class="normal"><a href="#__codelineno-0-277">277</a></span>
-<span class="normal"><a href="#__codelineno-0-278">278</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-224" name="__codelineno-0-224"></a><span class="k">def</span><span class="w"> </span><span class="nf">resolve_data_dir</span><span class="p">(</span>
-<a id="__codelineno-0-225" name="__codelineno-0-225"></a>    <span class="n">starcall_workflow_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">dir_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">explicit</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
-<a id="__codelineno-0-226" name="__codelineno-0-226"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-227" name="__codelineno-0-227"></a><span class="w">    </span><span class="sd">"""Resolve one of phenotyping_dir/segmentation_dir/sequencing_dir.</span>
-<a id="__codelineno-0-228" name="__codelineno-0-228"></a>
-<a id="__codelineno-0-229" name="__codelineno-0-229"></a><span class="sd">    Precedence, matching `workflow/Snakefile`'s own resolution exactly (so</span>
-<a id="__codelineno-0-230" name="__codelineno-0-230"></a><span class="sd">    this stays correct even when a project's own config.yaml remaps these</span>
-<a id="__codelineno-0-231" name="__codelineno-0-231"></a><span class="sd">    paths -- "handles cases where the output looks different for whatever</span>
-<a id="__codelineno-0-232" name="__codelineno-0-232"></a><span class="sd">    reason", not just the documented-default case):</span>
-<a id="__codelineno-0-233" name="__codelineno-0-233"></a>
-<a id="__codelineno-0-234" name="__codelineno-0-234"></a><span class="sd">    1. ``explicit``, if given.</span>
-<a id="__codelineno-0-235" name="__codelineno-0-235"></a><span class="sd">    2. ``dir_key`` read from ``starcall_workflow_dir``'s own project</span>
-<a id="__codelineno-0-236" name="__codelineno-0-236"></a><span class="sd">       config -- ``config.yaml`` if present, else ``default-config.yaml``</span>
-<a id="__codelineno-0-237" name="__codelineno-0-237"></a><span class="sd">       (never both; a project's ``config.yaml`` existing at all stops</span>
-<a id="__codelineno-0-238" name="__codelineno-0-238"></a><span class="sd">       ``default-config.yaml`` from being consulted, exactly like</span>
-<a id="__codelineno-0-239" name="__codelineno-0-239"></a><span class="sd">       `workflow/Snakefile`'s own `if os.path.exists('config.yaml'): ...</span>
-<a id="__codelineno-0-240" name="__codelineno-0-240"></a><span class="sd">       elif os.path.exists('default-config.yaml'): ...`). A relative value</span>
-<a id="__codelineno-0-241" name="__codelineno-0-241"></a><span class="sd">       there (starcall-workflow's own convention, e.g. ``'phenotyping/'``)</span>
-<a id="__codelineno-0-242" name="__codelineno-0-242"></a><span class="sd">       is resolved against ``starcall_workflow_dir`` -- the same directory</span>
-<a id="__codelineno-0-243" name="__codelineno-0-243"></a><span class="sd">       Snakemake itself runs relative to (`--directory`); an absolute</span>
-<a id="__codelineno-0-244" name="__codelineno-0-244"></a><span class="sd">       value is used as-is.</span>
-<a id="__codelineno-0-245" name="__codelineno-0-245"></a><span class="sd">    3. ``{starcall_workflow_dir}/{bare_name}`` (e.g. ``.../phenotyping``),</span>
-<a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="sd">       matching starcall-workflow's own ``default-config.yaml`` default</span>
-<a id="__codelineno-0-247" name="__codelineno-0-247"></a><span class="sd">       for the common case where a project doesn't override this key at</span>
-<a id="__codelineno-0-248" name="__codelineno-0-248"></a><span class="sd">       all (confirmed by reading `rules/config.smk`'s own</span>
-<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">       ``config.get(dir_key, '&lt;bare_name&gt;/')`` -- this fallback is exactly</span>
-<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">       that default, resolved against the same working directory).</span>
-<a id="__codelineno-0-251" name="__codelineno-0-251"></a>
-<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">    Parameters</span>
-<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">    ----------</span>
-<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">    dir_key : str</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a><span class="sd">        One of ``"phenotyping_dir"``, ``"segmentation_dir"``,</span>
-<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">        ``"sequencing_dir"``.</span>
-<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">    """</span>
-<a id="__codelineno-0-258" name="__codelineno-0-258"></a>    <span class="k">if</span> <span class="n">explicit</span><span class="p">:</span>
-<a id="__codelineno-0-259" name="__codelineno-0-259"></a>        <span class="k">return</span> <span class="n">explicit</span>
-<a id="__codelineno-0-260" name="__codelineno-0-260"></a>
-<a id="__codelineno-0-261" name="__codelineno-0-261"></a>    <span class="n">bare_name</span> <span class="o">=</span> <span class="n">_DEFAULT_SUBDIR</span><span class="p">[</span><span class="n">dir_key</span><span class="p">]</span>
-<a id="__codelineno-0-262" name="__codelineno-0-262"></a>    <span class="k">for</span> <span class="n">config_filename</span> <span class="ow">in</span> <span class="n">_PROJECT_CONFIG_FILENAMES</span><span class="p">:</span>
-<a id="__codelineno-0-263" name="__codelineno-0-263"></a>        <span class="n">config_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">starcall_workflow_dir</span><span class="p">,</span> <span class="n">config_filename</span><span class="p">)</span>
-<a id="__codelineno-0-264" name="__codelineno-0-264"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">config_path</span><span class="p">):</span>
-<a id="__codelineno-0-265" name="__codelineno-0-265"></a>            <span class="k">continue</span>
-<a id="__codelineno-0-266" name="__codelineno-0-266"></a>        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-<a id="__codelineno-0-267" name="__codelineno-0-267"></a>            <span class="n">project_config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
-<a id="__codelineno-0-268" name="__codelineno-0-268"></a>        <span class="n">value</span> <span class="o">=</span> <span class="n">project_config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">dir_key</span><span class="p">)</span>
-<a id="__codelineno-0-269" name="__codelineno-0-269"></a>        <span class="k">if</span> <span class="n">value</span><span class="p">:</span>
-<a id="__codelineno-0-270" name="__codelineno-0-270"></a>            <span class="n">value</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s2">"/"</span><span class="p">)</span>
-<a id="__codelineno-0-271" name="__codelineno-0-271"></a>            <span class="k">return</span> <span class="n">value</span> <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isabs</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="k">else</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
-<a id="__codelineno-0-272" name="__codelineno-0-272"></a>                <span class="n">starcall_workflow_dir</span><span class="p">,</span> <span class="n">value</span>
-<a id="__codelineno-0-273" name="__codelineno-0-273"></a>            <span class="p">)</span>
-<a id="__codelineno-0-274" name="__codelineno-0-274"></a>        <span class="k">break</span>  <span class="c1"># config.yaml exists (even without dir_key set) -- don't</span>
-<a id="__codelineno-0-275" name="__codelineno-0-275"></a>        <span class="c1"># also fall through to default-config.yaml, matching the</span>
-<a id="__codelineno-0-276" name="__codelineno-0-276"></a>        <span class="c1"># Snakefile's own either/or (never both) precedence.</span>
-<a id="__codelineno-0-277" name="__codelineno-0-277"></a>
-<a id="__codelineno-0-278" name="__codelineno-0-278"></a>    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">starcall_workflow_dir</span><span class="p">,</span> <span class="n">bare_name</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-278">278</a></span>
+<span class="normal"><a href="#__codelineno-0-279">279</a></span>
+<span class="normal"><a href="#__codelineno-0-280">280</a></span>
+<span class="normal"><a href="#__codelineno-0-281">281</a></span>
+<span class="normal"><a href="#__codelineno-0-282">282</a></span>
+<span class="normal"><a href="#__codelineno-0-283">283</a></span>
+<span class="normal"><a href="#__codelineno-0-284">284</a></span>
+<span class="normal"><a href="#__codelineno-0-285">285</a></span>
+<span class="normal"><a href="#__codelineno-0-286">286</a></span>
+<span class="normal"><a href="#__codelineno-0-287">287</a></span>
+<span class="normal"><a href="#__codelineno-0-288">288</a></span>
+<span class="normal"><a href="#__codelineno-0-289">289</a></span>
+<span class="normal"><a href="#__codelineno-0-290">290</a></span>
+<span class="normal"><a href="#__codelineno-0-291">291</a></span>
+<span class="normal"><a href="#__codelineno-0-292">292</a></span>
+<span class="normal"><a href="#__codelineno-0-293">293</a></span>
+<span class="normal"><a href="#__codelineno-0-294">294</a></span>
+<span class="normal"><a href="#__codelineno-0-295">295</a></span>
+<span class="normal"><a href="#__codelineno-0-296">296</a></span>
+<span class="normal"><a href="#__codelineno-0-297">297</a></span>
+<span class="normal"><a href="#__codelineno-0-298">298</a></span>
+<span class="normal"><a href="#__codelineno-0-299">299</a></span>
+<span class="normal"><a href="#__codelineno-0-300">300</a></span>
+<span class="normal"><a href="#__codelineno-0-301">301</a></span>
+<span class="normal"><a href="#__codelineno-0-302">302</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="k">def</span><span class="w"> </span><span class="nf">resolve_data_dir</span><span class="p">(</span>
+<a id="__codelineno-0-247" name="__codelineno-0-247"></a>    <span class="n">starcall_workflow_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">dir_key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">explicit</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<a id="__codelineno-0-248" name="__codelineno-0-248"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="w">    </span><span class="sd">"""Resolve one of phenotyping_dir/segmentation_dir/sequencing_dir.</span>
+<a id="__codelineno-0-250" name="__codelineno-0-250"></a>
+<a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="sd">    Precedence, matching `workflow/Snakefile`'s own resolution exactly (so</span>
+<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">    this stays correct even when a project's own config.yaml remaps these</span>
+<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">    paths -- "handles cases where the output looks different for whatever</span>
+<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">    reason", not just the documented-default case):</span>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a>
+<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">    1. ``explicit``, if given.</span>
+<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">    2. ``dir_key`` read from ``starcall_workflow_dir``'s own project</span>
+<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">       config -- ``config.yaml`` if present, else ``default-config.yaml``</span>
+<a id="__codelineno-0-259" name="__codelineno-0-259"></a><span class="sd">       (never both; a project's ``config.yaml`` existing at all stops</span>
+<a id="__codelineno-0-260" name="__codelineno-0-260"></a><span class="sd">       ``default-config.yaml`` from being consulted, exactly like</span>
+<a id="__codelineno-0-261" name="__codelineno-0-261"></a><span class="sd">       `workflow/Snakefile`'s own `if os.path.exists('config.yaml'): ...</span>
+<a id="__codelineno-0-262" name="__codelineno-0-262"></a><span class="sd">       elif os.path.exists('default-config.yaml'): ...`). A relative value</span>
+<a id="__codelineno-0-263" name="__codelineno-0-263"></a><span class="sd">       there (starcall-workflow's own convention, e.g. ``'phenotyping/'``)</span>
+<a id="__codelineno-0-264" name="__codelineno-0-264"></a><span class="sd">       is resolved against ``starcall_workflow_dir`` -- the same directory</span>
+<a id="__codelineno-0-265" name="__codelineno-0-265"></a><span class="sd">       Snakemake itself runs relative to (`--directory`); an absolute</span>
+<a id="__codelineno-0-266" name="__codelineno-0-266"></a><span class="sd">       value is used as-is.</span>
+<a id="__codelineno-0-267" name="__codelineno-0-267"></a><span class="sd">    3. ``{starcall_workflow_dir}/{bare_name}`` (e.g. ``.../phenotyping``),</span>
+<a id="__codelineno-0-268" name="__codelineno-0-268"></a><span class="sd">       matching starcall-workflow's own ``default-config.yaml`` default</span>
+<a id="__codelineno-0-269" name="__codelineno-0-269"></a><span class="sd">       for the common case where a project doesn't override this key at</span>
+<a id="__codelineno-0-270" name="__codelineno-0-270"></a><span class="sd">       all (confirmed by reading `rules/config.smk`'s own</span>
+<a id="__codelineno-0-271" name="__codelineno-0-271"></a><span class="sd">       ``config.get(dir_key, '&lt;bare_name&gt;/')`` -- this fallback is exactly</span>
+<a id="__codelineno-0-272" name="__codelineno-0-272"></a><span class="sd">       that default, resolved against the same working directory).</span>
+<a id="__codelineno-0-273" name="__codelineno-0-273"></a>
+<a id="__codelineno-0-274" name="__codelineno-0-274"></a><span class="sd">    Parameters</span>
+<a id="__codelineno-0-275" name="__codelineno-0-275"></a><span class="sd">    ----------</span>
+<a id="__codelineno-0-276" name="__codelineno-0-276"></a><span class="sd">    dir_key : str</span>
+<a id="__codelineno-0-277" name="__codelineno-0-277"></a><span class="sd">        One of ``"phenotyping_dir"``, ``"segmentation_dir"``,</span>
+<a id="__codelineno-0-278" name="__codelineno-0-278"></a><span class="sd">        ``"sequencing_dir"``.</span>
+<a id="__codelineno-0-279" name="__codelineno-0-279"></a><span class="sd">    """</span>
+<a id="__codelineno-0-280" name="__codelineno-0-280"></a>    <span class="k">if</span> <span class="n">explicit</span><span class="p">:</span>
+<a id="__codelineno-0-281" name="__codelineno-0-281"></a>        <span class="k">return</span> <span class="n">explicit</span>
+<a id="__codelineno-0-282" name="__codelineno-0-282"></a>
+<a id="__codelineno-0-283" name="__codelineno-0-283"></a>    <span class="n">bare_name</span> <span class="o">=</span> <span class="n">_DEFAULT_SUBDIR</span><span class="p">[</span><span class="n">dir_key</span><span class="p">]</span>
+<a id="__codelineno-0-284" name="__codelineno-0-284"></a>    <span class="k">for</span> <span class="n">config_filename</span> <span class="ow">in</span> <span class="n">_PROJECT_CONFIG_FILENAMES</span><span class="p">:</span>
+<a id="__codelineno-0-285" name="__codelineno-0-285"></a>        <span class="n">config_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">starcall_workflow_dir</span><span class="p">,</span> <span class="n">config_filename</span><span class="p">)</span>
+<a id="__codelineno-0-286" name="__codelineno-0-286"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">config_path</span><span class="p">):</span>
+<a id="__codelineno-0-287" name="__codelineno-0-287"></a>            <span class="k">continue</span>
+<a id="__codelineno-0-288" name="__codelineno-0-288"></a>        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">config_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+<a id="__codelineno-0-289" name="__codelineno-0-289"></a>            <span class="n">project_config</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+<a id="__codelineno-0-290" name="__codelineno-0-290"></a>        <span class="n">value</span> <span class="o">=</span> <span class="n">project_config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">dir_key</span><span class="p">)</span>
+<a id="__codelineno-0-291" name="__codelineno-0-291"></a>        <span class="k">if</span> <span class="n">value</span><span class="p">:</span>
+<a id="__codelineno-0-292" name="__codelineno-0-292"></a>            <span class="n">value</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s2">"/"</span><span class="p">)</span>
+<a id="__codelineno-0-293" name="__codelineno-0-293"></a>            <span class="k">return</span> <span class="p">(</span>
+<a id="__codelineno-0-294" name="__codelineno-0-294"></a>                <span class="n">value</span>
+<a id="__codelineno-0-295" name="__codelineno-0-295"></a>                <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isabs</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+<a id="__codelineno-0-296" name="__codelineno-0-296"></a>                <span class="k">else</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">starcall_workflow_dir</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+<a id="__codelineno-0-297" name="__codelineno-0-297"></a>            <span class="p">)</span>
+<a id="__codelineno-0-298" name="__codelineno-0-298"></a>        <span class="k">break</span>  <span class="c1"># config.yaml exists (even without dir_key set) -- don't</span>
+<a id="__codelineno-0-299" name="__codelineno-0-299"></a>        <span class="c1"># also fall through to default-config.yaml, matching the</span>
+<a id="__codelineno-0-300" name="__codelineno-0-300"></a>        <span class="c1"># Snakefile's own either/or (never both) precedence.</span>
+<a id="__codelineno-0-301" name="__codelineno-0-301"></a>
+<a id="__codelineno-0-302" name="__codelineno-0-302"></a>    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">starcall_workflow_dir</span><span class="p">,</span> <span class="n">bare_name</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -3033,31 +3159,7 @@ distinct grid size is required.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/fisseq_embeddings_pipeline/build_cell_images_enumerate.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-181">181</a></span>
-<span class="normal"><a href="#__codelineno-0-182">182</a></span>
-<span class="normal"><a href="#__codelineno-0-183">183</a></span>
-<span class="normal"><a href="#__codelineno-0-184">184</a></span>
-<span class="normal"><a href="#__codelineno-0-185">185</a></span>
-<span class="normal"><a href="#__codelineno-0-186">186</a></span>
-<span class="normal"><a href="#__codelineno-0-187">187</a></span>
-<span class="normal"><a href="#__codelineno-0-188">188</a></span>
-<span class="normal"><a href="#__codelineno-0-189">189</a></span>
-<span class="normal"><a href="#__codelineno-0-190">190</a></span>
-<span class="normal"><a href="#__codelineno-0-191">191</a></span>
-<span class="normal"><a href="#__codelineno-0-192">192</a></span>
-<span class="normal"><a href="#__codelineno-0-193">193</a></span>
-<span class="normal"><a href="#__codelineno-0-194">194</a></span>
-<span class="normal"><a href="#__codelineno-0-195">195</a></span>
-<span class="normal"><a href="#__codelineno-0-196">196</a></span>
-<span class="normal"><a href="#__codelineno-0-197">197</a></span>
-<span class="normal"><a href="#__codelineno-0-198">198</a></span>
-<span class="normal"><a href="#__codelineno-0-199">199</a></span>
-<span class="normal"><a href="#__codelineno-0-200">200</a></span>
-<span class="normal"><a href="#__codelineno-0-201">201</a></span>
-<span class="normal"><a href="#__codelineno-0-202">202</a></span>
-<span class="normal"><a href="#__codelineno-0-203">203</a></span>
-<span class="normal"><a href="#__codelineno-0-204">204</a></span>
-<span class="normal"><a href="#__codelineno-0-205">205</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-205">205</a></span>
 <span class="normal"><a href="#__codelineno-0-206">206</a></span>
 <span class="normal"><a href="#__codelineno-0-207">207</a></span>
 <span class="normal"><a href="#__codelineno-0-208">208</a></span>
@@ -3073,47 +3175,67 @@ distinct grid size is required.</p>
 <span class="normal"><a href="#__codelineno-0-218">218</a></span>
 <span class="normal"><a href="#__codelineno-0-219">219</a></span>
 <span class="normal"><a href="#__codelineno-0-220">220</a></span>
-<span class="normal"><a href="#__codelineno-0-221">221</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="k">def</span><span class="w"> </span><span class="nf">resolve_grid_size</span><span class="p">(</span>
-<a id="__codelineno-0-182" name="__codelineno-0-182"></a>    <span class="n">phenotyping_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">well</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">grid_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span>
-<a id="__codelineno-0-183" name="__codelineno-0-183"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<a id="__codelineno-0-184" name="__codelineno-0-184"></a><span class="w">    </span><span class="sd">"""Resolve one well's tile grid size, auto-detecting it when omitted.</span>
-<a id="__codelineno-0-185" name="__codelineno-0-185"></a>
-<a id="__codelineno-0-186" name="__codelineno-0-186"></a><span class="sd">    An explicit ``grid_size`` is returned as-is; otherwise this scans</span>
-<a id="__codelineno-0-187" name="__codelineno-0-187"></a><span class="sd">    ``phenotyping_dir`` for a ``{well}_grid&lt;N&gt;`` directory. Exactly one</span>
-<a id="__codelineno-0-188" name="__codelineno-0-188"></a><span class="sd">    distinct grid size is required.</span>
-<a id="__codelineno-0-189" name="__codelineno-0-189"></a>
-<a id="__codelineno-0-190" name="__codelineno-0-190"></a><span class="sd">    Raises</span>
-<a id="__codelineno-0-191" name="__codelineno-0-191"></a><span class="sd">    ------</span>
-<a id="__codelineno-0-192" name="__codelineno-0-192"></a><span class="sd">    ValueError</span>
-<a id="__codelineno-0-193" name="__codelineno-0-193"></a><span class="sd">        If auto-detection finds zero or more than one distinct grid size.</span>
-<a id="__codelineno-0-194" name="__codelineno-0-194"></a><span class="sd">    """</span>
-<a id="__codelineno-0-195" name="__codelineno-0-195"></a>    <span class="k">if</span> <span class="n">grid_size</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-196" name="__codelineno-0-196"></a>        <span class="k">return</span> <span class="n">grid_size</span>
-<a id="__codelineno-0-197" name="__codelineno-0-197"></a>
-<a id="__codelineno-0-198" name="__codelineno-0-198"></a>    <span class="n">matches</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
-<a id="__codelineno-0-199" name="__codelineno-0-199"></a>    <span class="n">sizes</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
-<a id="__codelineno-0-200" name="__codelineno-0-200"></a>    <span class="k">for</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">phenotyping_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">well</span><span class="si">}</span><span class="s2">_grid*"</span><span class="p">)):</span>
-<a id="__codelineno-0-201" name="__codelineno-0-201"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">candidate</span><span class="p">):</span>
-<a id="__codelineno-0-202" name="__codelineno-0-202"></a>            <span class="k">continue</span>
-<a id="__codelineno-0-203" name="__codelineno-0-203"></a>        <span class="n">m</span> <span class="o">=</span> <span class="n">_GRID_DIR_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">candidate</span><span class="p">))</span>
-<a id="__codelineno-0-204" name="__codelineno-0-204"></a>        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-205" name="__codelineno-0-205"></a>            <span class="n">sizes</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)))</span>
-<a id="__codelineno-0-206" name="__codelineno-0-206"></a>            <span class="n">matches</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-221">221</a></span>
+<span class="normal"><a href="#__codelineno-0-222">222</a></span>
+<span class="normal"><a href="#__codelineno-0-223">223</a></span>
+<span class="normal"><a href="#__codelineno-0-224">224</a></span>
+<span class="normal"><a href="#__codelineno-0-225">225</a></span>
+<span class="normal"><a href="#__codelineno-0-226">226</a></span>
+<span class="normal"><a href="#__codelineno-0-227">227</a></span>
+<span class="normal"><a href="#__codelineno-0-228">228</a></span>
+<span class="normal"><a href="#__codelineno-0-229">229</a></span>
+<span class="normal"><a href="#__codelineno-0-230">230</a></span>
+<span class="normal"><a href="#__codelineno-0-231">231</a></span>
+<span class="normal"><a href="#__codelineno-0-232">232</a></span>
+<span class="normal"><a href="#__codelineno-0-233">233</a></span>
+<span class="normal"><a href="#__codelineno-0-234">234</a></span>
+<span class="normal"><a href="#__codelineno-0-235">235</a></span>
+<span class="normal"><a href="#__codelineno-0-236">236</a></span>
+<span class="normal"><a href="#__codelineno-0-237">237</a></span>
+<span class="normal"><a href="#__codelineno-0-238">238</a></span>
+<span class="normal"><a href="#__codelineno-0-239">239</a></span>
+<span class="normal"><a href="#__codelineno-0-240">240</a></span>
+<span class="normal"><a href="#__codelineno-0-241">241</a></span>
+<span class="normal"><a href="#__codelineno-0-242">242</a></span>
+<span class="normal"><a href="#__codelineno-0-243">243</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-205" name="__codelineno-0-205"></a><span class="k">def</span><span class="w"> </span><span class="nf">resolve_grid_size</span><span class="p">(</span><span class="n">phenotyping_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">well</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">grid_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<a id="__codelineno-0-206" name="__codelineno-0-206"></a><span class="w">    </span><span class="sd">"""Resolve one well's tile grid size, auto-detecting it when omitted.</span>
 <a id="__codelineno-0-207" name="__codelineno-0-207"></a>
-<a id="__codelineno-0-208" name="__codelineno-0-208"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">sizes</span><span class="p">:</span>
-<a id="__codelineno-0-209" name="__codelineno-0-209"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-<a id="__codelineno-0-210" name="__codelineno-0-210"></a>            <span class="sa">f</span><span class="s2">"Could not auto-detect grid_size for well </span><span class="si">{</span><span class="n">well</span><span class="si">!r}</span><span class="s2">: no "</span>
-<a id="__codelineno-0-211" name="__codelineno-0-211"></a>            <span class="sa">f</span><span class="s2">"'</span><span class="si">{</span><span class="n">well</span><span class="si">}</span><span class="s2">_grid&lt;N&gt;' directory found under </span><span class="si">{</span><span class="n">phenotyping_dir</span><span class="si">!r}</span><span class="s2">. "</span>
-<a id="__codelineno-0-212" name="__codelineno-0-212"></a>            <span class="s2">"Fix phenotyping_dir/wells, or set grid_size explicitly."</span>
-<a id="__codelineno-0-213" name="__codelineno-0-213"></a>        <span class="p">)</span>
-<a id="__codelineno-0-214" name="__codelineno-0-214"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sizes</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-<a id="__codelineno-0-215" name="__codelineno-0-215"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-<a id="__codelineno-0-216" name="__codelineno-0-216"></a>            <span class="sa">f</span><span class="s2">"Could not auto-detect grid_size for well </span><span class="si">{</span><span class="n">well</span><span class="si">!r}</span><span class="s2">: found "</span>
-<a id="__codelineno-0-217" name="__codelineno-0-217"></a>            <span class="sa">f</span><span class="s2">"multiple candidate directories with different grid sizes "</span>
-<a id="__codelineno-0-218" name="__codelineno-0-218"></a>            <span class="sa">f</span><span class="s2">"(</span><span class="si">{</span><span class="s1">', '</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">matches</span><span class="p">)</span><span class="si">}</span><span class="s2">). Set grid_size explicitly to "</span>
-<a id="__codelineno-0-219" name="__codelineno-0-219"></a>            <span class="s2">"disambiguate."</span>
-<a id="__codelineno-0-220" name="__codelineno-0-220"></a>        <span class="p">)</span>
-<a id="__codelineno-0-221" name="__codelineno-0-221"></a>    <span class="k">return</span> <span class="n">sizes</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+<a id="__codelineno-0-208" name="__codelineno-0-208"></a><span class="sd">    An explicit ``grid_size`` is returned as-is; otherwise this scans</span>
+<a id="__codelineno-0-209" name="__codelineno-0-209"></a><span class="sd">    ``phenotyping_dir`` for a ``{well}_grid&lt;N&gt;`` directory. Exactly one</span>
+<a id="__codelineno-0-210" name="__codelineno-0-210"></a><span class="sd">    distinct grid size is required.</span>
+<a id="__codelineno-0-211" name="__codelineno-0-211"></a>
+<a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="sd">    Raises</span>
+<a id="__codelineno-0-213" name="__codelineno-0-213"></a><span class="sd">    ------</span>
+<a id="__codelineno-0-214" name="__codelineno-0-214"></a><span class="sd">    ValueError</span>
+<a id="__codelineno-0-215" name="__codelineno-0-215"></a><span class="sd">        If auto-detection finds zero or more than one distinct grid size.</span>
+<a id="__codelineno-0-216" name="__codelineno-0-216"></a><span class="sd">    """</span>
+<a id="__codelineno-0-217" name="__codelineno-0-217"></a>    <span class="k">if</span> <span class="n">grid_size</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-218" name="__codelineno-0-218"></a>        <span class="k">return</span> <span class="n">grid_size</span>
+<a id="__codelineno-0-219" name="__codelineno-0-219"></a>
+<a id="__codelineno-0-220" name="__codelineno-0-220"></a>    <span class="n">matches</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-0-221" name="__codelineno-0-221"></a>    <span class="n">sizes</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+<a id="__codelineno-0-222" name="__codelineno-0-222"></a>    <span class="k">for</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">phenotyping_dir</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">well</span><span class="si">}</span><span class="s2">_grid*"</span><span class="p">)):</span>
+<a id="__codelineno-0-223" name="__codelineno-0-223"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">candidate</span><span class="p">):</span>
+<a id="__codelineno-0-224" name="__codelineno-0-224"></a>            <span class="k">continue</span>
+<a id="__codelineno-0-225" name="__codelineno-0-225"></a>        <span class="n">m</span> <span class="o">=</span> <span class="n">_GRID_DIR_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">candidate</span><span class="p">))</span>
+<a id="__codelineno-0-226" name="__codelineno-0-226"></a>        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-227" name="__codelineno-0-227"></a>            <span class="n">sizes</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)))</span>
+<a id="__codelineno-0-228" name="__codelineno-0-228"></a>            <span class="n">matches</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span>
+<a id="__codelineno-0-229" name="__codelineno-0-229"></a>
+<a id="__codelineno-0-230" name="__codelineno-0-230"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">sizes</span><span class="p">:</span>
+<a id="__codelineno-0-231" name="__codelineno-0-231"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+<a id="__codelineno-0-232" name="__codelineno-0-232"></a>            <span class="sa">f</span><span class="s2">"Could not auto-detect grid_size for well </span><span class="si">{</span><span class="n">well</span><span class="si">!r}</span><span class="s2">: no "</span>
+<a id="__codelineno-0-233" name="__codelineno-0-233"></a>            <span class="sa">f</span><span class="s2">"'</span><span class="si">{</span><span class="n">well</span><span class="si">}</span><span class="s2">_grid&lt;N&gt;' directory found under </span><span class="si">{</span><span class="n">phenotyping_dir</span><span class="si">!r}</span><span class="s2">. "</span>
+<a id="__codelineno-0-234" name="__codelineno-0-234"></a>            <span class="s2">"Fix phenotyping_dir/wells, or set grid_size explicitly."</span>
+<a id="__codelineno-0-235" name="__codelineno-0-235"></a>        <span class="p">)</span>
+<a id="__codelineno-0-236" name="__codelineno-0-236"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sizes</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+<a id="__codelineno-0-237" name="__codelineno-0-237"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+<a id="__codelineno-0-238" name="__codelineno-0-238"></a>            <span class="sa">f</span><span class="s2">"Could not auto-detect grid_size for well </span><span class="si">{</span><span class="n">well</span><span class="si">!r}</span><span class="s2">: found "</span>
+<a id="__codelineno-0-239" name="__codelineno-0-239"></a>            <span class="sa">f</span><span class="s2">"multiple candidate directories with different grid sizes "</span>
+<a id="__codelineno-0-240" name="__codelineno-0-240"></a>            <span class="sa">f</span><span class="s2">"(</span><span class="si">{</span><span class="s1">', '</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">matches</span><span class="p">)</span><span class="si">}</span><span class="s2">). Set grid_size explicitly to "</span>
+<a id="__codelineno-0-241" name="__codelineno-0-241"></a>            <span class="s2">"disambiguate."</span>
+<a id="__codelineno-0-242" name="__codelineno-0-242"></a>        <span class="p">)</span>
+<a id="__codelineno-0-243" name="__codelineno-0-243"></a>    <span class="k">return</span> <span class="n">sizes</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

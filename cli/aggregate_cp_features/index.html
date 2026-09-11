@@ -674,6 +674,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Metadata (BUILD_CELL_METADATA)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dataset/" class="md-nav__link">
         
   
@@ -1272,6 +1300,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cell_metadata
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/dataset/" class="md-nav__link">
         
   
@@ -1812,7 +1868,8 @@
 process <code>AGGREGATE_CP_FEATURES</code>) is the CellProfiler-feature analog of
 <code>AGGREGATE_EMBEDDINGS</code>: it reconstructs the QC-passed, synonymous-corrected
 CellProfiler feature table and computes per-variant pooling via one or
-more of <code>mean</code>/<code>median</code>/<code>KS</code>/<code>AUROC</code> -- the same aggregator classes,
+more of <code>mean</code>/<code>median</code>/<code>KS</code>/<code>AUROC</code>/<code>KSnegLogP</code>/<code>AUROCnegLogP</code> -- the
+same aggregator classes,
 called with <code>feature_selector=FEATURE_SELECTOR</code> instead of
 <code>AGGREGATE_EMBEDDINGS</code>' default <code>EMBEDDING_SELECTOR</code> (see
 <a href="../aggregate/">aggregate</a> for the aggregator semantics themselves, which
@@ -1856,7 +1913,7 @@ unlike <code>AGGREGATE_EMBEDDINGS</code>, whose default is now <code>["median", 
 <tr>
 <td><code>aggregators</code></td>
 <td><code>["median"]</code></td>
-<td>One or more of <code>"mean"</code>, <code>"median"</code>, <code>"KS"</code>, <code>"AUROC"</code>.</td>
+<td>One or more of <code>"mean"</code>, <code>"median"</code>, <code>"KS"</code>, <code>"AUROC"</code>, <code>"KSnegLogP"</code>, <code>"AUROCnegLogP"</code>.</td>
 </tr>
 </tbody>
 </table>

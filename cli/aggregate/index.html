@@ -674,6 +674,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Metadata (BUILD_CELL_METADATA)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../dataset/" class="md-nav__link">
         
   
@@ -1272,6 +1300,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cell_metadata
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/dataset/" class="md-nav__link">
         
   
@@ -1820,6 +1876,19 @@ pooling of the cell-level embeddings via one or more of:</p>
 <li><strong><code>AUROC</code></strong> -- per-group AUROC against the synonymous reference
   distribution (<code>P(variant &gt; reference) + 0.5 * P(variant == reference)</code>,
   not symmetrized to <code>[0.5, 1]</code>, so the sign of separation is preserved).</li>
+<li><strong><code>KSnegLogP</code></strong> / <strong><code>AUROCnegLogP</code></strong> -- <code>-log10(p)</code> for those same two
+  statistics: evidence strength against "this variant is drawn from the
+  reference distribution" rather than effect size, so larger means more
+  significant. Both are closed-form asymptotic approximations (the
+  classical limiting Kolmogorov distribution, and the tie-corrected
+  normal approximation to Mann-Whitney U) computed entirely in log space,
+  which is what keeps the most-significant hits finite instead of
+  underflowing to <code>-inf</code>. Two caveats: they are <strong>raw, uncorrected</strong>
+  per-(variant, dimension) p-values with no multiple-testing correction,
+  and they are imprecise near <code>p = 1</code> (<code>-log10(p)</code> near 0) -- don't read
+  precision into small values. Both cost meaningfully more than their
+  base statistic (~5.6x for KS, ~2.9x for AUROC), so neither is in the
+  default <code>aggregate_methods</code>; opt in explicitly.</li>
 </ul>
 <p>Every aggregator, including mean/median, excludes control (synonymous,
 untagged) rows before grouping by variant -- required structurally for
@@ -1828,7 +1897,7 @@ applied uniformly here as one consistent rule. Literal <code>"WT"</code> rows ar
 unaffected (never classified as synonymous) -- only genuinely-synonymous
 variant labels drop out of the per-variant output, since they exist only
 to define the reference baseline.</p>
-<p>When <code>aggregators</code> is exactly <code>["median"]</code> (the default), output embedding
+<p>When <code>aggregators</code> is exactly <code>["median"]</code>, output embedding
 columns are bare <code>emb_0000..emb_{D-1}</code>; any other selection (multiple
 methods, or a single non-median method) suffixes each column by its
 aggregator (<code>emb_0000_mean</code>, <code>emb_0000_KS</code>, ...).</p>
@@ -1865,13 +1934,13 @@ aggregator (<code>emb_0000_mean</code>, <code>emb_0000_KS</code>, ...).</p>
 </tr>
 <tr>
 <td><code>aggregators</code></td>
-<td><code>["median"]</code></td>
-<td>One or more of <code>"mean"</code>, <code>"median"</code>, <code>"KS"</code>, <code>"AUROC"</code>.</td>
+<td><code>["median", "KS", "AUROC"]</code></td>
+<td>One or more of <code>"mean"</code>, <code>"median"</code>, <code>"KS"</code>, <code>"AUROC"</code>, <code>"KSnegLogP"</code>, <code>"AUROCnegLogP"</code>.</td>
 </tr>
 </tbody>
 </table>
 <h2 id="output-file">Output file<a class="headerlink" href="#output-file" title="Permanent link">&para;</a></h2>
-<p><code>aggregate.parquet</code> -- one row per non-control variant. With the default
+<p><code>aggregate.parquet</code> -- one row per non-control variant. With
 <code>aggregators=["median"]</code>: <code>emb_0000..emb_{D-1}</code> (variant-level,
 median-pooled and synonymous-corrected) plus <code>meta_num_cells</code>,
 <code>meta_barcode_num_unique</code>, etc.</p>

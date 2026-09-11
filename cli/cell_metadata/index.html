@@ -9,10 +9,10 @@
       
       
       
-        <link rel="prev" href="../cell_metadata/">
+        <link rel="prev" href="../build_cell_images_table/">
       
       
-        <link rel="next" href="../qcfilter/">
+        <link rel="next" href="../dataset/">
       
       
         
@@ -23,7 +23,7 @@
     
     
       
-        <title>Cell Dataset (BUILD_DATASET) - Fisseq Embeddings Pipeline</title>
+        <title>Cell Metadata (BUILD_CELL_METADATA) - Fisseq Embeddings Pipeline</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#cell-dataset-build_dataset" class="md-skip">
+        <a href="#cell-metadata-build_cell_metadata" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Cell Dataset (BUILD_DATASET)
+              Cell Metadata (BUILD_CELL_METADATA)
             
           </span>
         </div>
@@ -671,34 +671,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../cell_metadata/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -718,7 +690,7 @@
   <span class="md-ellipsis">
     
   
-    Cell Dataset (BUILD_DATASET)
+    Cell Metadata (BUILD_CELL_METADATA)
   
 
     
@@ -736,7 +708,7 @@
   <span class="md-ellipsis">
     
   
-    Cell Dataset (BUILD_DATASET)
+    Cell Metadata (BUILD_CELL_METADATA)
   
 
     
@@ -773,10 +745,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#output-files" class="md-nav__link">
+  <a href="#output-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Output files
+        Output file
       
     </span>
   </a>
@@ -809,6 +781,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Dataset (BUILD_DATASET)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1814,10 +1814,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#output-files" class="md-nav__link">
+  <a href="#output-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Output files
+        Output file
       
     </span>
   </a>
@@ -1863,29 +1863,30 @@
 
 
 
-<h1 id="cell-dataset-build_dataset">Cell Dataset (<code>BUILD_DATASET</code>)<a class="headerlink" href="#cell-dataset-build_dataset" title="Permanent link">&para;</a></h1>
-<p><code>python -m fisseq_embeddings_pipeline.dataset</code> (Nextflow process
-<code>BUILD_DATASET</code>) indexes directly into every tile's already-cropped
-per-cell crop stacks (<code>BUILD_CELL_IMAGES</code>' own <code>make_cell_images_bbox</code>
-output -- see <a href="../../architecture/">Architecture</a> decision 17) at each
-cell's <code>crop_index</code>, repackaging each row into a single <strong>WebDataset</strong> --
-a sharded <code>.tar</code> archive holding every cell in the experiment, unfiltered
--- that <code>EMBED_CELLS</code> streams from directly. No cropping happens in this
-module any more.</p>
-<p>Building it (and running <code>EMBED_CELLS</code> over it) is deliberately decoupled
-from <code>QC_FILTER</code>: QC thresholds get tuned and re-run often, and the whole
-point of making embedding a separate, unconditional branch off Cell
-Dataset is so that changing a QC threshold never re-triggers the
-expensive GPU embedding pass -- you pay for embedding every cell once, up
-front.</p>
-<p>No hand-authored tile manifest is needed: <code>BUILD_DATASET</code> derives the
-tile list directly from <code>BUILD_CELL_IMAGES</code>' own output directory (see
-<a href="../../architecture/#cell-images-buildcellimages-output-from-starcall-workflow">Architecture</a>),
-not from <code>starcall-workflow</code>'s tree directly -- <code>BUILD_CELL_IMAGES</code> is the
-only stage that touches <code>starcall-workflow</code>'s tree or invokes Snakemake.
-<code>BUILD_DATASET</code> itself no longer does any well/grid-size discovery of its
-own; it just globs <code>cell_images_dir</code>'s already-resolved
-<code>{well}_grid&lt;N&gt;/tile&lt;x&gt;x&lt;y&gt;y/</code> directories.</p>
+<h1 id="cell-metadata-build_cell_metadata">Cell Metadata (<code>BUILD_CELL_METADATA</code>)<a class="headerlink" href="#cell-metadata-build_cell_metadata" title="Permanent link">&para;</a></h1>
+<p><code>python -m fisseq_embeddings_pipeline.cell_metadata</code> (Nextflow process
+<code>BUILD_CELL_METADATA</code>) projects <code>BUILD_CELL_IMAGES</code>' <code>cell_table.parquet</code>
+down to the seven <code>meta_*</code> columns <code>QC_FILTER</code> reads, as one
+per-experiment <code>metadata.parquet</code>. No images, no feature columns, no
+<code>starcall-workflow</code> tree access.</p>
+<p>This stage exists to make <code>QC_FILTER</code> the point where the cellDINO and
+CellProfiler tracks fan out, rather than <code>BUILD_DATASET</code>. Before it, QC's
+input was <code>BUILD_DATASET</code>'s own <code>metadata.parquet</code>, written inside that
+stage's WebDataset shard-writing loop -- which made the expensive,
+image-reading dataset build a hard dependency of the CellProfiler track
+too, since <code>FILTER_CP_FEATURES</code> consumes the same QC output. See
+<a href="../../nextflow/#track-independence">Nextflow Workflow: Track independence</a>.</p>
+<p><code>QC_FILTER</code> can't simply read <code>cell_table.parquet</code> itself: its
+<code>filter_columns</code> does rename the barcode/edit-distance/amino-acid-changes
+columns to their canonical <code>meta_*</code> names, but its closing <code>select</code> keeps
+only <code>meta_</code>-prefixed (and CellProfiler-looking) columns -- so the cell
+table's unprefixed <code>well</code>/<code>tile</code>/<code>tile_cell_index</code> would be dropped,
+leaving <code>FILTER_EMBEDDINGS</code>/<code>FILTER_CP_FEATURES</code> with no join key. This
+stage mints those four. The projection is shared with
+<code>BUILD_CP_FEATURES</code> via <code>utils/cell_table.py</code> so the two can't drift.</p>
+<p>Structurally this is the analog of <code>fisseq-data-pipeline</code>'s own <code>INPUT</code>
+stage: the cheap read-and-normalize step producing the one per-batch
+parquet <code>QC_FILTER</code> consumes.</p>
 <h2 id="config-fields">Config fields<a class="headerlink" href="#config-fields" title="Permanent link">&para;</a></h2>
 <p>Extends the <a href="#common-config-fields">common config fields</a> below.</p>
 <table>
@@ -1898,24 +1899,14 @@ own; it just globs <code>cell_images_dir</code>'s already-resolved
 </thead>
 <tbody>
 <tr>
-<td><code>cell_images_dir</code></td>
+<td><code>cell_table</code></td>
 <td><strong>required</strong></td>
-<td><code>BUILD_CELL_IMAGES</code>' per-experiment output directory (holds <code>cell_table.parquet</code> plus each tile's collected <code>*_crops_*.tif</code>/<code>*_mask_crops_*.tif</code>). Injected automatically by <code>workflows/embeddings.nf</code> when run through the pipeline; set explicitly only when invoking this module's CLI directly against a <code>BUILD_CELL_IMAGES</code> output you already have.</td>
-</tr>
-<tr>
-<td><code>window</code></td>
-<td><strong>required</strong></td>
-<td>Crop size <code>BUILD_CELL_IMAGES</code>' own <code>make_cell_images_bbox</code> already produced each cell's crop at -- sanity-checked against the discovered stacks' actual shape, and must match the loaded Cell-DINO checkpoint's expected input. When run via <code>BUILD_DATASET</code>, an <code>experiments:</code> entry omitting this falls back to <code>params.yaml</code>'s pipeline-wide <code>window</code> default (see <a href="../../configuration/">Configuration</a>); required here only when invoking this module's CLI directly.</td>
+<td>Path to <code>BUILD_CELL_IMAGES</code>' <code>cell_table.parquet</code>. The file itself, not its directory -- the Nextflow module stages it as a real <code>path</code> input, which is what keeps this stage out of the container-visibility problem <code>BUILD_DATASET</code>/<code>BUILD_CP_FEATURES</code> need bind mounts for (see <a href="../../nextflow/#docker-and-singularityapptainer-arbitrary-host-paths">Nextflow Workflow</a>).</td>
 </tr>
 <tr>
 <td><code>batch_stem</code></td>
 <td><strong>required</strong></td>
-<td>This experiment's identifier, written into every sample's <code>meta.json</code> as <code>meta_batch</code>.</td>
-</tr>
-<tr>
-<td><code>shard_maxcount</code></td>
-<td><code>2000</code></td>
-<td>Max samples per WebDataset shard. See <a href="../../configuration/#build_dataset-shard-sizing">shard sizing</a>.</td>
+<td>This experiment's identifier, written into every row as <code>meta_batch</code>.</td>
 </tr>
 <tr>
 <td><code>barcode_col_name</code></td>
@@ -1934,31 +1925,25 @@ own; it just globs <code>cell_images_dir</code>'s already-resolved
 </tr>
 </tbody>
 </table>
-<p><code>phenotyping_dir</code>/<code>wells</code>/<code>grid_size</code>/<code>segmentation_type</code>/<code>use_corrected</code>/
-<code>csv_schema_scan_rows</code> are no longer fields on this stage -- they're
-<code>BUILD_CELL_IMAGES</code>-only now (starcall-workflow-discovery concerns), and
-there's no CSV left for this stage to scan-infer dtypes for
-(<code>cell_table.parquet</code> is already typed).</p>
-<h2 id="output-files">Output files<a class="headerlink" href="#output-files" title="Permanent link">&para;</a></h2>
+<h2 id="output-file">Output file<a class="headerlink" href="#output-file" title="Permanent link">&para;</a></h2>
 <p>Written to <code>output_dir</code>:</p>
 <ul>
-<li><code>dataset-{shard:06d}.tar</code> (one or more shards) -- one sample per cell,
-  key <code>"{well}_{tile}_{cell_index}"</code>, carrying <code>crop.npy</code>
-  (<code>(num_phenotyping_cycles × num_channels, window, window)</code>), <code>mask.npy</code>
-  (<code>(window, window)</code> uint8 label mask), and <code>meta.json</code> (<code>meta_batch</code>,
-  <code>meta_well</code>, <code>meta_tile</code>, <code>meta_cell_index</code>, <code>meta_barcode</code>,
-  <code>meta_aa_changes</code>, <code>meta_edit_distance</code>).</li>
-<li><code>metadata.parquet</code> -- the same per-cell <code>meta_*</code> fields as a plain
-  table, no images. <code>QC_FILTER</code> and <code>FILTER_EMBEDDINGS</code>'s join key read
-  this rather than paying to decode WebDataset shards just for metadata.</li>
+<li><code>metadata.parquet</code> -- one row per cell, exactly seven columns:
+  <code>meta_batch</code>, <code>meta_well</code>, <code>meta_tile</code>, <code>meta_cell_index</code>,
+  <code>meta_barcode</code>, <code>meta_aa_changes</code>, <code>meta_edit_distance</code>.</li>
 </ul>
+<p>Note this covers <em>every</em> row of <code>cell_table.parquet</code>, where
+<code>BUILD_DATASET</code>'s own <code>metadata.parquet</code> only ever held cells that made it
+into a shard. <code>filtered_cells.parquet</code> can therefore cover strictly more
+cells than it used to; every downstream consumer inner-joins it back on
+<code>filter.py</code>'s <code>JOIN_KEYS</code>, so the extra rows drop out where they don't
+apply.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.dataset<span class="w"> </span><span class="se">\</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.cell_metadata<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="nv">output_dir</span><span class="o">=</span>./out<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">cell_images_dir</span><span class="o">=</span>/pipeline/cell_images/experiment1<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">window</span><span class="o">=</span><span class="m">224</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">batch_stem</span><span class="o">=</span>experiment1<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">cell_table</span><span class="o">=</span>/pipeline/cell_images/experiment1/cell_table.parquet<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">batch_stem</span><span class="o">=</span>experiment1<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
 </code></pre></div>
 <h2 id="common-config-fields">Common config fields<a class="headerlink" href="#common-config-fields" title="Permanent link">&para;</a></h2>
 <p>Every CLI tool's config extends <code>AppConfig</code>, which supplies:</p>
@@ -1989,11 +1974,11 @@ there's no CSV left for this stage to scan-infer dtypes for
 <tr>
 <td><code>random_seed</code></td>
 <td><code>0</code></td>
-<td>Shared seed for every stochastic pipeline stage.</td>
+<td>Shared seed for every stochastic pipeline stage (unused by this stage).</td>
 </tr>
 </tbody>
 </table>
-<p>See <a href="../../api/dataset/">API Reference: dataset</a> for full function documentation.</p>
+<p>See <a href="../../api/cell_metadata/">API Reference: cell_metadata</a> for full function documentation.</p>
 
 
 

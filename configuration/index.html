@@ -622,6 +622,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#snakemake-and-a-read-only-home" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snakemake and a read-only $HOME
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snakemake-on-a-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snakemake on a cluster
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#docker-image-versioning-publishing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -746,6 +768,34 @@
     
   
     Cell Images, Phase 3: Build Table (BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Metadata (BUILD_CELL_METADATA)
   
 
     
@@ -1273,6 +1323,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/cell_metadata/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cell_metadata
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/dataset/" class="md-nav__link">
         
   
@@ -1776,6 +1854,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#snakemake-and-a-read-only-home" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snakemake and a read-only $HOME
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snakemake-on-a-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snakemake on a cluster
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#docker-image-versioning-publishing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1845,8 +1945,8 @@ to three stages:</p>
 <li><strong><code>BUILD_CELL_IMAGES</code></strong> (starcall-workflow-facing, always runs):
   <code>starcall_workflow_dir</code>, <code>phenotyping_dir</code>, <code>segmentation_dir</code>,
   <code>sequencing_dir</code>, <code>wells</code>, <code>grid_size</code>, <code>segmentation_type</code>,
-  <code>use_corrected</code>, <code>sequencing_reads_params</code>. This is the ONLY stage that
-  touches <code>starcall-workflow</code>'s tree or invokes Snakemake -- see
+  <code>use_corrected</code>, <code>window</code>, <code>sequencing_reads_params</code>. This is the ONLY
+  stage that touches <code>starcall-workflow</code>'s tree or invokes Snakemake -- see
   <a href="../architecture/#cell-images-buildcellimages-output-from-starcall-workflow">Architecture</a>.
   <code>phenotyping_dir</code>/<code>segmentation_dir</code>/<code>sequencing_dir</code> are all optional,
   each auto-resolved when omitted: <code>starcall_workflow_dir</code>'s own
@@ -1857,10 +1957,12 @@ to three stages:</p>
   matching <code>starcall-workflow</code>'s own documented default). Set one
   explicitly only when that tree isn't colocated under
   <code>starcall_workflow_dir</code> at all.</li>
-<li><strong><code>BUILD_DATASET</code></strong>: <code>window</code>, <code>shard_maxcount</code>, <code>barcode_col_name</code>/
-  <code>aa_changes_col_name</code>/<code>edit_distance_col_name</code>. <code>cell_images_dir</code> (which
-  directory to read) is injected automatically from <code>BUILD_CELL_IMAGES</code>'
-  own output -- never set it yourself.</li>
+<li><strong><code>BUILD_DATASET</code></strong>: <code>window</code> (sanity-checked against the crop-stack
+  shape <code>BUILD_CELL_IMAGES</code> already collected -- see above; no cropping
+  happens in <code>BUILD_DATASET</code> itself any more), <code>shard_maxcount</code>,
+  <code>barcode_col_name</code>/<code>aa_changes_col_name</code>/<code>edit_distance_col_name</code>.
+  <code>cell_images_dir</code> (which directory to read) is injected automatically
+  from <code>BUILD_CELL_IMAGES</code>' own output -- never set it yourself.</li>
 <li><strong><code>BUILD_CP_FEATURES</code></strong> (only for <code>cp_features: true</code> entries):
   the same three <code>*_col_name</code> fields, shared with <code>BUILD_DATASET</code> since
   both read the same <code>cell_table.parquet</code>. <code>cell_images_dir</code> is injected
@@ -1875,7 +1977,11 @@ always the same across every experiment in a run -- <code>window</code>,
 <code>cellprofiler_pipeline</code>, <code>cellprofiler_cycle</code> -- are the exception: each
 has its own pipeline-wide default below, used for any experiment entry
 that doesn't set its own value for that key; an entry's own value always
-wins over the global default. <code>cell_images_hard_copy</code> is a <em>further</em>
+wins over the global default. <code>window</code> is routed to <em>both</em>
+<code>BUILD_CELL_IMAGES</code> and <code>BUILD_DATASET</code> this way, via two independent
+fallback blocks in <code>workflows/embeddings.nf</code> (one per stage) -- not a
+single shared mechanism, but the same global default value either way.
+<code>cell_images_hard_copy</code> is a <em>further</em>
 exception -- it's global-only, with no per-experiment override at all
 (Nextflow's <code>publishDir</code> mode must be a static value at process-definition
 time; see <code>params.yaml</code>'s own comment on this).</p>
@@ -1912,7 +2018,7 @@ time; see <code>params.yaml</code>'s own comment on this).</p>
 <tr>
 <td><code>window</code></td>
 <td><code>224</code></td>
-<td><code>BUILD_DATASET</code> (global default for any <code>experiments</code> entry that omits <code>window</code>; an entry's own <code>window</code> wins)</td>
+<td><code>BUILD_CELL_IMAGES</code>, <code>BUILD_DATASET</code> (global default for any <code>experiments</code> entry that omits <code>window</code>; an entry's own <code>window</code> wins -- two independent fallback mechanisms, one per stage)</td>
 </tr>
 <tr>
 <td><code>cellprofiler_pipeline</code></td>
@@ -1927,12 +2033,27 @@ time; see <code>params.yaml</code>'s own comment on this).</p>
 <tr>
 <td><code>cell_images_hard_copy</code></td>
 <td><code>false</code></td>
-<td><code>BUILD_CELL_IMAGES</code> (global-only, see above -- <code>false</code> symlinks collected tile images from their real <code>starcall-workflow</code> location, <code>true</code> hard-copies them)</td>
+<td><code>BUILD_CELL_IMAGES</code> (global-only, see above -- <code>false</code> symlinks the collected per-cell crop-stack files (<code>make_cell_images_bbox</code>'s output -- small, not whole-tile images) from their real <code>starcall-workflow</code> location, <code>true</code> hard-copies them)</td>
 </tr>
 <tr>
 <td><code>snakemake_cores</code></td>
 <td><code>4</code></td>
-<td><code>BUILD_CELL_IMAGES</code> (<code>--cores</code> for its own <code>snakemake</code> invocation, distinct from Nextflow's own executor parallelism across experiments)</td>
+<td><code>BUILD_CELL_IMAGES</code> (<code>--cores</code> for its own <code>snakemake</code> invocation, distinct from Nextflow's own executor parallelism across experiments). <strong>Local mode only</strong> -- see <a href="#snakemake-on-a-cluster">Snakemake on a cluster</a></td>
+</tr>
+<tr>
+<td><code>starcall_child_image</code></td>
+<td><code>null</code></td>
+<td><code>BUILD_CELL_IMAGES</code>, cluster mode only: the pre-built <code>.sif</code> each per-rule scheduler job re-enters the image with</td>
+</tr>
+<tr>
+<td><code>snakemake_cache_dir</code></td>
+<td><code>null</code> (-&gt; <code>&lt;pipeline_dir&gt;/.snakemake_cache</code>)</td>
+<td><code>BUILD_CELL_IMAGES</code> (where its <code>snakemake</code> invocation points <code>$XDG_CACHE_HOME</code>/<code>$HOME</code> -- see <a href="#snakemake-and-a-read-only-home">read-only <code>$HOME</code></a> below)</td>
+</tr>
+<tr>
+<td><code>starcall_gpu</code></td>
+<td><code>true</code></td>
+<td><code>BUILD_CELL_IMAGES</code> (request a GPU for its <code>snakemake</code> invocation -- <code>starcall-workflow</code>'s stardist/cellpose segmentation; set <code>false</code> on a GPU-less host)</td>
 </tr>
 <tr>
 <td><code>random_seed</code></td>
@@ -1975,8 +2096,8 @@ time; see <code>params.yaml</code>'s own comment on this).</p>
 <td><code>EMBED_CELLS</code></td>
 </tr>
 <tr>
-<td><code>cell_dino_channel_apply_mask</code></td>
-<td><code>[true, true, true, true]</code></td>
+<td><code>cell_dino_apply_mask</code></td>
+<td><code>true</code></td>
 <td><code>EMBED_CELLS</code></td>
 </tr>
 <tr>
@@ -2066,6 +2187,115 @@ feature type) -- see <a href="../nextflow/#cellprofiler-feature-track">Nextflow 
 See each <a href="../cli/dataset/">Stage Reference</a> page for the full field list a
 given stage's Hydra config accepts beyond what <code>params.yaml</code> exposes (e.g.
 <code>QC_FILTER</code>'s optional <code>n_variants</code> downsampling cap, off by default).</p>
+<h2 id="snakemake-and-a-read-only-home">Snakemake and a read-only <code>$HOME</code><a class="headerlink" href="#snakemake-and-a-read-only-home" title="Permanent link">&para;</a></h2>
+<p><code>BUILD_CELL_IMAGES</code>' phase-2 <code>snakemake</code> invocation builds a
+<code>SourceCache</code> inside <code>Workflow.__init__</code> -- i.e. before it parses a single
+rule -- and that constructor unconditionally does
+<code>os.makedirs($XDG_CACHE_HOME/snakemake)</code>, falling back to <code>$HOME/.cache</code>
+when <code>XDG_CACHE_HOME</code> is unset. There is no CLI flag to relocate it.</p>
+<p>On a cluster that's a problem: under Singularity/Apptainer's
+<code>autoMounts</code>, the container's <code>$HOME</code> is the submitting user's <em>real</em>
+home, which is frequently a read-only NFS mount on compute nodes. The
+stage then dies with</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>OSError: [Errno 30] Read-only file system: '/net/noble'
+</code></pre></div>
+<p>before doing any work -- and because every module carries <code>errorStrategy
+'ignore'</code>, <code>nextflow run</code> still exits 0, with only a missing
+<code>cell_table.parquet</code> to show for it (the same silent-failure shape
+described in <a href="../nextflow/#docker-and-singularityapptainer-arbitrary-host-paths">Nextflow Workflow</a>).</p>
+<p><code>snakemake_cache_dir</code> fixes this: the module exports it as both
+<code>$XDG_CACHE_HOME</code> and (with a <code>home/</code> suffix) <code>$HOME</code> for that one
+invocation. <code>$HOME</code> is redirected too, not just <code>$XDG_CACHE_HOME</code>,
+because <code>--use-conda</code> shells out to a bare <code>conda</code>, which reads
+<code>~/.condarc</code> and appends to <code>~/.conda/environments.txt</code>.</p>
+<p>The default, <code>&lt;pipeline_dir&gt;/.snakemake_cache</code>, is writable and persists
+across tasks and runs, so the source cache is built once rather than per
+task. Point it at shared scratch if you'd rather it not live under
+<code>pipeline_dir</code>. Whatever it resolves to is bind-mounted into the
+container by <code>nextflow.config</code>'s <code>BUILD_CELL_IMAGES</code> <code>containerOptions</code>
+(<code>pipeline_dir</code> is otherwise never bind-mounted -- Nextflow publishes
+outputs from the host side, so no task has previously needed to see it
+from inside).</p>
+<h2 id="snakemake-on-a-cluster">Snakemake on a cluster<a class="headerlink" href="#snakemake-on-a-cluster" title="Permanent link">&para;</a></h2>
+<p><code>BUILD_CELL_IMAGES</code>' phase-2 <code>snakemake</code> runs in local mode by default, so on
+a cluster every starcall rule for an experiment runs inside the single
+scheduler job Nextflow submitted for that task. Per-rule submission is opt-in
+via an executor profile; see
+<a href="../nextflow/#running-starcalls-rules-as-their-own-cluster-jobs">Nextflow</a> for
+how it works and <code>scratch/nextflow.config</code>'s <code>sge</code> profile for a worked
+example. The knobs:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Where</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ext.snakemake_cluster_args</code></td>
+<td>process directive</td>
+<td>Empty = local mode. Set to a complete <code>--cluster ... --jobs ...</code> block to opt in.</td>
+</tr>
+<tr>
+<td><code>ext.snakemake_cluster_cores</code></td>
+<td>process directive</td>
+<td><code>--cores</code> in cluster mode -- the <em>global</em> budget across submitted jobs. Caps each rule's <code>threads:</code>, so it must not be small.</td>
+</tr>
+<tr>
+<td><code>ext.starcall_cluster_env</code></td>
+<td>process directive</td>
+<td>Map of site-specific env vars for the submit script (scheduler project/queue/runtime, <code>SGE_ROOT</code>, ...). A null/empty value fails the stage rather than exporting <code>"null"</code>.</td>
+</tr>
+<tr>
+<td><code>ext.starcall_apptainer_bin</code></td>
+<td>process directive</td>
+<td>Container engine the per-rule job wrapper uses on a bare exec node.</td>
+</tr>
+<tr>
+<td><code>ext.starcall_host_overrides_dir</code></td>
+<td>process directive</td>
+<td><strong>Host</strong> path to <code>resources/starcall_overrides</code>, on storage the exec nodes can read.</td>
+</tr>
+<tr>
+<td><code>starcall_child_image</code></td>
+<td><code>params.yaml</code></td>
+<td>Pre-built <code>.sif</code> the child jobs exec.</td>
+</tr>
+</tbody>
+</table>
+<p>These are <strong><code>ext</code> process directives, not <code>params.yaml</code> keys</strong> (except
+<code>starcall_child_image</code>, which is deployment data rather than a profile switch),
+for the same reason <code>ext.snakemake_bin</code> is: a <code>-params-file</code> value outranks a
+profile's own <code>params.*</code> assignments in Nextflow's config precedence, so a
+profile could not override a <code>params.yaml</code> value at all.</p>
+<p><code>$SGE_ROOT</code> has to be both bind-mounted into the task's container (so the
+<code>qsub</code> client exists) and exported within it (so <code>qsub</code> can find qmaster). Its
+value should come from the scheduler rather than being hard-coded: SGE sets
+<code>SGE_ROOT</code>/<code>SGE_CELL</code> in the environment of every job it runs, and
+<code>scratch/run.sh</code> runs as one, so it reads them there and passes them on as
+<code>--sge_root</code>/<code>--sge_cell</code>. The <code>sge</code> profile then interpolates the same param
+into both the bind and the env map, so the two cannot disagree. Any entry in
+<code>ext.starcall_cluster_env</code> that ends up null fails <code>BUILD_CELL_IMAGES</code>
+immediately with the key named.</p>
+<p>The two helper scripts under <code>resources/starcall_overrides/</code> are addressed by
+different paths on purpose, and it is the easiest thing here to get wrong:
+<code>sge_submit.sh</code> is invoked <em>by snakemake</em>, inside the task's own container, so
+it uses the in-image <code>ext.starcall_overrides_dir</code>; <code>sge_job_wrapper.sh</code> is what
+the <em>scheduler</em> runs, on a bare exec node with no container around it, so it
+needs the host <code>ext.starcall_host_overrides_dir</code> -- the in-image <code>/opt/...</code>
+path does not exist there. <code>BUILD_CELL_IMAGES</code> fails fast if the latter isn't
+readable.</p>
+<p><code>starcall_child_image</code> must be a real <code>.sif</code> <strong>file</strong>, not the <code>docker://</code> URI
+<code>container_image</code> carries on the cluster. Each per-rule job runs on a bare exec
+node outside Nextflow's container handling, so having hundreds of them
+concurrently re-resolve a registry URI against one shared Singularity cache --
+each needing <code>SINGULARITY_DOCKER_USERNAME</code>/<code>PASSWORD</code> -- is exactly what this
+avoids. <code>scratch/run.sh</code> pulls it once, pinned to the same <code>GIT_HASH</code> as
+<code>container_image</code>. It is deliberately <em>not</em> derived from Nextflow's own
+<code>singularity.cacheDir</code>: that filename mangling is an implementation detail, not
+an interface.</p>
 <h2 id="docker-image-versioning-publishing">Docker image versioning &amp; publishing<a class="headerlink" href="#docker-image-versioning-publishing" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Registry:</strong> GitHub Container Registry, <code>ghcr.io/&lt;owner&gt;/&lt;repo&gt;</code>
