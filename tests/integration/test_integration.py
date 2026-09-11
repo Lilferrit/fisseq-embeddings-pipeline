@@ -663,6 +663,52 @@ def test_cluster_mode_requires_child_image(tmp_path_factory):
     assert not (exp_dir / "stub_snakemake_argv.log").exists()
 
 
+def test_cluster_env_with_unset_value_fails(tmp_path_factory):
+    """A null/empty entry in `ext.starcall_cluster_env` must fail the stage
+    rather than exporting the literal string "null".
+
+    This is the shape of a real mistake: an executor profile builds that map
+    out of params (e.g. `SGE_ROOT: params.sge_root`, which scratch/run.sh
+    fills from the scheduler's own environment), so a launch script that
+    forgets to pass one leaves a null behind. Exported as-is it surfaces much
+    later as an unintelligible bind-mount or scheduler error on every child
+    job."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_unset_cluster_env")
+    _write_synthetic_experiment(exp_dir)
+    checkpoint_path = tmp_path_factory.mktemp("weights_unset_env") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    fake_sif = exp_dir / "fake.sif"
+    fake_sif.write_text("not a real image")
+
+    cluster_config = exp_dir / "cluster_unset_env.config"
+    cluster_config.write_text(
+        "process { withName: 'BUILD_CELL_IMAGES' {\n"
+        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
+        f"    ext.starcall_host_overrides_dir = "
+        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
+        # params.does_not_exist resolves to null, exactly as an unpassed
+        # --sge_root would.
+        "    ext.starcall_cluster_env = [SGE_ROOT: params.does_not_exist]\n"
+        "} }\n"
+    )
+
+    result = _run_nextflow(
+        exp_dir,
+        checkpoint_path,
+        extra_args=(
+            "-c",
+            str(cluster_config),
+            "--starcall_child_image",
+            str(fake_sif),
+        ),
+    )
+
+    assert not (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
+    combined = result.stdout + result.stderr
+    assert "starcall_cluster_env has no value for SGE_ROOT" in combined, combined
+
+
 def test_cp_track_survives_dataset_failure(tmp_path_factory):
     """The regression test for decoupling the two tracks: with
     BUILD_DATASET failing outright, the whole cellDINO branch

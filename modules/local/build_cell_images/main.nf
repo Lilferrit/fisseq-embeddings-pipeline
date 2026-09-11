@@ -205,7 +205,26 @@ process BUILD_CELL_IMAGES {
     // individual params, so the repo side stays scheduler-agnostic and every
     // site-specific value lives in the executor profile -- see
     // nextflow.config's own note on why these are `ext` and not params.yaml.
-    def cluster_env = (task.ext.starcall_cluster_env ?: [:]).collect { key, value ->
+    def cluster_env_map = task.ext.starcall_cluster_env ?: [:]
+    // A null/empty value here means the profile interpolated something that
+    // never got set -- e.g. an executor profile reading $SGE_ROOT out of a
+    // param that the launch script forgot to pass. Left alone it exports the
+    // literal string "null" and the failure surfaces much later, as an
+    // unintelligible scheduler or bind-mount error on every child job. Caught
+    // generically rather than per-key so the repo side stays
+    // scheduler-agnostic.
+    def unset_env = cluster_env_map.findAll { _key, value ->
+        value == null || value.toString().trim().isEmpty()
+    }.keySet()
+    if (cluster_mode && unset_env) {
+        throw new IllegalStateException(
+            "BUILD_CELL_IMAGES: ext.starcall_cluster_env has no value for " +
+            "${unset_env.join(', ')} -- the executor profile references " +
+            "something that was never set (check the params its sge block " +
+            "interpolates, and that your launch script passes them)."
+        )
+    }
+    def cluster_env = cluster_env_map.collect { key, value ->
         "    export ${key}='${value}'"
     }.join('\n')
     // Short, alnum-only, and unique per task: it prefixes every child job's

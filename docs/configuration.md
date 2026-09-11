@@ -180,7 +180,7 @@ example. The knobs:
 | --- | --- | --- |
 | `ext.snakemake_cluster_args` | process directive | Empty = local mode. Set to a complete `--cluster ... --jobs ...` block to opt in. |
 | `ext.snakemake_cluster_cores` | process directive | `--cores` in cluster mode -- the *global* budget across submitted jobs. Caps each rule's `threads:`, so it must not be small. |
-| `ext.starcall_cluster_env` | process directive | Map of site-specific env vars for the submit script (scheduler project/queue/runtime, `SGE_ROOT`, ...). |
+| `ext.starcall_cluster_env` | process directive | Map of site-specific env vars for the submit script (scheduler project/queue/runtime, `SGE_ROOT`, ...). A null/empty value fails the stage rather than exporting `"null"`. |
 | `ext.starcall_apptainer_bin` | process directive | Container engine the per-rule job wrapper uses on a bare exec node. |
 | `ext.starcall_host_overrides_dir` | process directive | **Host** path to `resources/starcall_overrides`, on storage the exec nodes can read. |
 | `starcall_child_image` | `params.yaml` | Pre-built `.sif` the child jobs exec. |
@@ -190,6 +190,16 @@ These are **`ext` process directives, not `params.yaml` keys** (except
 for the same reason `ext.snakemake_bin` is: a `-params-file` value outranks a
 profile's own `params.*` assignments in Nextflow's config precedence, so a
 profile could not override a `params.yaml` value at all.
+
+`$SGE_ROOT` has to be both bind-mounted into the task's container (so the
+`qsub` client exists) and exported within it (so `qsub` can find qmaster). Its
+value should come from the scheduler rather than being hard-coded: SGE sets
+`SGE_ROOT`/`SGE_CELL` in the environment of every job it runs, and
+`scratch/run.sh` runs as one, so it reads them there and passes them on as
+`--sge_root`/`--sge_cell`. The `sge` profile then interpolates the same param
+into both the bind and the env map, so the two cannot disagree. Any entry in
+`ext.starcall_cluster_env` that ends up null fails `BUILD_CELL_IMAGES`
+immediately with the key named.
 
 The two helper scripts under `resources/starcall_overrides/` are addressed by
 different paths on purpose, and it is the easiest thing here to get wrong:

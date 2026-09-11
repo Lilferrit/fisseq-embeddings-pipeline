@@ -262,7 +262,10 @@ How the pieces fit:
   means that path is `/opt/conda/envs/ops/bin/python3.10` on both sides.
   This requires `qsub` to work *from inside* the container -- bind `$SGE_ROOT`
   (via `singularity.runOptions`) and export `SGE_ROOT`/`SGE_CELL` through
-  `ext.starcall_cluster_env`.
+  `ext.starcall_cluster_env`. Both read the same param, filled by
+  `scratch/run.sh` from the environment SGE sets for the job it runs as, so
+  the path is the cluster's own rather than a hard-coded guess and the bind
+  and the export cannot drift apart.
 - **Every child job re-enters the image.** `resources/starcall_overrides/sge_submit.sh`
   builds the `qsub` line; `sge_job_wrapper.sh` is what the scheduler actually
   runs, and it `apptainer exec`s the image. This is not optional: starcall's
