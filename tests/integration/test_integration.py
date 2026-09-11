@@ -76,6 +76,8 @@ import torch
 import yaml
 
 from fisseq_embeddings_pipeline.build_cell_images_enumerate import resolve_data_dir
+from fisseq_embeddings_pipeline.filter import JOIN_KEYS
+from fisseq_embeddings_pipeline.utils.cell_table import CELL_METADATA_SCHEMA
 from fisseq_embeddings_pipeline.vendor.dinov2.models.vision_transformer import (
     vit_small,
 )
@@ -377,7 +379,11 @@ def _write_tiny_checkpoint(path: Path) -> None:
     torch.save({"teacher": reference.state_dict()}, path)
 
 
-def _run_nextflow(exp_dir: Path, checkpoint_path: Path) -> subprocess.CompletedProcess:
+def _run_nextflow(
+    exp_dir: Path,
+    checkpoint_path: Path,
+    extra_args: tuple[str, ...] = (),
+) -> subprocess.CompletedProcess:
     """Shared `nextflow run` invocation, factored out of `pipeline_outputs`
     so `reproducibility_outputs` (below) can drive two independent, fully
     from-scratch runs against two separate `pipeline_dir`s with identical
@@ -388,7 +394,11 @@ def _run_nextflow(exp_dir: Path, checkpoint_path: Path) -> subprocess.CompletedP
     PATH is prepended with exp_dir's own stub_bin/ (written by
     _write_synthetic_experiment) so BUILD_CELL_IMAGES' `snakemake`
     invocation resolves to the stub, not a real (likely absent) snakemake
-    binary -- see this module's own docstring."""
+    binary -- see this module's own docstring.
+
+    extra_args are appended verbatim to the command line (e.g. an extra
+    `-c <config>` layering a per-test process directive on top of the
+    repo's own nextflow.config)."""
     # exp_dir's own params.yaml (repo defaults + this run's `experiments:`
     # entry, written by _write_synthetic_experiment) -- not the repo's root
     # params.yaml, since Nextflow only accepts one -params-file per run and
@@ -412,6 +422,7 @@ def _run_nextflow(exp_dir: Path, checkpoint_path: Path) -> subprocess.CompletedP
             "--cell_dino_checkpoint",
             str(checkpoint_path),
             *_EXTRA_NF_PARAMS,
+            *extra_args,
         ],
         cwd=exp_dir,
         capture_output=True,
@@ -455,6 +466,84 @@ def test_cell_images_produced(pipeline_outputs):
     tile_dir = cell_images_dir / "well1_grid1" / "tile0x0y"
     assert (tile_dir / f"cells_crops_{_WINDOW}.tif").exists()
     assert (tile_dir / f"cells_mask_crops_{_WINDOW}.tif").exists()
+
+
+def test_cell_metadata_produced(pipeline_outputs):
+    """BUILD_CELL_METADATA's metadata.parquet -- QC_FILTER's input, and
+    the stage that keeps QC off the cellDINO dataset build (see
+    cell_metadata.py's module docstring)."""
+    exp_dir, _ = pipeline_outputs
+    metadata = pl.read_parquet(
+        exp_dir / "cell_metadata" / "batch1" / "metadata.parquet"
+    )
+    assert metadata.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
+    assert metadata.columns == list(CELL_METADATA_SCHEMA)
+
+
+def test_qc_filter_runs_off_cell_metadata(pipeline_outputs):
+    """QC sees every cell in the cell table, not just the cells that made
+    it into a WebDataset shard."""
+    exp_dir, _ = pipeline_outputs
+    metadata = pl.read_parquet(
+        exp_dir / "cell_metadata" / "batch1" / "metadata.parquet"
+    )
+    filtered = pl.read_parquet(
+        exp_dir / "qc_filter" / "batch1" / "filtered_cells.parquet"
+    )
+    assert set(JOIN_KEYS).issubset(filtered.columns)
+    assert 0 < filtered.height <= metadata.height
+
+
+def test_cp_track_survives_dataset_failure(tmp_path_factory):
+    """The regression test for decoupling the two tracks: with
+    BUILD_DATASET failing outright, the whole cellDINO branch
+    (BUILD_DATASET -> EMBED_CELLS -> FILTER_EMBEDDINGS -> ...) produces
+    nothing, but QC_FILTER and the entire CellProfiler branch still run
+    to completion.
+
+    BUILD_DATASET is failed via an extra `-c` config rather than by
+    corrupting its inputs, so the failure is unambiguous and isolated to
+    that one process -- `beforeScript = 'exit 1'` makes the task exit
+    non-zero before its script runs, which every module's own
+    `errorStrategy 'ignore'` then swallows."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_dataset_fail")
+    _write_synthetic_experiment(exp_dir)
+    checkpoint_path = tmp_path_factory.mktemp("weights_fail") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    fail_config = exp_dir / "fail_dataset.config"
+    fail_config.write_text(
+        "process { withName: 'BUILD_DATASET' { beforeScript = 'exit 1' } }\n"
+    )
+
+    result = _run_nextflow(
+        exp_dir, checkpoint_path, extra_args=("-c", str(fail_config))
+    )
+    assert result.returncode == 0, result.stderr
+
+    # The cellDINO branch is gone...
+    assert not (exp_dir / "dataset" / "batch1" / "metadata.parquet").exists()
+    assert not (exp_dir / "embeddings" / "batch1" / "embeddings.parquet").exists()
+    assert not (
+        exp_dir / "filter_embeddings" / "batch1" / "filtered_keys.parquet"
+    ).exists()
+
+    # ...while QC and the whole CellProfiler branch are unaffected.
+    assert (exp_dir / "qc_filter" / "batch1" / "filtered_cells.parquet").exists()
+    assert (exp_dir / "cp_features" / "batch1" / "cp_features.parquet").exists()
+    assert (
+        exp_dir / "filter_cp_features" / "batch1" / "filtered_keys.parquet"
+    ).exists()
+    assert (
+        exp_dir
+        / "feature_select_batchwise_cp_features"
+        / "batch1"
+        / "aggregate.parquet"
+    ).exists()
+    assert (
+        exp_dir / "ovwt_batchwise_cp_features" / "batch1" / "results.parquet"
+    ).exists()
+    assert (exp_dir / "global" / "cp_features" / "median_aggregate.parquet").exists()
 
 
 def test_dataset_and_embeddings_produced(pipeline_outputs):
@@ -1035,6 +1124,17 @@ def test_real_starcall_pipeline_produces_cell_images(
     params["cell_dino_device"] = "cpu"
     params["cell_dino_batch_size"] = 4
     params["cell_dino_num_workers"] = 0
+    # Same reason as cell_dino_device=cpu above, for BUILD_CELL_IMAGES'
+    # own GPU flag: params.yaml defaults starcall_gpu to true (the ops
+    # env's stardist/cellpose segmentation is GPU-capable, and the image
+    # is CUDA-based), which puts `--gpus all` on this task's `docker run`
+    # line -- and that fails outright on a GPU-less host, before the
+    # container's entrypoint runs: "Error response from daemon: failed to
+    # discover GPU vendor from CDI: no known GPU vendor found" (exit 125).
+    # Confirmed directly: without this line BUILD_CELL_IMAGES dies exactly
+    # that way here, `nextflow run` still exits 0 (errorStrategy
+    # 'ignore'), and cell_table.parquet is simply never written.
+    params["starcall_gpu"] = False
     params["experiments"] = [
         {
             "batch_stem": "lmna_t3",

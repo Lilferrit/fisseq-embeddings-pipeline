@@ -33,7 +33,7 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 from polars import selectors as cs
 
 from .config import AppConfig
-from .utils.constants import META_BARCODE_COL, META_BATCH_COL, META_EDIT_DISTANCE_COL
+from .utils.cell_table import CELL_METADATA_SCHEMA, cell_metadata_exprs
 from .utils.log import setup_logging
 
 _CP_COL_PREFIX = "cp_"
@@ -82,17 +82,6 @@ class CpFeaturesConfig(AppConfig):
     edit_distance_col_name: str = "editDistance"
 
 
-_EMPTY_SCHEMA = {
-    META_BATCH_COL: pl.String,
-    "meta_well": pl.String,
-    "meta_tile": pl.String,
-    "meta_cell_index": pl.Int64,
-    META_BARCODE_COL: pl.String,
-    "meta_aa_changes": pl.String,
-    META_EDIT_DISTANCE_COL: pl.Int64,
-}
-
-
 def build_cp_features(cfg: CpFeaturesConfig) -> pl.DataFrame:
     """
     Select this experiment's CellProfiler feature columns out of
@@ -118,7 +107,7 @@ def build_cp_features(cfg: CpFeaturesConfig) -> pl.DataFrame:
 
     if table.height == 0:
         logging.info("cell_table.parquet at %s has no rows", cell_table_path)
-        return pl.DataFrame(schema=_EMPTY_SCHEMA)
+        return pl.DataFrame(schema=CELL_METADATA_SCHEMA)
 
     cp_columns = [c for c in table.columns if c.startswith(_CP_COL_PREFIX)]
     if not cp_columns:
@@ -130,13 +119,12 @@ def build_cp_features(cfg: CpFeaturesConfig) -> pl.DataFrame:
         )
 
     result = table.select(
-        pl.lit(cfg.batch_stem).alias(META_BATCH_COL),
-        pl.col("well").alias("meta_well"),
-        pl.col("tile").alias("meta_tile"),
-        pl.col("tile_cell_index").cast(pl.Int64).alias("meta_cell_index"),
-        pl.col(cfg.barcode_col_name).cast(pl.String).alias(META_BARCODE_COL),
-        pl.col(cfg.aa_changes_col_name).cast(pl.String).alias("meta_aa_changes"),
-        pl.col(cfg.edit_distance_col_name).cast(pl.Int64).alias(META_EDIT_DISTANCE_COL),
+        *cell_metadata_exprs(
+            cfg.batch_stem,
+            cfg.barcode_col_name,
+            cfg.aa_changes_col_name,
+            cfg.edit_distance_col_name,
+        ),
         cs.starts_with(_CP_COL_PREFIX).name.map(
             lambda name: name[len(_CP_COL_PREFIX) :]
         ),

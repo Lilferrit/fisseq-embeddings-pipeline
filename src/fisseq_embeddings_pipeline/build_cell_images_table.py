@@ -19,11 +19,15 @@ BUILD_DATASET/BUILD_CP_FEATURES need; neither reads starcall-workflow's
 tree directly.
 
 Reads CSVs via pandas (matching starcall-workflow's own
-``to_csv()``/``read_csv(index_col=0)`` convention -- `dataset.py`'s own
-module docstring notes the same choice for the same reason), but writes the
-final table via polars, matching this repo's own parquet-writing convention
+``to_csv()``/``read_csv(index_col=0)`` convention), but writes the final
+table via polars, matching this repo's own parquet-writing convention
 (AGENTS.md: polars for tabular data) for the artifact everything downstream
-actually reads.
+actually reads. This is now the ONLY pandas in the pipeline: `dataset.py`
+used to round-trip `cell_table.parquet` through ``.to_pandas()`` purely to
+get ``.iloc[]`` row access, which AGENTS.md's carve-out never covered (it
+reads no CSVs) and which silently produced ``"nan"`` strings for missing
+genotype values -- it now projects with polars via
+``utils/cell_table.py`` like every other stage.
 
 Until this stage's Docker image merged starcall-workflow's own `ops` conda
 env into this repo's main image (see the root `Dockerfile`), this logic

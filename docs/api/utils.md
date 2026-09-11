@@ -12,6 +12,8 @@ Shared helpers used across pipeline stages -- most are vendored from
 
 ::: fisseq_embeddings_pipeline.utils.metadata
 
+::: fisseq_embeddings_pipeline.utils.cell_table
+
 ::: fisseq_embeddings_pipeline.utils.batches
 
 ::: fisseq_embeddings_pipeline.utils.xgbparams

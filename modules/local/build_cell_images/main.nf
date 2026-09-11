@@ -106,6 +106,20 @@
 process BUILD_CELL_IMAGES {
     errorStrategy 'ignore'
     label 'process_medium'
+    // Phase 2 runs starcall-workflow's own segmentation rules
+    // (stardist/cellpose/tensorflow, out of the image's `ops` conda env)
+    // on a CUDA base image, so this is the pipeline's second GPU-capable
+    // stage after EMBED_CELLS -- same two-label shape that one uses. The
+    // GPU flag itself is NOT taken from nextflow.config's process_gpu
+    // containerOptions: this process has its own withName: containerOptions
+    // closure, which is the more specific selector and shadows it
+    // entirely, so the flag is folded in there (gated on
+    // params.starcall_gpu) instead. The label still matters for executor
+    // sizing -- an SGE/Slurm profile's own withLabel: 'process_gpu' block
+    // (see scratch/nextflow.config for a worked example, and note it wins
+    // over process_medium there by being declared last) is what actually
+    // requests the GPU resource from the scheduler.
+    label 'process_gpu'
     container "${params.container_image}"
     // symlink, not copy -- the one deliberate default deviation from every
     // other module's `mode: 'copy'` convention. Governed by the GLOBAL
@@ -156,8 +170,38 @@ process BUILD_CELL_IMAGES {
     def conda_path_prefix = task.ext.conda_bin_dir
         ? "PATH=\"${task.ext.conda_bin_dir}:\$PATH\" "
         : ''
+    // Resolved here (Groovy) rather than in bash so params.yaml's null
+    // default becomes a concrete path Nextflow can also bind-mount --
+    // nextflow.config's containerOptions closure for this process repeats
+    // the same `?:` fallback, and the two must agree.
+    def snakemake_cache_dir = params.snakemake_cache_dir ?: "${params.pipeline_dir}/.snakemake_cache"
     """
     set -euo pipefail
+
+    # Snakemake builds its SourceCache -- os.makedirs(\$XDG_CACHE_HOME/
+    # snakemake, falling back to \$HOME/.cache -- inside Workflow.__init__,
+    # i.e. before it parses a single rule, and exposes no CLI flag to move
+    # it. Under Singularity/Apptainer's autoMounts the container's \$HOME is
+    # the submitting user's real cluster home, which on the Fowler lab
+    # nodes is a read-only NFS mount: the whole stage died with "OSError:
+    # [Errno 30] Read-only file system: '/net/noble'" before phase 2 did
+    # any work (and, with errorStrategy 'ignore', showed up only as a
+    # missing cell_table.parquet on an otherwise exit-0 run). Point both
+    # vars at params.snakemake_cache_dir (default <pipeline_dir>/
+    # .snakemake_cache) -- writable, and persistent across tasks and runs
+    # rather than rebuilt per task. \$HOME is redirected too, not just
+    # \$XDG_CACHE_HOME: --use-conda shells out to a bare `conda`, which
+    # reads ~/.condarc and appends to ~/.conda/environments.txt.
+    #
+    # These live here rather than in a nextflow.config `beforeScript` for
+    # this process on purpose: an executor profile may well set a generic
+    # process.beforeScript of its own (scratch/nextflow.config's sge one
+    # exports the thread-pool vars), and a repo-side withName: beforeScript
+    # is the more specific selector -- it would replace that rather than
+    # add to it.
+    export XDG_CACHE_HOME="${snakemake_cache_dir}"
+    export HOME="${snakemake_cache_dir}/home"
+    mkdir -p "\$XDG_CACHE_HOME" "\$HOME"
 
     python -m fisseq_embeddings_pipeline.build_cell_images_enumerate \\
         output_dir=. \\

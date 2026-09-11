@@ -45,12 +45,12 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
-from .utils.constants import (
-    META_BARCODE_COL,
-    META_BATCH_COL,
-    META_EDIT_DISTANCE_COL,
-    TILE_DIR_RE,
+from .utils.cell_table import (
+    CELL_METADATA_SCHEMA,
+    META_CELL_INDEX_COL,
+    cell_metadata_exprs,
 )
+from .utils.constants import TILE_DIR_RE
 from .utils.log import setup_logging
 
 # TILE_DIR_RE (utils/constants.py) matches a tile directory's own name
@@ -235,14 +235,34 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
 
     with wds.ShardWriter(output_pattern, maxcount=cfg.shard_maxcount) as sink:
         for row in tile_manifest.iter_rows(named=True):
+            # The same seven-column meta_* projection BUILD_CELL_METADATA
+            # (cell_metadata.py) and BUILD_CP_FEATURES apply, via the one
+            # shared helper -- so a cell's meta_* values are identical in
+            # this shard's meta.json, in metadata.parquet, and in QC's own
+            # input, rather than three hand-rolled copies that can drift.
+            # crop_index rides along on top of the projection: it indexes
+            # into the crop stacks below and isn't metadata itself. (This
+            # used to be a .to_pandas() + .iloc[] loop whose
+            # str(tile_row[...]) turned a missing barcode into the literal
+            # string "nan"; the projection leaves it null, which is what
+            # cp_features.py already produced -- see docs/architecture.md
+            # decision 19.)
             tile_table = (
                 cell_table.filter(
                     (pl.col("well") == row["well"]) & (pl.col("tile") == row["tile"])
                 )
                 .sort("crop_index")
-                .to_pandas()
+                .select(
+                    *cell_metadata_exprs(
+                        cfg.batch_stem,
+                        cfg.barcode_col_name,
+                        cfg.aa_changes_col_name,
+                        cfg.edit_distance_col_name,
+                    ),
+                    pl.col("crop_index"),
+                )
             )
-            if len(tile_table.index) == 0:
+            if tile_table.height == 0:
                 logging.info("Skipping empty tile %s/%s", row["well"], row["tile"])
                 continue
 
@@ -258,20 +278,11 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
                 "requested here."
             )
 
-            for i in range(len(tile_table.index)):
-                tile_row = tile_table.iloc[i]
+            for tile_row in tile_table.iter_rows(named=True):
                 crop_index = int(tile_row["crop_index"])
                 crop, crop_mask = crops[crop_index], mask_crops[crop_index]
-                cell_index = int(tile_row["tile_cell_index"])
-                meta = {
-                    META_BATCH_COL: cfg.batch_stem,
-                    "meta_well": row["well"],
-                    "meta_tile": row["tile"],
-                    "meta_cell_index": cell_index,
-                    META_BARCODE_COL: str(tile_row[cfg.barcode_col_name]),
-                    "meta_aa_changes": str(tile_row[cfg.aa_changes_col_name]),
-                    META_EDIT_DISTANCE_COL: int(tile_row[cfg.edit_distance_col_name]),
-                }
+                meta = {key: tile_row[key] for key in CELL_METADATA_SCHEMA}
+                cell_index = meta[META_CELL_INDEX_COL]
                 sink.write(
                     {
                         "__key__": f"{row['well']}_{row['tile']}_{cell_index}",
@@ -286,17 +297,7 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
     if metadata_rows:
         metadata_df = pl.DataFrame(metadata_rows)
     else:
-        metadata_df = pl.DataFrame(
-            schema={
-                META_BATCH_COL: pl.String,
-                "meta_well": pl.String,
-                "meta_tile": pl.String,
-                "meta_cell_index": pl.Int64,
-                META_BARCODE_COL: pl.String,
-                "meta_aa_changes": pl.String,
-                META_EDIT_DISTANCE_COL: pl.Int64,
-            }
-        )
+        metadata_df = pl.DataFrame(schema=CELL_METADATA_SCHEMA)
     metadata_df.write_parquet(output_dir / "metadata.parquet")
 
 

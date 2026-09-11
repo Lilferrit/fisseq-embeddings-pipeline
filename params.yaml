@@ -141,6 +141,33 @@ cell_images_hard_copy: false   # false = symlink BUILD_CELL_IMAGES' collected pe
 
 # ── Snakemake invocation (BUILD_CELL_IMAGES) ─────────────────────────────────
 snakemake_cores: 4             # --cores passed to snakemake within one BUILD_CELL_IMAGES task -- local parallelism inside that one invocation, distinct from Nextflow's own executor parallelism across experiments
+# Where BUILD_CELL_IMAGES points $XDG_CACHE_HOME (and $HOME) for its one
+# snakemake invocation. Snakemake's SourceCache mkdir's
+# $XDG_CACHE_HOME/snakemake (falling back to $HOME/.cache) while
+# CONSTRUCTING the Workflow object -- before any rule runs, and with no
+# CLI flag to relocate it -- and under Singularity/Apptainer autoMounts
+# the container's $HOME is the submitting user's real cluster home, which
+# is frequently read-only on compute nodes ("OSError: [Errno 30]
+# Read-only file system"). null resolves to <pipeline_dir>/.snakemake_cache,
+# which is writable and persists across tasks and runs (so the source
+# cache, and conda's own ~/.conda bookkeeping under --use-conda, are
+# built once rather than per task). Set this explicitly to put the cache
+# on shared scratch instead. Whatever it resolves to is bind-mounted into
+# the container by nextflow.config's BUILD_CELL_IMAGES containerOptions.
+snakemake_cache_dir: null
+# Request a GPU for BUILD_CELL_IMAGES' snakemake invocation -- starcall-
+# workflow's segmentation rules run stardist/cellpose/tensorflow out of
+# the image's `ops` conda env, and the image is CUDA-based
+# (nvidia/cuda:12.4.1-runtime-ubuntu22.04). Adds the running engine's own
+# GPU flag (--gpus all under Docker, --nv under Singularity/Apptainer) to
+# that process' containerOptions, exactly as cell_dino_device gates
+# EMBED_CELLS'. Set false on a GPU-less host: `docker run --gpus all`
+# fails outright there, before the container's entrypoint runs, whatever
+# the workload would actually have used. Note BUILD_CELL_IMAGES also
+# carries `label 'process_gpu'`, so an executor profile that sizes that
+# label (e.g. scratch/nextflow.config's sge `-l cuda=1`) applies to it
+# too -- see docs/nextflow.md.
+starcall_gpu: true
 # The ops conda env's snakemake binary is NOT a params.yaml value -- it's
 # process.ext.snakemake_bin (nextflow.config), a process-config directive
 # rather than a pipeline param, specifically so -profile local can

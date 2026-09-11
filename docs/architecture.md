@@ -16,7 +16,7 @@ High-level shape:
 ```text
 Batch Aggregates And Variant Scores          (per experiment, runs independently)
   starcall-workflow ─► Cell Images ─┬─► Cell Dataset ─► Cell Embeddings (Cell DINO) ─┐
-    (raw tree)                      └─► QC Filtering ───────────────────────────────┤
+    (raw tree)                      └─► Cell Metadata ─► QC Filtering ──────────────┤
                                                                                       ├─► Filter Embeddings
                                                                      ┌────────────────┴──────┐
                                                                      ▼                        ▼
@@ -49,7 +49,9 @@ CellProfiler measurements alongside the cellDINO-embedding track above --
 the whole point being the two are directly comparable, run against the
 same cells. QC filtering isn't duplicated: this track's own filter stage
 joins against `QC_FILTER`'s existing output instead of running QC a
-second time.
+second time. That shared `QC_FILTER` hangs off `BUILD_CELL_METADATA`, not
+off either track, so neither track can take the other down -- see
+decision 19.
 
 ```text
 Batch Aggregates And Variant Scores (CellProfiler)  (per experiment, runs independently)
@@ -168,7 +170,8 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     counts / variant barcode counts) only ever looks at `meta_*` columns
     -- never the feature space -- so `FILTER_CP_FEATURES` joins directly
     against `QC_FILTER`'s existing `filtered_cells.parquet` rather than
-    running a second `QC_FILTER` process.
+    running a second `QC_FILTER` process. See decision 19 for where that
+    single `QC_FILTER` sits in the graph.
 16. **`BUILD_CELL_IMAGES` is the only stage that touches `starcall-workflow`'s
     tree or invokes Snakemake.** Earlier, `BUILD_DATASET` and
     `BUILD_CP_FEATURES` each independently rediscovered
@@ -275,6 +278,59 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     means neither `wrapper.smk` nor `fixed_cell_images.smk` needs to be
     copied or templated per task at all -- both are used as-is straight out
     of `starcall_overrides_dir`.
+19. **`QC_FILTER` hangs off its own metadata stage, so the two tracks
+    fail independently.** `QC_FILTER`'s input used to be `BUILD_DATASET`'s
+    `metadata.parquet`, written inside `dataset.py`'s WebDataset
+    shard-writing loop. Since decision 15 has the CellProfiler track reuse
+    that same QC output, that edge made the expensive, image-reading
+    dataset build a hard dependency of a track that never touches a shard:
+    one `BUILD_DATASET` failure took down both tracks at once, which on a
+    cluster (where every module carries `errorStrategy 'ignore'`) shows up
+    only as silently missing outputs. `BUILD_CELL_METADATA`
+    (`cell_metadata.py`) now projects `BUILD_CELL_IMAGES`'
+    `cell_table.parquet` down to the seven `meta_*` columns QC reads, and
+    feeds QC directly. `BUILD_CELL_IMAGES` is then the only stage both
+    tracks share; everything after it is two independent chains, each
+    consuming the same QC output but neither depending on the other. This
+    matches `fisseq-data-pipeline`'s own shape, where `INPUT` -> `QC_FILTER`
+    is likewise the shared trunk and QC the fan-out point.
+
+    The projection can't be folded into `QC_FILTER` itself:
+    `qcfilter.py`'s `filter_columns` renames the barcode/edit-distance/
+    amino-acid-changes columns but then keeps only `meta_`-prefixed (and
+    CellProfiler-looking) columns, so the cell table's unprefixed
+    `well`/`tile`/`tile_cell_index` would be dropped and `filter.py`'s
+    `JOIN_KEYS` would have nothing to join on. It's shared with
+    `BUILD_CP_FEATURES` via `utils/cell_table.py` instead, so the two
+    stages can't drift on those keys.
+
+    Second consequence, and a deliberate behavior change: missing
+    genotype values are now `null`, not the string `"nan"`. `dataset.py`
+    used to round-trip the cell table through `.to_pandas()` purely for
+    `.iloc[]` row access, and its `str(tile_row[...])` turned pandas' NaN
+    into the literal string `"nan"` in both `metadata.parquet` and every
+    shard's `meta.json` (and so, via `embed.py`'s passthrough, in
+    `embeddings.parquet`). `cp_features.py`'s polars projection always
+    produced `null` for the same cells, so the two tracks silently
+    disagreed. All three stages now share `utils/cell_table.py`'s
+    projection, so a cell's `meta_*` values are identical wherever they
+    appear, and `null` -- the correct representation -- is what they are.
+    Nothing joins on these columns (`JOIN_KEYS` is batch/well/tile/
+    cell_index), so this changes no join behavior; it only affects how
+    unmatched cells are labeled, and those are cells QC exists to drop.
+    It also removed the last unjustified pandas use in the pipeline --
+    AGENTS.md's pandas carve-out covers only `build_cell_images_table.py`'s
+    per-tile CSV reads.
+
+    Consequence: QC now sees every row of `cell_table.parquet` rather than
+    only the cells that reached a shard (`dataset.py` skips empty tiles and
+    needs each tile's crop stacks readable), so `filtered_cells.parquet`
+    can cover strictly more cells than before. Every consumer inner-joins
+    it back on `JOIN_KEYS`, so the extra rows drop where they don't apply
+    -- and QC thresholds no longer shift with whether the dataset build
+    succeeded. `BUILD_DATASET` still writes and publishes its own
+    `metadata.parquet` as the record of what actually landed in the shards;
+    nothing consumes it.
 
 ## Repository layout
 
@@ -298,6 +354,7 @@ fisseq-embeddings-pipeline/
     embeddings.nf                 # the one pipeline_mode this repo has
   modules/local/
     build_cell_images/main.nf          # the only stage touching starcall-workflow's tree
+    build_cell_metadata/main.nf        # cell_table.parquet -> QC_FILTER's input (decision 19)
     build_dataset/main.nf
     qc_filter/main.nf
     embed_cells/main.nf
@@ -316,6 +373,7 @@ fisseq-embeddings-pipeline/
     config/
       app.py                      # AppConfig -- vendored, + random_seed
       input.py                    # InputConfig, LabeledInputConfig -- vendored
+    cell_metadata.py              # BUILD_CELL_METADATA
     dataset.py                    # BUILD_DATASET
     build_cell_images_enumerate.py # BUILD_CELL_IMAGES phase 1 (grid/tile discovery)
     build_cell_images_table.py    # BUILD_CELL_IMAGES phase 3 (cell_table.parquet join)
@@ -342,6 +400,8 @@ fisseq-embeddings-pipeline/
       globalfeatureselect.py      # vendored (median_across_batches only)
       vectors.py                  # vendored (compute_impact_score/compute_cosine_distance)
       nextflow_staging.py         # stageAs-numbered-filename reconstruction helper
+      cell_table.py               # shared cell_table.parquet -> meta_* projection
+                                   # (BUILD_CELL_METADATA + BUILD_CP_FEATURES)
       log.py                      # vendored
   docs/
   tests/
