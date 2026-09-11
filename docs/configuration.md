@@ -86,7 +86,7 @@ time; see `params.yaml`'s own comment on this).
 | `cellprofiler_cycle` | `""` | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_cycle`) |
 | `cell_images_hard_copy` | `false` | `BUILD_CELL_IMAGES` (global-only, see above -- `false` symlinks the collected per-cell crop-stack files (`make_cell_images_bbox`'s output -- small, not whole-tile images) from their real `starcall-workflow` location, `true` hard-copies them) |
 | `snakemake_cores` | `4` | `BUILD_CELL_IMAGES` (`--cores` for its own `snakemake` invocation, distinct from Nextflow's own executor parallelism across experiments). **Local mode only** -- see [Snakemake on a cluster](#snakemake-on-a-cluster) |
-| `starcall_child_image` | `null` | `BUILD_CELL_IMAGES`, cluster mode only: the pre-built `.sif` each per-rule scheduler job re-enters the image with |
+| `starcall_child_image` | `null` (-> the image Nextflow already cached for the task) | `BUILD_CELL_IMAGES`, cluster mode only: the `.sif` each per-rule scheduler job re-enters the image with. Optional -- see [Snakemake on a cluster](#snakemake-on-a-cluster) |
 | `snakemake_cache_dir` | `null` (-> `<pipeline_dir>/.snakemake_cache`) | `BUILD_CELL_IMAGES` (where its `snakemake` invocation points `$XDG_CACHE_HOME`/`$HOME` -- see [read-only `$HOME`](#snakemake-and-a-read-only-home) below) |
 | `starcall_gpu` | `true` | `BUILD_CELL_IMAGES` (request a GPU for its `snakemake` invocation -- `starcall-workflow`'s stardist/cellpose segmentation; set `false` on a GPU-less host) |
 | `random_seed` | `0` | every stochastic stage |
@@ -183,6 +183,7 @@ example. The knobs:
 | `ext.starcall_cluster_env` | process directive | Map of site-specific env vars for the submit script (scheduler project/queue/runtime, `SGE_ROOT`, ...). A null/empty value fails the stage rather than exporting `"null"`. |
 | `ext.starcall_apptainer_bin` | process directive | Container engine the per-rule job wrapper uses on a bare exec node. |
 | `ext.starcall_host_overrides_dir` | process directive | **Host** path to `resources/starcall_overrides`, on storage the exec nodes can read. |
+| `ext.starcall_singularity_cache_dir` | process directive | Mirror of `singularity.cacheDir`, used only to resolve `starcall_child_image` when it is null. |
 | `starcall_child_image` | `params.yaml` | Pre-built `.sif` the child jobs exec. |
 
 These are **`ext` process directives, not `params.yaml` keys** (except
@@ -210,15 +211,40 @@ needs the host `ext.starcall_host_overrides_dir` -- the in-image `/opt/...`
 path does not exist there. `BUILD_CELL_IMAGES` fails fast if the latter isn't
 readable.
 
-`starcall_child_image` must be a real `.sif` **file**, not the `docker://` URI
-`container_image` carries on the cluster. Each per-rule job runs on a bare exec
-node outside Nextflow's container handling, so having hundreds of them
-concurrently re-resolve a registry URI against one shared Singularity cache --
-each needing `SINGULARITY_DOCKER_USERNAME`/`PASSWORD` -- is exactly what this
-avoids. `scratch/run.sh` pulls it once, pinned to the same `GIT_HASH` as
-`container_image`. It is deliberately *not* derived from Nextflow's own
-`singularity.cacheDir`: that filename mangling is an implementation detail, not
-an interface.
+The child jobs need a real `.sif` **file**, not the `docker://` URI
+`container_image` carries on the cluster: each runs on a bare exec node outside
+Nextflow's container handling, and having hundreds of them concurrently
+re-resolve a registry URI against one shared cache -- each needing
+`SINGULARITY_DOCKER_USERNAME`/`PASSWORD` -- is what this avoids.
+
+**`starcall_child_image` is optional.** Left `null`, `BUILD_CELL_IMAGES` uses
+the image Nextflow has *already* pulled and converted for that very task, so
+nothing extra is needed. It has to reconstruct the path rather than ask for it:
+`task.container` returns the raw `docker://` URI, and the `singularity` config
+scope isn't readable from a task context at all. What it rebuilds is Nextflow's
+own cache filename -- strip the scheme, turn `/` and `:` into `-`, append
+`.img` (not `.sif`):
+
+| `container_image` | cached as |
+| --- | --- |
+| `docker://busybox` | `busybox.img` |
+| `docker://quay.io/biocontainers/foo:1.0--py_0` | `quay.io-biocontainers-foo-1.0--py_0.img` |
+| `docker://ghcr.io/Owner/Repo:v1.2.3` | `ghcr.io-Owner-Repo-v1.2.3.img` |
+
+That rule is `SingularityCache.simpleName()`, which is package-private -- an
+implementation detail, not an API. The risk is bounded: if a Nextflow upgrade
+changes it the path stops existing and the stage fails immediately with both
+candidates named, rather than dying hundreds of times on the nodes. An
+integration test pins the rule, so a change surfaces in CI.
+
+**Set it explicitly** to opt out of that entirely, to point the child jobs at a
+separately built image, or to run the children on a different image than the
+tasks. An explicit value always wins.
+
+The cache directory is found via `ext.starcall_singularity_cache_dir` and then
+`$NXF_SINGULARITY_CACHEDIR`. A profile that sets `singularity.cacheDir` must
+mirror it into that `ext` (the config scope is invisible from a task context);
+using the environment variable instead needs no mirroring.
 
 ## Docker image versioning & publishing
 

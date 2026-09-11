@@ -238,6 +238,49 @@ process BUILD_CELL_IMAGES {
     // out as the literal string "null"), so every task would share one tag.
     // workflow.sessionId is stable across a run and distinct between runs,
     // and task.index separates the experiments within one run.
+    // The .sif every per-rule cluster job re-enters the image with. Explicit
+    // params.starcall_child_image always wins; when it's null (the default)
+    // fall back to the image Nextflow has ALREADY pulled and converted for
+    // this very task, so the common case needs no extra param and no separate
+    // `apptainer pull`.
+    //
+    // The fallback has to reconstruct the path rather than ask for it:
+    // `task.container` returns the raw `docker://` URI, not the resolved file
+    // (measured against a real Nextflow 26.04.6 run), and the `singularity`
+    // config scope is not visible from a task context at all ("No such
+    // variable: singularity", same). What IS reachable is the cache
+    // directory, plus Nextflow's naming rule, measured across image shapes
+    // against that same build:
+    //   docker://busybox                             -> busybox.img
+    //   docker://quay.io/biocontainers/foo:1.0--py_0 -> quay.io-biocontainers-foo-1.0--py_0.img
+    //   docker://ghcr.io/Owner/Repo:v1.2.3           -> ghcr.io-Owner-Repo-v1.2.3.img
+    // i.e. strip the scheme, turn '/' and ':' into '-', append '.img' (note:
+    // .img, not .sif), preserving case.
+    //
+    // That rule comes from SingularityCache.simpleName(), which is
+    // package-private -- an implementation detail, not an API. The risk is
+    // real but bounded: a Nextflow upgrade that changes it makes the path
+    // stop existing, and the `-s` guard below then fails this task
+    // immediately with both candidates named, rather than letting hundreds of
+    // child jobs die on the nodes. Set params.starcall_child_image explicitly
+    // to opt out of the guesswork entirely.
+    def child_image = params.starcall_child_image
+    def child_image_origin = 'params.starcall_child_image'
+    if (!child_image) {
+        // Nextflow resolves its own cache dir from singularity.cacheDir then
+        // $NXF_SINGULARITY_CACHEDIR; only the latter is readable from here,
+        // so a profile setting the former must mirror it into this `ext`
+        // (scratch/nextflow.config does) -- the two must agree.
+        def cache_dir = task.ext.starcall_singularity_cache_dir ?:
+            System.getenv('NXF_SINGULARITY_CACHEDIR')
+        if (cache_dir && params.container_image) {
+            def cached_name = params.container_image
+                .replaceFirst(/^[a-z0-9]+:\/\//, '')
+                .replaceAll(/[\/:]/, '-')
+            child_image = "${cache_dir}/${cached_name}.img"
+            child_image_origin = 'derived from params.container_image + the Singularity cache dir'
+        }
+    }
     def job_tag = 'sc' +
         workflow.sessionId.toString().replaceAll(/[^A-Za-z0-9]/, '').take(6) +
         task.index
@@ -249,10 +292,13 @@ process BUILD_CELL_IMAGES {
     # one shared Singularity cache, with registry credentials, is exactly what
     # params.starcall_child_image exists to avoid. Fail loudly here rather
     # than letting every child job fail identically N minutes later.
-    export STARCALL_SIF='${params.starcall_child_image ?: ''}'
+    export STARCALL_SIF='${child_image ?: ''}'
     if [ ! -s "\$STARCALL_SIF" ]; then
-        echo "BUILD_CELL_IMAGES: params.starcall_child_image must point at a pre-built .sif" >&2
-        echo "  when an executor profile sets ext.snakemake_cluster_args (got: '\$STARCALL_SIF')" >&2
+        echo "BUILD_CELL_IMAGES: no usable container image for the per-rule cluster jobs." >&2
+        echo "  tried (${child_image_origin}): '\$STARCALL_SIF'" >&2
+        echo "  Set params.starcall_child_image to a pre-built .sif, or make sure the" >&2
+        echo "  Singularity cache dir is visible here (singularity.cacheDir mirrored into" >&2
+        echo "  ext.starcall_singularity_cache_dir, or \$NXF_SINGULARITY_CACHEDIR)." >&2
         exit 1
     fi
     export STARCALL_APPTAINER_BIN='${task.ext.starcall_apptainer_bin ?: 'singularity'}'

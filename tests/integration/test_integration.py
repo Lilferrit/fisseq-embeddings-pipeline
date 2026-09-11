@@ -663,6 +663,100 @@ def test_cluster_mode_requires_child_image(tmp_path_factory):
     assert not (exp_dir / "stub_snakemake_argv.log").exists()
 
 
+def test_child_image_resolved_from_nextflow_cache_when_null(tmp_path_factory):
+    """With `starcall_child_image` null, the per-rule jobs fall back to the
+    image Nextflow already pulled and converted for the task itself.
+
+    That path has to be reconstructed: `task.container` yields the raw
+    `docker://` URI and the `singularity` config scope isn't readable from a
+    task context, so the module rebuilds Nextflow's own cache filename --
+    scheme stripped, `/` and `:` turned into `-`, `.img` appended. This test
+    is what pins that rule; if a Nextflow upgrade changes it, this fails here
+    rather than as hundreds of dead jobs on the cluster."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_derived_image")
+    _write_synthetic_experiment(exp_dir)
+    checkpoint_path = tmp_path_factory.mktemp("weights_derived") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    # Stand in for the image Nextflow would have pulled, named exactly as its
+    # SingularityCache does.
+    cache_dir = exp_dir / "singularity-cache"
+    cache_dir.mkdir()
+    container_image = "docker://ghcr.io/lilferrit/fisseq-embeddings-pipeline:abc1234"
+    cached_name = (
+        container_image.removeprefix("docker://").replace("/", "-").replace(":", "-")
+    )
+    cached_image = cache_dir / f"{cached_name}.img"
+    cached_image.write_text("stand-in for the converted image")
+
+    cluster_config = exp_dir / "cluster_derived.config"
+    cluster_config.write_text(
+        "process { withName: 'BUILD_CELL_IMAGES' {\n"
+        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
+        f"    ext.starcall_host_overrides_dir = "
+        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
+        f"    ext.starcall_singularity_cache_dir = '{cache_dir}'\n"
+        "} }\n"
+    )
+
+    result = _run_nextflow(
+        exp_dir,
+        checkpoint_path,
+        extra_args=(
+            "-c",
+            str(cluster_config),
+            "--container_image",
+            container_image,
+        ),
+    )
+    assert result.returncode == 0, result.stderr
+
+    # It got past the preamble's image check and ran phase 2 for real.
+    assert _read_stub_argv(exp_dir)
+    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
+
+
+def test_explicit_child_image_wins_over_derived(tmp_path_factory):
+    """An explicit `starcall_child_image` is used even when a derivable cache
+    entry also exists -- the param is the escape hatch from Nextflow's cache
+    naming, so it must not be quietly overridden by it."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_explicit_image")
+    _write_synthetic_experiment(exp_dir)
+    checkpoint_path = tmp_path_factory.mktemp("weights_explicit") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    # A cache dir whose derived entry does NOT exist, so the run can only
+    # succeed via the explicit path.
+    empty_cache = exp_dir / "empty-cache"
+    empty_cache.mkdir()
+    explicit_sif = exp_dir / "explicit.sif"
+    explicit_sif.write_text("the image we asked for")
+
+    cluster_config = exp_dir / "cluster_explicit.config"
+    cluster_config.write_text(
+        "process { withName: 'BUILD_CELL_IMAGES' {\n"
+        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
+        f"    ext.starcall_host_overrides_dir = "
+        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
+        f"    ext.starcall_singularity_cache_dir = '{empty_cache}'\n"
+        "} }\n"
+    )
+
+    result = _run_nextflow(
+        exp_dir,
+        checkpoint_path,
+        extra_args=(
+            "-c",
+            str(cluster_config),
+            "--starcall_child_image",
+            str(explicit_sif),
+        ),
+    )
+    assert result.returncode == 0, result.stderr
+    assert _read_stub_argv(exp_dir)
+    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
+
+
 def test_cluster_env_with_unset_value_fails(tmp_path_factory):
     """A null/empty entry in `ext.starcall_cluster_env` must fail the stage
     rather than exporting the literal string "null".

@@ -153,7 +153,14 @@ snakemake_cores: 4             # --cores passed to snakemake within one BUILD_CE
 # needs a real .sif FILE -- container_image is a `docker://` URI on the
 # cluster (scratch/run.sh), and having hundreds of concurrently-starting jobs
 # each re-resolve that URI against one shared Singularity cache, with registry
-# credentials in every job's environment, is exactly what this avoids. Build
+# credentials in every job's environment, is exactly what this avoids.
+#
+# OPTIONAL. Left null, BUILD_CELL_IMAGES reconstructs the path of the image
+# Nextflow has already pulled and converted for that very task, so the usual
+# case needs nothing here. Set it explicitly to point the child jobs at a
+# different (or independently built) image, or to avoid depending on
+# Nextflow's cache naming -- an explicit value always wins. Either way the
+# stage fails fast if the file isn't there. Build
 # it once with `apptainer pull` before `nextflow run` (scratch/run.sh does)
 # and pin it to the same commit as container_image. null is fine unless an
 # executor profile sets ext.snakemake_cluster_args, in which case
