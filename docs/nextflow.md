@@ -53,15 +53,16 @@ cell_images_config_ch (params.experiments -- starcall-workflow-facing fields)
     ▼
 BUILD_CELL_IMAGES  (cell_table.parquet + collected per-tile crop stacks per experiment)
     │
+    ├──► BUILD_CELL_METADATA ──► QC_FILTER   (shared by BOTH tracks; see below)
+    │
     ▼ (cell_images_dir injected into both config_ch and cp_config_ch below)
 config_ch (params.experiments -- BuildDatasetConfig fields)
     │
     ▼
-BUILD_DATASET ──┬──► QC_FILTER
-                └──► EMBED_CELLS
-                          │
-          QC_FILTER ──┐  │
-                       ▼  ▼
+BUILD_DATASET ──► EMBED_CELLS
+                       │
+          QC_FILTER ──┐│
+                      ▼▼
                  FILTER_EMBEDDINGS
                        │
         ┌──────────────┴──────────────┐
@@ -75,6 +76,16 @@ GLOBAL_VARIANT_EMBEDDINGS   GLOBAL_VARIANT_DISTINGUISHABILITY
 `BUILD_CELL_IMAGES` runs unconditionally for every experiment (not gated
 on `cp_features`) -- both the cellDINO track above and the CellProfiler
 track below depend on its output.
+
+`QC_FILTER` runs off `BUILD_CELL_METADATA`, not `BUILD_DATASET`.
+`BUILD_CELL_METADATA` (`modules/local/build_cell_metadata/main.nf`,
+`cell_metadata.py`) is a flat projection of `BUILD_CELL_IMAGES`'
+`cell_table.parquet` down to the seven `meta_*` columns QC reads
+(`meta_batch`/`meta_well`/`meta_tile`/`meta_cell_index` --
+`filter.py`'s `JOIN_KEYS` -- plus `meta_barcode`/`meta_aa_changes`/
+`meta_edit_distance`). That makes `QC_FILTER` the point where the two
+tracks fan out, instead of `BUILD_DATASET`: see
+[Track independence](#track-independence) below.
 
 `EMBED_CELLS` streams `BUILD_DATASET`'s WebDataset shards directly and has
 no dependency on `QC_FILTER` -- the whole point of building the WebDataset
@@ -132,7 +143,8 @@ cp_config_ch (params.experiments entries with cp_features: true --
 BUILD_CP_FEATURES
     │
 QC_FILTER ──┐  (the SAME qc_ch used by FILTER_EMBEDDINGS above -- no
-             │   second QC_FILTER process)
+             │   second QC_FILTER process; it hangs off
+             │   BUILD_CELL_METADATA, not this track or the other)
              ▼
       FILTER_CP_FEATURES
              │
@@ -153,6 +165,36 @@ function, unchanged, with `feature_selector=FEATURE_SELECTOR` where that
 parameter exists (see [Architecture](architecture.md#architecture-decisions),
 decision 14).
 
+### Track independence
+
+`BUILD_CELL_IMAGES` is the only stage both tracks depend on. Everything
+after it is two independent chains meeting nowhere, joined only by the
+`QC_FILTER` output they both consume -- and `QC_FILTER` itself depends on
+neither, since `BUILD_CELL_METADATA` feeds it straight from
+`cell_table.parquet`. Combined with every module's `errorStrategy
+'ignore'`, that means a failure anywhere in the cellDINO track
+(`BUILD_DATASET`, `EMBED_CELLS`, `FILTER_EMBEDDINGS`, either global
+stage) leaves the CellProfiler track running to completion, and vice
+versa. `tests/integration/test_integration.py::test_cp_track_survives_dataset_failure`
+pins this by failing `BUILD_DATASET` outright and asserting the
+CellProfiler outputs still land.
+
+Before `BUILD_CELL_METADATA` existed, `QC_FILTER` read `BUILD_DATASET`'s
+own `metadata.parquet` (written inside `dataset.py`'s shard-writing
+loop), which made the expensive, image-reading WebDataset build a hard
+dependency of the CellProfiler track too. `BUILD_DATASET` still writes
+and publishes that file -- it's the record of which cells actually made
+it into the shards -- but nothing consumes it.
+
+One behavioral consequence: QC now sees every row of
+`cell_table.parquet`, where before it saw only cells that made it into a
+shard (`dataset.py` skips empty tiles and needs each tile's crop stacks
+to be readable), so `filtered_cells.parquet` can cover strictly more
+cells than it used to. Every consumer inner-joins it back on
+`filter.py`'s `JOIN_KEYS`, so the extra rows drop out where they don't
+apply -- and QC thresholds no longer shift depending on whether the
+dataset build succeeded.
+
 ## Profiles
 
 `nextflow.config` declares one profile beyond the (containerized) default:
@@ -166,13 +208,35 @@ decision 14).
   the real pipeline without building the image first. The production path
   is still fully containerized by default (no `-profile` flag needed).
 
-GPU-bound processes carry `label 'process_gpu'`; `nextflow.config` gives
-that label a `containerOptions` closure that requests the GPU in the
-running engine's own dialect (`--gpus all` under Docker, `--nv` under
-Singularity/Apptainer) and skips it entirely when
-`params.cell_dino_device` is `cpu`. Add executor-specific settings
-(SGE/Slurm queue, etc.) to that same `withLabel` block for your own
-deployment.
+### GPU-bound processes
+
+Two stages carry `label 'process_gpu'`:
+
+- **`EMBED_CELLS`** -- the Cell-DINO forward pass. Its GPU flag comes
+  from `nextflow.config`'s `withLabel: 'process_gpu'` `containerOptions`
+  closure, which requests the GPU in the running engine's own dialect
+  (`--gpus all` under Docker, `--nv` under Singularity/Apptainer) and
+  skips it entirely when `params.cell_dino_device` is `cpu`.
+- **`BUILD_CELL_IMAGES`** -- its phase-2 `snakemake` invocation runs
+  `starcall-workflow`'s stardist/cellpose/tensorflow segmentation rules
+  out of the image's `ops` conda env, on a CUDA base image. Its GPU flag
+  is spelled in its *own* `withName: 'BUILD_CELL_IMAGES'`
+  `containerOptions` closure, gated on `params.starcall_gpu`, **not** in
+  the `process_gpu` one: `withName:` is the more specific selector, so
+  that closure shadows the label's outright, and a second
+  `containerOptions` assignment for the same process clobbers rather than
+  merges with the first. Set `starcall_gpu: false` on a GPU-less host --
+  `docker run --gpus all` fails there before the container's entrypoint
+  runs, whatever the workload would actually have used.
+
+Add executor-specific settings (SGE/Slurm queue, etc.) to the
+`withLabel: 'process_gpu'` block for your own deployment. Note that block
+then applies to *both* stages -- in `scratch/nextflow.config`'s `sge`
+profile, for instance, it's declared last, so it wins over
+`process_medium` on `BUILD_CELL_IMAGES` and that stage gets the GPU
+label's cpus/memory and `-l cuda=1` too. If you'd rather `BUILD_CELL_IMAGES`
+not queue behind GPU availability, either set `starcall_gpu: false` and
+drop its label, or give it its own `withName:` sizing block there.
 
 ### Docker and Singularity/Apptainer: arbitrary host paths
 
@@ -268,8 +332,9 @@ module, nf-core's layout convention) and follows the same shape:
 task.ext.when == null || task.ext.when` gate, a `python -m
 fisseq_embeddings_pipeline.<module>` script block ending in
 `random_seed=${params.random_seed}`, and a named `emit:` on the output.
-`EMBED_CELLS` additionally carries `label 'process_gpu'`, since it's the
-pipeline's only GPU-bound stage. `BUILD_CELL_IMAGES`
+`EMBED_CELLS` and `BUILD_CELL_IMAGES` additionally carry `label
+'process_gpu'` -- see [GPU-bound processes](#gpu-bound-processes).
+`BUILD_CELL_IMAGES`
 (`modules/local/build_cell_images/main.nf`) is a partial exception to the
 shape above: its `publishDir` `mode:` is `'symlink'` or `'copy'` depending
 on `params.cell_images_hard_copy` (not the shared static `'copy'` every
@@ -297,7 +362,7 @@ they're not. Adopted:
 - **Named `emit:`**: every module's output channel is named.
 - **Resource labels**: every module carries exactly one bundled label
   (`process_single`/`process_low`/`process_medium`/`process_high`, plus
-  `process_gpu` on `EMBED_CELLS`) -- see `nextflow.config`'s comment next
+  `process_gpu` on `EMBED_CELLS` and `BUILD_CELL_IMAGES`) -- see `nextflow.config`'s comment next
   to the `process_gpu` `withLabel:` block for why there's no numeric
   `cpus`/`memory` behind them yet.
 
@@ -344,9 +409,11 @@ package rather than a third-party tool:
     <well>_grid<N>/tile<x>x<y>y/                   # symlinked (default) or hard-copied per-cell crop stacks
       <segmentation_type>_crops_<window>.tif        # (num_cells, num_channels, window, window)
       <segmentation_type>_mask_crops_<window>.tif   # (num_cells, window, window), uint8
+  cell_metadata/<batch>/
+    metadata.parquet                              # QC_FILTER's input: cell_table.parquet's seven meta_* columns, every cell
   dataset/<batch>/
     dataset-000000.tar, dataset-000001.tar, ...   # WebDataset shards -- all cells, unfiltered
-    metadata.parquet                              # same cells, meta_* only, no images
+    metadata.parquet                              # cells that actually made it into the shards, meta_* only, no images -- published for the record; nothing consumes it
   qc_filter/<batch>/
     filtered_cells.parquet
     barcode_counts.parquet

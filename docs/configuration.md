@@ -86,6 +86,8 @@ time; see `params.yaml`'s own comment on this).
 | `cellprofiler_cycle` | `""` | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_cycle`) |
 | `cell_images_hard_copy` | `false` | `BUILD_CELL_IMAGES` (global-only, see above -- `false` symlinks the collected per-cell crop-stack files (`make_cell_images_bbox`'s output -- small, not whole-tile images) from their real `starcall-workflow` location, `true` hard-copies them) |
 | `snakemake_cores` | `4` | `BUILD_CELL_IMAGES` (`--cores` for its own `snakemake` invocation, distinct from Nextflow's own executor parallelism across experiments) |
+| `snakemake_cache_dir` | `null` (-> `<pipeline_dir>/.snakemake_cache`) | `BUILD_CELL_IMAGES` (where its `snakemake` invocation points `$XDG_CACHE_HOME`/`$HOME` -- see [read-only `$HOME`](#snakemake-and-a-read-only-home) below) |
+| `starcall_gpu` | `true` | `BUILD_CELL_IMAGES` (request a GPU for its `snakemake` invocation -- `starcall-workflow`'s stardist/cellpose segmentation; set `false` on a GPU-less host) |
 | `random_seed` | `0` | every stochastic stage |
 | `barcode_count_threshold` | `10` | `QC_FILTER` |
 | `variant_barcode_count_threshold` | `4` | `QC_FILTER` |
@@ -125,6 +127,43 @@ feature type) -- see [Nextflow Workflow](nextflow.md#cellprofiler-feature-track)
 See each [Stage Reference](cli/dataset.md) page for the full field list a
 given stage's Hydra config accepts beyond what `params.yaml` exposes (e.g.
 `QC_FILTER`'s optional `n_variants` downsampling cap, off by default).
+
+## Snakemake and a read-only `$HOME`
+
+`BUILD_CELL_IMAGES`' phase-2 `snakemake` invocation builds a
+`SourceCache` inside `Workflow.__init__` -- i.e. before it parses a single
+rule -- and that constructor unconditionally does
+`os.makedirs($XDG_CACHE_HOME/snakemake)`, falling back to `$HOME/.cache`
+when `XDG_CACHE_HOME` is unset. There is no CLI flag to relocate it.
+
+On a cluster that's a problem: under Singularity/Apptainer's
+`autoMounts`, the container's `$HOME` is the submitting user's *real*
+home, which is frequently a read-only NFS mount on compute nodes. The
+stage then dies with
+
+```text
+OSError: [Errno 30] Read-only file system: '/net/noble'
+```
+
+before doing any work -- and because every module carries `errorStrategy
+'ignore'`, `nextflow run` still exits 0, with only a missing
+`cell_table.parquet` to show for it (the same silent-failure shape
+described in [Nextflow Workflow](nextflow.md#docker-and-singularityapptainer-arbitrary-host-paths)).
+
+`snakemake_cache_dir` fixes this: the module exports it as both
+`$XDG_CACHE_HOME` and (with a `home/` suffix) `$HOME` for that one
+invocation. `$HOME` is redirected too, not just `$XDG_CACHE_HOME`,
+because `--use-conda` shells out to a bare `conda`, which reads
+`~/.condarc` and appends to `~/.conda/environments.txt`.
+
+The default, `<pipeline_dir>/.snakemake_cache`, is writable and persists
+across tasks and runs, so the source cache is built once rather than per
+task. Point it at shared scratch if you'd rather it not live under
+`pipeline_dir`. Whatever it resolves to is bind-mounted into the
+container by `nextflow.config`'s `BUILD_CELL_IMAGES` `containerOptions`
+(`pipeline_dir` is otherwise never bind-mounted -- Nextflow publishes
+outputs from the host side, so no task has previously needed to see it
+from inside).
 
 ## Docker image versioning & publishing
 

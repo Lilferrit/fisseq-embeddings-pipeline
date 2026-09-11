@@ -77,7 +77,8 @@ depends on (`make_cell_images`, `extract_embeddings` in
 - **Nextflow modules** (`modules/local/<name>/main.nf`, one directory per
   module — nf-core's layout convention): `errorStrategy 'ignore'`, one
   bundled resource `label` (`process_single`/`process_low`/`process_medium`/
-  `process_high`, plus `process_gpu` on `EMBED_CELLS`), `container
+  `process_high`, plus `process_gpu` on `EMBED_CELLS` and
+  `BUILD_CELL_IMAGES`), `container
   "${params.container_image}"`, `publishDir`, a `when: task.ext.when == null
   || task.ext.when` gate, a `python -m <pkg>.<module>` script block ending in
   `random_seed=${params.random_seed}`, and a named `emit:` on the output —

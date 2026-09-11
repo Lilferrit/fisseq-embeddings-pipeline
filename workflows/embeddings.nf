@@ -10,6 +10,7 @@
 nextflow.enable.dsl = 2
 
 include { BUILD_CELL_IMAGES } from '../modules/local/build_cell_images/main.nf'
+include { BUILD_CELL_METADATA } from '../modules/local/build_cell_metadata/main.nf'
 include { BUILD_DATASET } from '../modules/local/build_dataset/main.nf'
 include { QC_FILTER } from '../modules/local/qc_filter/main.nf'
 include { EMBED_CELLS } from '../modules/local/embed_cells/main.nf'
@@ -110,6 +111,21 @@ workflow EmbeddingsPipeline {
     }
     cell_images_ch = BUILD_CELL_IMAGES(cell_images_config_ch) // (batch_stem, cell_table.parquet, cell_images_dir)
 
+    // QC's own input, straight off BUILD_CELL_IMAGES' cell table -- NOT
+    // BUILD_DATASET's metadata.parquet, which is what it used to be. That
+    // old edge made the whole CellProfiler track (whose FILTER_CP_FEATURES
+    // consumes this same qc_ch below) a downstream dependent of the
+    // expensive, image-reading WebDataset build, so a BUILD_DATASET failure
+    // took both tracks down at once. QC_FILTER is now the shared fan-out
+    // point instead -- the same shape fisseq-data-pipeline's own
+    // INPUT -> QC_FILTER -> {NORMALIZE, batch-correction} wiring has -- and
+    // the two tracks below depend on it independently of each other.
+    // cell_table.parquet is passed as a real staged `path` (the tuple's
+    // second element), not as a cell_images_dir string, so this stage needs
+    // no containerOptions bind of its own; see the module's own comment.
+    meta_ch = BUILD_CELL_METADATA(cell_images_ch.map { stem, parquet, dir -> tuple(stem, parquet) }) // (batch_stem, metadata.parquet)
+    qc_ch   = QC_FILTER(meta_ch) // (batch_stem, filtered_cells, barcode_counts, variants_per_barcode)
+
     // `cp_features` opts an experiment into the CellProfiler-feature track
     // below and isn't a BuildDatasetConfig field itself, so BUILD_DATASET
     // never sees it; every starcall-workflow-facing key above is now
@@ -146,8 +162,12 @@ workflow EmbeddingsPipeline {
 
     // Per-batch (per-experiment) chain -- identical shape to
     // fisseq-data-pipeline's per-batch resolution pattern (BatchParams.resolve).
+    // dataset_ch's metadata.parquet is still declared/published (it's the
+    // record of which cells actually made it into the shards, which can be
+    // a subset of the cell table -- dataset.py skips empty/unreadable
+    // tiles), but nothing consumes it now that QC_FILTER runs off
+    // BUILD_CELL_METADATA above.
     dataset_ch = BUILD_DATASET(config_ch)                 // (batch_stem, [dataset-*.tar shards], metadata.parquet)
-    qc_ch      = QC_FILTER(dataset_ch.map { s, shards, meta -> tuple(s, meta) })     // (batch_stem, filtered_cells, barcode_counts, variants_per_barcode) -- reads metadata.parquet only
     embed_ch   = EMBED_CELLS(dataset_ch.map { s, shards, meta -> tuple(s, shards) }) // (batch_stem, embeddings.parquet) -- streams the shards; no QC dependency, matches diagram
     // FILTER_EMBEDDINGS only wants the join key (filtered_cells.parquet),
     // not qc_ch's other two (informational, QC-report-only) outputs.

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import numpy as np
@@ -297,6 +299,45 @@ def test_write_dataset_shards_skips_empty_tile_without_erroring(tmp_path: Path):
     metadata = pl.read_parquet(output_dir / "metadata.parquet")
     assert metadata.height == 1
     assert metadata["meta_tile"].to_list() == ["tile0x1y"]
+
+
+def test_write_dataset_shards_leaves_missing_genotype_values_null(tmp_path: Path):
+    """Missing barcode/aaChanges values stay null -- in metadata.parquet
+    AND in each shard's meta.json. This used to be the literal string
+    "nan": write_dataset_shards round-tripped the cell table through
+    .to_pandas() for .iloc[] access, and str() on pandas' NaN produced
+    "nan", while cp_features.py's polars projection produced null for the
+    same cells. All three stages now share utils/cell_table.py's
+    projection -- see docs/architecture.md decision 19."""
+    cell_images_dir = tmp_path / "cell_images"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    _crops, _masks, tile = _write_populated_tile(
+        cell_images_dir, "well1", 4, 0, 0, num_cells=2
+    )
+    rows = [_row("well1", tile, 10, 0), _row("well1", tile, 11, 1)]
+    rows[1]["upBarcode"] = None
+    rows[1]["aaChanges"] = None
+    _write_cell_table(cell_images_dir, rows)
+
+    cfg = _cfg(cell_images_dir, batch_stem="batchA")
+    write_dataset_shards(output_dir, cfg)
+
+    metadata = pl.read_parquet(output_dir / "metadata.parquet").sort("meta_cell_index")
+    assert metadata[META_BARCODE_COL].to_list() == ["bc", None]
+    assert metadata["meta_aa_changes"].to_list() == ["WT", None]
+    assert "nan" not in metadata[META_BARCODE_COL].to_list()
+
+    shard = sorted(output_dir.glob("dataset-*.tar"))[0]
+    metas = []
+    with tarfile.open(shard) as tf:
+        for member in sorted(tf.getmembers(), key=lambda m: m.name):
+            if member.name.endswith("meta.json"):
+                metas.append(json.loads(tf.extractfile(member).read()))
+    metas.sort(key=lambda m: m["meta_cell_index"])
+    assert [m[META_BARCODE_COL] for m in metas] == ["bc", None]
+    assert [m["meta_aa_changes"] for m in metas] == ["WT", None]
 
 
 def test_write_dataset_shards_round_trips_crops_masks_and_metadata(tmp_path: Path):
