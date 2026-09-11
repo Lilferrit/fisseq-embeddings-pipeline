@@ -2301,9 +2301,11 @@ default and <code>-profile local</code> command lines are unchanged byte-for-byt
   execute in-process inside the child snakemake and import
   numpy/tifffile/starcall/tensorflow. Snakemake never containerizes a <code>run:</code>
   body, so the child's own interpreter has to be the <code>ops</code> env.</li>
-<li><strong>Child jobs need a real <code>.sif</code>, not a <code>docker://</code> URI</strong> --
-  <code>params.starcall_child_image</code>, pulled once by <code>scratch/run.sh</code>. See
-  <a href="../configuration/">Configuration</a>.</li>
+<li><strong>Child jobs need a real <code>.sif</code>, not a <code>docker://</code> URI.</strong> By default this
+  needs no configuration: with <code>params.starcall_child_image</code> null, the stage
+  reuses the image Nextflow already pulled and converted for the task itself,
+  reconstructing its cache path. Set the param to override. See
+  <a href="../configuration/#snakemake-on-a-cluster">Configuration</a>.</li>
 <li><strong><code>--cores</code> changes meaning.</strong> In cluster mode it is the <em>global</em> budget
   across all submitted jobs and it silently caps each rule's own <code>threads:</code>
   (<code>min(global_cores, rule.threads)</code>), so it comes from

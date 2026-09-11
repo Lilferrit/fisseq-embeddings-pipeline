@@ -2042,8 +2042,8 @@ time; see <code>params.yaml</code>'s own comment on this).</p>
 </tr>
 <tr>
 <td><code>starcall_child_image</code></td>
-<td><code>null</code></td>
-<td><code>BUILD_CELL_IMAGES</code>, cluster mode only: the pre-built <code>.sif</code> each per-rule scheduler job re-enters the image with</td>
+<td><code>null</code> (-&gt; the image Nextflow already cached for the task)</td>
+<td><code>BUILD_CELL_IMAGES</code>, cluster mode only: the <code>.sif</code> each per-rule scheduler job re-enters the image with. Optional -- see <a href="#snakemake-on-a-cluster">Snakemake on a cluster</a></td>
 </tr>
 <tr>
 <td><code>snakemake_cache_dir</code></td>
@@ -2259,6 +2259,11 @@ example. The knobs:</p>
 <td><strong>Host</strong> path to <code>resources/starcall_overrides</code>, on storage the exec nodes can read.</td>
 </tr>
 <tr>
+<td><code>ext.starcall_singularity_cache_dir</code></td>
+<td>process directive</td>
+<td>Mirror of <code>singularity.cacheDir</code>, used only to resolve <code>starcall_child_image</code> when it is null.</td>
+</tr>
+<tr>
 <td><code>starcall_child_image</code></td>
 <td><code>params.yaml</code></td>
 <td>Pre-built <code>.sif</code> the child jobs exec.</td>
@@ -2287,15 +2292,52 @@ the <em>scheduler</em> runs, on a bare exec node with no container around it, so
 needs the host <code>ext.starcall_host_overrides_dir</code> -- the in-image <code>/opt/...</code>
 path does not exist there. <code>BUILD_CELL_IMAGES</code> fails fast if the latter isn't
 readable.</p>
-<p><code>starcall_child_image</code> must be a real <code>.sif</code> <strong>file</strong>, not the <code>docker://</code> URI
-<code>container_image</code> carries on the cluster. Each per-rule job runs on a bare exec
-node outside Nextflow's container handling, so having hundreds of them
-concurrently re-resolve a registry URI against one shared Singularity cache --
-each needing <code>SINGULARITY_DOCKER_USERNAME</code>/<code>PASSWORD</code> -- is exactly what this
-avoids. <code>scratch/run.sh</code> pulls it once, pinned to the same <code>GIT_HASH</code> as
-<code>container_image</code>. It is deliberately <em>not</em> derived from Nextflow's own
-<code>singularity.cacheDir</code>: that filename mangling is an implementation detail, not
-an interface.</p>
+<p>The child jobs need a real <code>.sif</code> <strong>file</strong>, not the <code>docker://</code> URI
+<code>container_image</code> carries on the cluster: each runs on a bare exec node outside
+Nextflow's container handling, and having hundreds of them concurrently
+re-resolve a registry URI against one shared cache -- each needing
+<code>SINGULARITY_DOCKER_USERNAME</code>/<code>PASSWORD</code> -- is what this avoids.</p>
+<p><strong><code>starcall_child_image</code> is optional.</strong> Left <code>null</code>, <code>BUILD_CELL_IMAGES</code> uses
+the image Nextflow has <em>already</em> pulled and converted for that very task, so
+nothing extra is needed. It has to reconstruct the path rather than ask for it:
+<code>task.container</code> returns the raw <code>docker://</code> URI, and the <code>singularity</code> config
+scope isn't readable from a task context at all. What it rebuilds is Nextflow's
+own cache filename -- strip the scheme, turn <code>/</code> and <code>:</code> into <code>-</code>, append
+<code>.img</code> (not <code>.sif</code>):</p>
+<table>
+<thead>
+<tr>
+<th><code>container_image</code></th>
+<th>cached as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docker://busybox</code></td>
+<td><code>busybox.img</code></td>
+</tr>
+<tr>
+<td><code>docker://quay.io/biocontainers/foo:1.0--py_0</code></td>
+<td><code>quay.io-biocontainers-foo-1.0--py_0.img</code></td>
+</tr>
+<tr>
+<td><code>docker://ghcr.io/Owner/Repo:v1.2.3</code></td>
+<td><code>ghcr.io-Owner-Repo-v1.2.3.img</code></td>
+</tr>
+</tbody>
+</table>
+<p>That rule is <code>SingularityCache.simpleName()</code>, which is package-private -- an
+implementation detail, not an API. The risk is bounded: if a Nextflow upgrade
+changes it the path stops existing and the stage fails immediately with both
+candidates named, rather than dying hundreds of times on the nodes. An
+integration test pins the rule, so a change surfaces in CI.</p>
+<p><strong>Set it explicitly</strong> to opt out of that entirely, to point the child jobs at a
+separately built image, or to run the children on a different image than the
+tasks. An explicit value always wins.</p>
+<p>The cache directory is found via <code>ext.starcall_singularity_cache_dir</code> and then
+<code>$NXF_SINGULARITY_CACHEDIR</code>. A profile that sets <code>singularity.cacheDir</code> must
+mirror it into that <code>ext</code> (the config scope is invisible from a task context);
+using the environment variable instead needs no mirroring.</p>
 <h2 id="docker-image-versioning-publishing">Docker image versioning &amp; publishing<a class="headerlink" href="#docker-image-versioning-publishing" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Registry:</strong> GitHub Container Registry, <code>ghcr.io/&lt;owner&gt;/&lt;repo&gt;</code>
