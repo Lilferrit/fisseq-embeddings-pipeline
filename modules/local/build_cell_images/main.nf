@@ -175,6 +175,139 @@ process BUILD_CELL_IMAGES {
     // nextflow.config's containerOptions closure for this process repeats
     // the same `?:` fallback, and the two must agree.
     def snakemake_cache_dir = params.snakemake_cache_dir ?: "${params.pipeline_dir}/.snakemake_cache"
+    // Empty by default (nextflow.config), so the command this block emits is
+    // byte-for-byte today's on the default/Docker path and under -profile
+    // local -- the whole cluster path is additive, gated on an executor
+    // profile setting this to a non-empty --cluster ... string. Everything
+    // below keyed off `cluster_mode` follows the same rule: emitted only when
+    // a profile actually opted in.
+    def cluster_args = task.ext.snakemake_cluster_args ?: ''
+    def cluster_mode = !cluster_args.isEmpty()
+    // Emitted immediately before --cores so the cluster flags sit in the
+    // middle of the invocation rather than after the `--` target separator,
+    // which would make them unparseable target paths. Empty (not even a
+    // line) by default.
+    def cluster_args_line = cluster_mode ? "${cluster_args} \\\n        " : ''
+    // --cores means two different things to snakemake. In local mode it is
+    // the local CPU budget (params.snakemake_cores, default 4). In cluster
+    // mode it is the GLOBAL budget across all submitted jobs, and it silently
+    // CAPS every rule's own threads: Rule.expand_resources does
+    // `threads = min(global_resources['_cores'], rule.threads)` (confirmed
+    // against a real snakemake 7.32.4 source tree), so leaving it at 4 would
+    // quietly downgrade starcall's `threads: 8` rules (segment_cells_bases,
+    // segment_nuclei_bases) to 4 and submit them as `-pe serial 4`. Hence a
+    // separate, much larger value in cluster mode.
+    def snakemake_cores = cluster_mode
+        ? (task.ext.snakemake_cluster_cores ?: 128)
+        : params.snakemake_cores
+    // Site-specific environment the submit script needs (SGE project/queue/
+    // runtime, $SGE_ROOT and friends). A Map in an `ext` directive rather than
+    // individual params, so the repo side stays scheduler-agnostic and every
+    // site-specific value lives in the executor profile -- see
+    // nextflow.config's own note on why these are `ext` and not params.yaml.
+    def cluster_env = (task.ext.starcall_cluster_env ?: [:]).collect { key, value ->
+        "    export ${key}='${value}'"
+    }.join('\n')
+    // Short, alnum-only, and unique per task: it prefixes every child job's
+    // SGE name (-N), and SGE both truncates long names and rejects some
+    // characters. Only used for human-facing identification in qstat -- the
+    // cleanup trap matches on recorded job IDs, not on this (see
+    // sge_submit.sh's own comment on why).
+    //
+    // NOT task.hash: that is still null while the script block is being
+    // rendered (confirmed by inspecting a real .command.sh, where it came
+    // out as the literal string "null"), so every task would share one tag.
+    // workflow.sessionId is stable across a run and distinct between runs,
+    // and task.index separates the experiments within one run.
+    def job_tag = 'sc' +
+        workflow.sessionId.toString().replaceAll(/[^A-Za-z0-9]/, '').take(6) +
+        task.index
+    def cluster_preamble = !cluster_mode ? '' : """\
+    # ---- cluster submission preamble (executor profile opted in) ----------
+    # Every child rule job re-enters this image on its own node, so it needs a
+    # real .sif FILE. params.container_image is a docker:// URI on the cluster
+    # (see scratch/run.sh) -- hundreds of jobs each re-resolving that against
+    # one shared Singularity cache, with registry credentials, is exactly what
+    # params.starcall_child_image exists to avoid. Fail loudly here rather
+    # than letting every child job fail identically N minutes later.
+    export STARCALL_SIF='${params.starcall_child_image ?: ''}'
+    if [ ! -s "\$STARCALL_SIF" ]; then
+        echo "BUILD_CELL_IMAGES: params.starcall_child_image must point at a pre-built .sif" >&2
+        echo "  when an executor profile sets ext.snakemake_cluster_args (got: '\$STARCALL_SIF')" >&2
+        exit 1
+    fi
+    export STARCALL_APPTAINER_BIN='${task.ext.starcall_apptainer_bin ?: 'singularity'}'
+    # The two helper scripts live on opposite sides of the container
+    # boundary and so are addressed by DIFFERENT paths, which is easy to get
+    # wrong in exactly one direction each:
+    #   - sge_submit.sh is invoked BY snakemake, i.e. inside this task's own
+    #     container, so it takes the in-image path (ext.starcall_overrides_dir,
+    #     the same one --snakefile uses).
+    #   - sge_job_wrapper.sh is what the SCHEDULER runs, on a bare exec node
+    #     with no container around it at all, so it must be a HOST path on
+    #     shared storage -- the in-image /opt/... path does not exist there.
+    # Exported rather than interpolated into the profile's --cluster string
+    # so the profile doesn't have to know either path.
+    export STARCALL_SUBMIT_SCRIPT='${task.ext.starcall_overrides_dir}/sge_submit.sh'
+    export STARCALL_JOB_WRAPPER='${task.ext.starcall_host_overrides_dir ?: ''}/sge_job_wrapper.sh'
+    if [ ! -x "\$STARCALL_JOB_WRAPPER" ]; then
+        echo "BUILD_CELL_IMAGES: ext.starcall_host_overrides_dir must point at this repo's" >&2
+        echo "  resources/starcall_overrides on SHARED STORAGE the exec nodes can read --" >&2
+        echo "  the per-rule job wrapper runs outside any container (got: '\$STARCALL_JOB_WRAPPER')" >&2
+        exit 1
+    fi
+    export STARCALL_LOG_DIR='${params.pipeline_dir}/logs/starcall/${batch_stem}'
+    export STARCALL_JOB_TAG='${job_tag}'
+    export STARCALL_JOBID_FILE="\$PWD/cluster_jobids.txt"
+${cluster_env}
+    mkdir -p "\$STARCALL_LOG_DIR"
+    : > "\$STARCALL_JOBID_FILE"
+
+    # Every host path a child job can touch, bound at its own unchanged
+    # location (src == dest) -- starcall's rules concatenate strings onto
+    # phenotyping_dir/segmentation_dir/sequencing_dir, so reaching the data
+    # under some other in-container path is not enough. \$PWD is this task's
+    # own work dir and is NOT optional: snakemake prefixes every generated
+    # jobscript with `cd <the directory the submitter was launched from>`
+    # (ClusterExecutor.get_job_exec_prefix, confirmed against a real
+    # snakemake 7.32.4 source tree), which is this dir, not --directory.
+    STARCALL_BINDS="\$(printf '%s\\n' \\
+        '${starcall_workflow_dir}' \\
+        "\$phenotyping_dir" "\$segmentation_dir" "\$sequencing_dir" \\
+        '${snakemake_cache_dir}' "\$PWD" \\
+        | sort -u | sed 's|.*|&:&|' | paste -sd, -)"
+    export STARCALL_BINDS
+
+    # qdel whatever is still queued if this task dies. snakemake's own
+    # --cluster-cancel only fires on a graceful shutdown, and SGE's default
+    # terminate is SIGKILL -- which this trap does NOT catch either, so this
+    # is defence in depth, not a guarantee. The other two layers are the
+    # bounded -l h_rt on every child (sge_submit.sh) and the documented
+    # manual sweep in docs/nextflow.md.
+    starcall_cancel_children() {
+        if [ -s "\$STARCALL_JOBID_FILE" ]; then
+            xargs -r qdel < "\$STARCALL_JOBID_FILE" >/dev/null 2>&1 || true
+        fi
+    }
+    trap starcall_cancel_children EXIT INT TERM
+
+    # A SIGKILLed submitter leaves a lock behind in
+    # <starcall_workflow_dir>/.snakemake/locks/ and the NEXT run then dies
+    # with "Directory cannot be locked" before doing any work. Safe to clear
+    # unconditionally here only because this module already requires one
+    # starcall_workflow_dir per experiment and forbids concurrent
+    # invocations against the same tree (see this file's own header) -- it
+    # would be actively dangerous otherwise. Paired with --rerun-incomplete
+    # in the cluster args, which handles the other half of killed-mid-flight
+    # state.
+    ${conda_path_prefix}${task.ext.snakemake_bin} \\
+        --snakefile "${task.ext.starcall_overrides_dir}/wrapper.smk" \\
+        --directory "${starcall_workflow_dir}" \\
+        --unlock \\
+        --config phenotyping_dir="\$phenotyping_dir/" segmentation_dir="\$segmentation_dir/" sequencing_dir="\$sequencing_dir/" starcall_workflow_dir="${starcall_workflow_dir}" \\
+        || true
+    # ---- end cluster submission preamble ---------------------------------
+"""
     """
     set -euo pipefail
 
@@ -211,7 +344,7 @@ process BUILD_CELL_IMAGES {
     # phenotyping_dir/segmentation_dir/sequencing_dir, fully resolved by
     # phase 1 above (resolve_data_dir) -- not recomputed here.
     source resolved_dirs.env
-
+${cluster_preamble}
     # --snakefile points directly at the static wrapper.smk template baked
     # into the image (or, under -profile local, the checked-out repo -- see
     # ext.starcall_overrides_dir, nextflow.config); no per-task copy or text
@@ -271,7 +404,7 @@ process BUILD_CELL_IMAGES {
     ${conda_path_prefix}${task.ext.snakemake_bin} \\
         --snakefile "${task.ext.starcall_overrides_dir}/wrapper.smk" \\
         --directory "${starcall_workflow_dir}" \\
-        --cores ${params.snakemake_cores} \\
+        ${cluster_args_line}--cores ${snakemake_cores} \\
         --use-conda --conda-frontend conda \\
         --rerun-triggers mtime \\
         --config phenotyping_dir="\$phenotyping_dir/" segmentation_dir="\$segmentation_dir/" sequencing_dir="\$sequencing_dir/" starcall_workflow_dir="${starcall_workflow_dir}" \\

@@ -294,7 +294,6 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     consuming the same QC output but neither depending on the other. This
     matches `fisseq-data-pipeline`'s own shape, where `INPUT` -> `QC_FILTER`
     is likewise the shared trunk and QC the fan-out point.
-
     The projection can't be folded into `QC_FILTER` itself:
     `qcfilter.py`'s `filter_columns` renames the barcode/edit-distance/
     amino-acid-changes columns but then keeps only `meta_`-prefixed (and
@@ -332,6 +331,30 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     `metadata.parquet` as the record of what actually landed in the shards;
     nothing consumes it.
 
+20. **Snakemake's own cluster submission is opt-in, and its submitter
+    stays inside the container.** `BUILD_CELL_IMAGES`' phase-2 `snakemake`
+    runs in local mode by default (`--cores`), so on a scheduler every
+    starcall rule for an experiment runs inside the one job Nextflow
+    submitted for that task -- parallelism across experiments, none within
+    one. An executor profile can opt into per-rule submission by setting
+    `process.ext.snakemake_cluster_args`; everything the cluster path adds
+    is gated on that, so the default and `-profile local` invocations are
+    unchanged byte-for-byte.
+
+    The submitter deliberately stays *inside* the task's container rather
+    than moving to a host-side "thin" snakemake env. Snakemake bakes its own
+    `sys.executable` into every jobscript it generates, with no template
+    hook to override it, so a host submitter would emit a host Python path
+    that does not exist inside the child's container -- reconcilable only by
+    rewriting each jobscript before exec'ing it. Keeping the submitter in
+    the image makes that path (`/opt/conda/envs/ops/bin/python3.10`) valid
+    on both sides, and removes the version-skew class of bug entirely, at
+    the cost of requiring `qsub` to work from inside the container. The
+    child jobs must re-enter the image regardless: starcall's rules are
+    overwhelmingly `run:` blocks, which execute in-process in the child
+    snakemake and import the `ops` stack, and snakemake never containerizes
+    a `run:` body. See [Nextflow](nextflow.md#running-starcalls-rules-as-their-own-cluster-jobs).
+
 ## Repository layout
 
 ```text
@@ -350,6 +373,10 @@ fisseq-embeddings-pipeline/
     starcall_overrides/            # make_cell_images_bbox rule patch +
                                     # wrapper.smk composing it into starcall-
                                     # workflow's own Snakefile -- see decision 18
+                                    # plus sge_submit.sh/sge_job_wrapper.sh,
+                                    # used only when an executor profile opts
+                                    # into per-rule cluster submission
+                                    # (decision 20)
   workflows/
     embeddings.nf                 # the one pipeline_mode this repo has
   modules/local/
