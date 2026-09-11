@@ -134,6 +134,15 @@ _STUB_SNAKEMAKE_SCRIPT = """#!/bin/sh
 # invocation to do -- just succeed, mimicking "every requested target is
 # already up to date". See this test module's own docstring.
 echo "stub snakemake invoked: $*" >&2
+# Record the full argv so a test can assert on the command line
+# BUILD_CELL_IMAGES actually built -- the flags are the whole point of the
+# cluster-submission knob (task.ext.snakemake_cluster_args), and nothing
+# else in this suite can see them. Gated on the env var so every existing
+# test's behaviour is unchanged when it isn't set. One line per invocation,
+# appended, since a multi-experiment run invokes this stub once per batch.
+if [ -n "${SNAKEMAKE_STUB_ARGV_LOG:-}" ]; then
+    echo "$*" >> "$SNAKEMAKE_STUB_ARGV_LOG"
+fi
 exit 0
 """
 
@@ -406,6 +415,10 @@ def _run_nextflow(
     params_yaml = exp_dir / "params.yaml"
     env = os.environ.copy()
     env["PATH"] = f"{exp_dir / 'stub_bin'}{os.pathsep}{env.get('PATH', '')}"
+    # Where the stub snakemake appends each invocation's argv (see
+    # _STUB_SNAKEMAKE_SCRIPT). Always set, so any test can read it; tests
+    # that don't care simply never look at the file.
+    env["SNAKEMAKE_STUB_ARGV_LOG"] = str(exp_dir / "stub_snakemake_argv.log")
     return subprocess.run(
         [
             "nextflow",
@@ -492,6 +505,208 @@ def test_qc_filter_runs_off_cell_metadata(pipeline_outputs):
     )
     assert set(JOIN_KEYS).issubset(filtered.columns)
     assert 0 < filtered.height <= metadata.height
+
+
+def _read_stub_argv(exp_dir: Path) -> list[str]:
+    """Every `snakemake` command line BUILD_CELL_IMAGES built during a run,
+    one per invoked batch, as recorded by the stub on PATH (see
+    _STUB_SNAKEMAKE_SCRIPT / _run_nextflow)."""
+    log = exp_dir / "stub_snakemake_argv.log"
+    assert log.exists(), (
+        "stub snakemake never ran -- BUILD_CELL_IMAGES didn't invoke it"
+    )
+    return [line for line in log.read_text().splitlines() if line.strip()]
+
+
+def test_snakemake_runs_locally_by_default(pipeline_outputs):
+    """`process.ext.snakemake_cluster_args` is empty unless an executor
+    profile sets it, so the default path must invoke snakemake in LOCAL
+    mode -- `--cores <params.snakemake_cores>` and not one flag of the
+    cluster-submission machinery.
+
+    This is the guard on the whole opt-in claim: the cluster path adds
+    flags to this exact command line, and nothing else in this suite looks
+    at it (the stub ignores its arguments)."""
+    exp_dir, _ = pipeline_outputs
+    invocations = _read_stub_argv(exp_dir)
+
+    for argv in invocations:
+        # _write_synthetic_experiment pins snakemake_cores to 1.
+        assert "--cores 1" in argv, argv
+        for cluster_flag in (
+            "--cluster",
+            "--jobs",
+            "--default-resources",
+            "--set-resources",
+            "--conda-base-path",
+        ):
+            assert cluster_flag not in argv, (
+                f"{cluster_flag} leaked into the default (non-cluster) "
+                f"invocation: {argv}"
+            )
+
+
+def test_snakemake_cluster_args_are_opt_in(tmp_path_factory):
+    """Setting `ext.snakemake_cluster_args` adds its flags to phase 2's
+    invocation without disturbing the flags around them -- in particular
+    they must land BEFORE the `--` that separates snakemake's own options
+    from the target paths, or they'd be parsed as (nonexistent) targets.
+
+    Uses a harmless `--cluster "echo"` rather than a real scheduler command:
+    the stub snakemake never acts on any of it, so this asserts on the
+    command line the module *builds*, which is the part this repo owns."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_cluster_args")
+    _write_synthetic_experiment(exp_dir)
+    checkpoint_path = tmp_path_factory.mktemp("weights_cluster_args") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    cluster_config = exp_dir / "cluster_args.config"
+    cluster_config.write_text(
+        "process { withName: 'BUILD_CELL_IMAGES' {\n"
+        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
+        "    ext.snakemake_cluster_cores = 17\n"
+        # The per-rule job wrapper runs outside any container, so this is a
+        # host path -- here, just this repo's own checked-out copy.
+        f"    ext.starcall_host_overrides_dir = "
+        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
+        "} }\n"
+    )
+    # The cluster preamble refuses to run without a real .sif for the child
+    # jobs to re-enter (see test_cluster_mode_requires_child_image). Nothing
+    # here execs it -- the stub snakemake submits nothing -- so any existing
+    # file satisfies the check.
+    fake_sif = exp_dir / "fake.sif"
+    fake_sif.write_text("not a real image")
+
+    result = _run_nextflow(
+        exp_dir,
+        checkpoint_path,
+        extra_args=(
+            "-c",
+            str(cluster_config),
+            "--starcall_child_image",
+            str(fake_sif),
+        ),
+    )
+    assert result.returncode == 0, result.stderr
+
+    invocations = _read_stub_argv(exp_dir)
+    assert invocations, "BUILD_CELL_IMAGES never invoked snakemake"
+
+    # Cluster mode runs snakemake twice per batch: a `--unlock` preflight
+    # (which clears a lock left by a previously killed submitter) and then
+    # the real invocation. Only the latter carries the execution flags --
+    # the preflight deliberately doesn't, since it does no work.
+    unlock_calls = [a for a in invocations if "--unlock" in a]
+    real_calls = [a for a in invocations if "--use-conda" in a]
+    assert unlock_calls, f"no --unlock preflight in cluster mode: {invocations}"
+    assert real_calls, f"no real snakemake invocation: {invocations}"
+    for argv in unlock_calls:
+        assert "--cluster" not in argv, f"preflight must not submit jobs: {argv}"
+
+    for argv in real_calls:
+        tokens = argv.split()
+        assert "--cluster" in tokens, argv
+        assert tokens[tokens.index("--cluster") + 1] == "echo", argv
+        assert tokens[tokens.index("--jobs") + 1] == "3", argv
+        # The cluster core budget replaces params.snakemake_cores entirely
+        # (which _write_synthetic_experiment pins to 1) -- leaving the local
+        # value in would silently cap every rule's own `threads:`. Compared
+        # as a token, not a substring: "--cores 1" is a prefix of
+        # "--cores 17".
+        assert tokens.count("--cores") == 1, argv
+        assert tokens[tokens.index("--cores") + 1] == "17", argv
+        # Untouched neighbours, and correct ordering around `--`.
+        assert "--use-conda --conda-frontend conda" in argv, argv
+        assert "--rerun-triggers mtime" in argv, argv
+        assert argv.index("--cluster") < argv.index(" -- "), (
+            f"cluster flags must precede the `--` target separator: {argv}"
+        )
+
+    # The knob is purely additive: the stage still produces its real output.
+    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
+
+
+def test_cluster_mode_requires_child_image(tmp_path_factory):
+    """Opting into cluster submission without `starcall_child_image` must
+    fail BUILD_CELL_IMAGES outright rather than submitting jobs that can't
+    start.
+
+    Each per-rule job re-enters the image on a bare exec node, so it needs a
+    real .sif file -- `container_image` is a `docker://` URI on a cluster,
+    which only Nextflow itself knows how to pull. Without the guard this
+    surfaces as N identical child-job failures minutes later; with it, the
+    stage dies immediately with a message naming the key.
+
+    `errorStrategy 'ignore'` means the run still exits 0, so the observable
+    symptom is the missing output -- the same shape as every other
+    BUILD_CELL_IMAGES failure mode this suite checks."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_no_child_image")
+    _write_synthetic_experiment(exp_dir)
+    checkpoint_path = tmp_path_factory.mktemp("weights_no_child") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    cluster_config = exp_dir / "cluster_no_image.config"
+    cluster_config.write_text(
+        "process { withName: 'BUILD_CELL_IMAGES' {\n"
+        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
+        "} }\n"
+    )
+
+    result = _run_nextflow(
+        exp_dir, checkpoint_path, extra_args=("-c", str(cluster_config))
+    )
+    assert result.returncode == 0, result.stderr
+
+    assert not (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
+    # It failed in the preamble, before ever reaching phase 2.
+    assert not (exp_dir / "stub_snakemake_argv.log").exists()
+
+
+def test_cluster_env_with_unset_value_fails(tmp_path_factory):
+    """A null/empty entry in `ext.starcall_cluster_env` must fail the stage
+    rather than exporting the literal string "null".
+
+    This is the shape of a real mistake: an executor profile builds that map
+    out of params (e.g. `SGE_ROOT: params.sge_root`, which scratch/run.sh
+    fills from the scheduler's own environment), so a launch script that
+    forgets to pass one leaves a null behind. Exported as-is it surfaces much
+    later as an unintelligible bind-mount or scheduler error on every child
+    job."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_unset_cluster_env")
+    _write_synthetic_experiment(exp_dir)
+    checkpoint_path = tmp_path_factory.mktemp("weights_unset_env") / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+
+    fake_sif = exp_dir / "fake.sif"
+    fake_sif.write_text("not a real image")
+
+    cluster_config = exp_dir / "cluster_unset_env.config"
+    cluster_config.write_text(
+        "process { withName: 'BUILD_CELL_IMAGES' {\n"
+        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
+        f"    ext.starcall_host_overrides_dir = "
+        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
+        # params.does_not_exist resolves to null, exactly as an unpassed
+        # --sge_root would.
+        "    ext.starcall_cluster_env = [SGE_ROOT: params.does_not_exist]\n"
+        "} }\n"
+    )
+
+    result = _run_nextflow(
+        exp_dir,
+        checkpoint_path,
+        extra_args=(
+            "-c",
+            str(cluster_config),
+            "--starcall_child_image",
+            str(fake_sif),
+        ),
+    )
+
+    assert not (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
+    combined = result.stdout + result.stderr
+    assert "starcall_cluster_env has no value for SGE_ROOT" in combined, combined
 
 
 def test_cp_track_survives_dataset_failure(tmp_path_factory):
@@ -1003,15 +1218,24 @@ def _prime_tile_grid(image: str, starcall_workflow_dir: Path, well: str) -> None
     direct Snakemake invocation -- the same image, same `ops` env,
     `task.ext.snakemake_bin`'s own absolute path (nextflow.config) -- for
     the concrete tile00x00y targets, run straight from a from-scratch
-    starcall-workflow checkout. Mirrors build_cell_images.nf's own
-    invocation shape exactly (including the `--` separator ending
-    `--config`'s own arg list, the conda_bin_dir PATH prefix --use-
-    conda itself needs -- both real bugs this session's manual debugging
-    against this exact fixture found and fixed there -- and pointing
-    `--snakefile` at the image's own baked-in wrapper.smk,
-    `_STARCALL_OVERRIDES_DIR_IN_IMAGE`), since this is genuinely the same
-    command BUILD_CELL_IMAGES' own script block would run, just pointed at
-    concrete paths instead of a glob-discovered list.
+    starcall-workflow checkout. Mirrors
+    modules/local/build_cell_images/main.nf's own invocation shape exactly
+    (including the `--` separator ending `--config`'s own arg list, the
+    conda_bin_dir PATH prefix --use-conda itself needs -- both real bugs
+    this session's manual debugging against this exact fixture found and
+    fixed there -- and pointing `--snakefile` at the image's own baked-in
+    wrapper.smk, `_STARCALL_OVERRIDES_DIR_IN_IMAGE`), since this is
+    genuinely the same command BUILD_CELL_IMAGES' own script block would
+    run, just pointed at concrete paths instead of a glob-discovered list.
+
+    "Mirrors exactly" means the LOCAL-mode invocation, which is what that
+    module emits unless an executor profile sets
+    `process.ext.snakemake_cluster_args` (nextflow.config). The `--cores 4`
+    below is that path's `--cores ${params.snakemake_cores}`; a cluster
+    profile replaces it with `--cores ${task.ext.snakemake_cluster_cores}`
+    plus a `--cluster ...` block, which this fixture deliberately does not
+    mirror -- it has no scheduler to submit to, and priming the grid is a
+    one-tile job. Keep this in sync with the local path only.
     """
     resolved_dirs = {
         dir_key: resolve_data_dir(str(starcall_workflow_dir), dir_key, None)

@@ -141,6 +141,26 @@ cell_images_hard_copy: false   # false = symlink BUILD_CELL_IMAGES' collected pe
 
 # ── Snakemake invocation (BUILD_CELL_IMAGES) ─────────────────────────────────
 snakemake_cores: 4             # --cores passed to snakemake within one BUILD_CELL_IMAGES task -- local parallelism inside that one invocation, distinct from Nextflow's own executor parallelism across experiments
+# LOCAL MODE ONLY. When an executor profile opts into cluster submission
+# (process.ext.snakemake_cluster_args, nextflow.config), snakemake instead
+# submits each starcall rule as its own scheduler job and --cores becomes the
+# global budget ACROSS those jobs -- supplied by ext.snakemake_cluster_cores,
+# not by this value, because a 4 here would silently cap every rule's own
+# `threads:` declaration. See docs/nextflow.md.
+#
+# Where the per-rule cluster jobs re-enter this pipeline's image. Each one
+# runs on a bare exec node outside Nextflow's own container handling, so it
+# needs a real .sif FILE -- container_image is a `docker://` URI on the
+# cluster (scratch/run.sh), and having hundreds of concurrently-starting jobs
+# each re-resolve that URI against one shared Singularity cache, with registry
+# credentials in every job's environment, is exactly what this avoids. Build
+# it once with `apptainer pull` before `nextflow run` (scratch/run.sh does)
+# and pin it to the same commit as container_image. null is fine unless an
+# executor profile sets ext.snakemake_cluster_args, in which case
+# BUILD_CELL_IMAGES fails fast with a message naming this key. Deliberately
+# NOT derived from Nextflow's own singularity.cacheDir: that filename mangling
+# is a Nextflow implementation detail, not an interface.
+starcall_child_image: null
 # Where BUILD_CELL_IMAGES points $XDG_CACHE_HOME (and $HOME) for its one
 # snakemake invocation. Snakemake's SourceCache mkdir's
 # $XDG_CACHE_HOME/snakemake (falling back to $HOME/.cache) while
@@ -167,6 +187,11 @@ snakemake_cache_dir: null
 # carries `label 'process_gpu'`, so an executor profile that sizes that
 # label (e.g. scratch/nextflow.config's sge `-l cuda=1`) applies to it
 # too -- see docs/nextflow.md.
+# Under an executor profile that opts into cluster submission
+# (ext.snakemake_cluster_args), this governs only the submitter task's own
+# container -- which by then is just waiting on the scheduler and needs no
+# GPU. The GPU request that matters there is the per-rule one in that
+# profile's own --set-resources/submit template; see docs/nextflow.md.
 starcall_gpu: true
 # The ops conda env's snakemake binary is NOT a params.yaml value -- it's
 # process.ext.snakemake_bin (nextflow.config), a process-config directive

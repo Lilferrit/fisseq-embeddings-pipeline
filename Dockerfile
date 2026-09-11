@@ -111,16 +111,31 @@ RUN /opt/conda/bin/conda create -y -n ops python=3.10 && /opt/conda/bin/conda cl
 # follow.
 SHELL ["/opt/conda/bin/conda", "run", "--no-capture-output", "-n", "ops", "/bin/bash", "-c"]
 
-# snakemake>=7 (starcall-workflow's own requirement) plus conda-frontend
-# support for `--use-conda` (materializing workflow/envs/cp4.yaml's
-# CellProfiler env on demand, the first time a cp_features: true
-# experiment actually needs it -- see modules/local/build_cell_images.nf's
-# `--use-conda --conda-frontend conda` invocation). mamba is already on
-# PATH via Miniforge, and would be faster than conda's own solver for
-# `--conda-frontend`, but build_cell_images.nf's own invocation uses
+# snakemake (starcall-workflow's own requirement is `snakemake>=7`) plus
+# conda-frontend support for `--use-conda` (materializing the CellProfiler
+# env on demand, the first time a cp_features: true experiment actually
+# needs it -- see modules/local/build_cell_images/main.nf's `--use-conda
+# --conda-frontend conda` invocation). mamba is already on PATH via
+# Miniforge, and would be faster than conda's own solver for
+# `--conda-frontend`, but build_cell_images/main.nf's own invocation uses
 # --conda-frontend conda for the widest compatibility; switch it there if
 # mamba is confirmed to work once real rule execution is validated.
-RUN pip install --no-cache-dir "snakemake>=7"
+#
+# PINNED, not `>=7`, and specifically to the last release that still
+# supports this env's Python 3.10: every snakemake >=8.0.0 declares
+# `requires_python >=3.11` (confirmed against PyPI for 8.0.0/8.5.0/9.0.1/
+# 9.27.0), so a bare `>=7` silently resolves to 7.32.4 today *only* because
+# `conda create -n ops python=3.10` above holds it back. That accident is
+# load-bearing: snakemake 8 replaced `--cluster`/`--cluster-cancel` with the
+# executor-plugin interface, and modules/local/build_cell_images/main.nf's
+# cluster path (task.ext.snakemake_cluster_args, nextflow.config) is written
+# against the 7.x spelling. Pinning here means a future `ops` Python bump
+# fails loudly at build time instead of teleporting that invocation into an
+# 8.x where its flags no longer parse. Moving to 8/9 means first re-resolving
+# starcall-workflow's requirements.txt (tensorflow==2.13.0/stardist==0.8.5/
+# cellpose==2.2.1) against Python >=3.11 -- a much larger change than it
+# looks, and deliberately not bundled with the cluster work.
+RUN pip install --no-cache-dir "snakemake==7.32.4"
 
 # Cloned at build time (no vendored copy lives in this repo) at the
 # origin/devel ref this pipeline tracks -- NOT master, which has a

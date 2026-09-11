@@ -238,6 +238,82 @@ label's cpus/memory and `-l cuda=1` too. If you'd rather `BUILD_CELL_IMAGES`
 not queue behind GPU availability, either set `starcall_gpu: false` and
 drop its label, or give it its own `withName:` sizing block there.
 
+### Running starcall's rules as their own cluster jobs
+
+By default `BUILD_CELL_IMAGES`' phase-2 `snakemake` runs in **local mode**:
+`--cores ${params.snakemake_cores}`, forking each starcall rule as a
+subprocess of the one Nextflow task. On a cluster that means every rule for
+an experiment -- the whole stitching -> segmentation -> sequencing ->
+phenotyping chain -- shares the single scheduler job Nextflow submitted for
+that task. There is parallelism *across* experiments and none *within* one.
+
+An executor profile opts into per-rule submission by setting
+`process.ext.snakemake_cluster_args` to a complete `--cluster ... --jobs ...`
+block; `scratch/nextflow.config`'s `sge` profile is the worked example.
+Everything the cluster path needs is gated on that being non-empty, so the
+default and `-profile local` command lines are unchanged byte-for-byte.
+
+How the pieces fit:
+
+- **The submitter stays inside the container.** Snakemake bakes its own
+  `sys.executable` into every jobscript it generates, with no template hook
+  to change it, so a submitter running outside the image would emit a host
+  Python path that doesn't exist in the child's container. Keeping it inside
+  means that path is `/opt/conda/envs/ops/bin/python3.10` on both sides.
+  This requires `qsub` to work *from inside* the container -- bind `$SGE_ROOT`
+  (via `singularity.runOptions`) and export `SGE_ROOT`/`SGE_CELL` through
+  `ext.starcall_cluster_env`. Both read the same param, filled by
+  `scratch/run.sh` from the environment SGE sets for the job it runs as, so
+  the path is the cluster's own rather than a hard-coded guess and the bind
+  and the export cannot drift apart.
+- **Every child job re-enters the image.** `resources/starcall_overrides/sge_submit.sh`
+  builds the `qsub` line; `sge_job_wrapper.sh` is what the scheduler actually
+  runs, and it `apptainer exec`s the image. This is not optional: starcall's
+  rules are overwhelmingly `run:` blocks (78 `run:` vs 6 `shell:`), which
+  execute in-process inside the child snakemake and import
+  numpy/tifffile/starcall/tensorflow. Snakemake never containerizes a `run:`
+  body, so the child's own interpreter has to be the `ops` env.
+- **Child jobs need a real `.sif`, not a `docker://` URI** --
+  `params.starcall_child_image`, pulled once by `scratch/run.sh`. See
+  [Configuration](configuration.md).
+- **`--cores` changes meaning.** In cluster mode it is the *global* budget
+  across all submitted jobs and it silently caps each rule's own `threads:`
+  (`min(global_cores, rule.threads)`), so it comes from
+  `ext.snakemake_cluster_cores`, not `params.snakemake_cores`.
+- **The GPU request moves, and must be explicit.** starcall-workflow's `devel`
+  branch has `cuda = 1` commented out on every segmentation rule, and
+  `segment_cells`/`segment_cells_bases` gate their GPU path on
+  `resources.cuda == 1` -- false today, so cellpose already runs on CPU inside
+  the current `-l cuda=1` task, and only `segment_nuclei` (stardist/TF, which
+  does no gating) actually benefits. Per-rule submission therefore sets the
+  resource explicitly (`--set-resources segment_nuclei:cuda=1 ...`); relying
+  on the declared values would put everything on CPU nodes. `params.starcall_gpu`
+  then governs only the submitter task's own container, which needs no GPU.
+- **Orphan cleanup is defence in depth, not a guarantee.** `--cluster-cancel
+  qdel` fires only on a graceful shutdown, and SGE's default terminate is
+  SIGKILL. The module records every submitted job id and `qdel`s them from an
+  `EXIT`/`INT`/`TERM` trap, and every child carries a bounded `-l h_rt`; a
+  SIGKILLed submitter still needs a manual sweep:
+
+  ```bash
+  # job ids from the run's own record, inside its Nextflow work dir
+  xargs -r qdel < <work_dir>/cluster_jobids.txt
+  ```
+
+  A killed run also leaves a lock in `<starcall_workflow_dir>/.snakemake/locks/`;
+  the module clears it with a `--unlock` preflight on the next run, which is
+  safe only because each experiment has its own `starcall_workflow_dir` and
+  concurrent invocations against one tree are already forbidden.
+
+Child job stdout/stderr lands in
+`${params.pipeline_dir}/logs/starcall/<batch_stem>/<rule>/<jobid>.{out,err}`.
+
+Snakemake is pinned to **7.32.4** in the `Dockerfile`, deliberately: the `ops`
+env is Python 3.10 and every snakemake >=8 requires >=3.11, so `>=7` only
+resolved correctly by accident. The flags above are 7.x spellings
+(`--cluster`/`--cluster-cancel`); snakemake 8 replaced them with the executor
+plugin interface, which is out of reach until `ops` moves to Python >=3.11.
+
 ### Docker and Singularity/Apptainer: arbitrary host paths
 
 `phenotyping_dir`/`segmentation_dir`/`sequencing_dir`/`starcall_workflow_dir`
@@ -394,7 +470,7 @@ package rather than a third-party tool:
   each `containerOptions` closure) stays as one file.
 - **nf-test.** `tests/integration/test_integration.py` (pytest, driving
   real `nextflow run` subprocesses end-to-end) already fills this role --
-  see [Testing](../AGENTS.md#testing) in `AGENTS.md`.
+  see the **Testing** section of `AGENTS.md` at the repo root.
 - **The full nf-core Layer 2 release contract** (`CHANGELOG.md`,
   `CITATIONS.md`, `.nf-core.yml`, `modules.json`, the `nf-core` CLI,
   publishing to the nf-core org). This is a lab-internal pipeline, not one
