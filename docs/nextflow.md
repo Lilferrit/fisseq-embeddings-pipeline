@@ -273,9 +273,11 @@ How the pieces fit:
   execute in-process inside the child snakemake and import
   numpy/tifffile/starcall/tensorflow. Snakemake never containerizes a `run:`
   body, so the child's own interpreter has to be the `ops` env.
-- **Child jobs need a real `.sif`, not a `docker://` URI** --
-  `params.starcall_child_image`, pulled once by `scratch/run.sh`. See
-  [Configuration](configuration.md).
+- **Child jobs need a real `.sif`, not a `docker://` URI.** By default this
+  needs no configuration: with `params.starcall_child_image` null, the stage
+  reuses the image Nextflow already pulled and converted for the task itself,
+  reconstructing its cache path. Set the param to override. See
+  [Configuration](configuration.md#snakemake-on-a-cluster).
 - **`--cores` changes meaning.** In cluster mode it is the *global* budget
   across all submitted jobs and it silently caps each rule's own `threads:`
   (`min(global_cores, rule.threads)`), so it comes from
