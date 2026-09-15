@@ -1,6 +1,6 @@
 # fisseq-embeddings-pipeline
 
-A Nextflow + Python pipeline that scores genetic variants against learned
+A Snakemake + Python pipeline that scores genetic variants against learned
 **Cell-DINO** embeddings from FISSEQ (Fluorescence In-Situ Sequencing)
 experiments -- the embedding-space sibling of
 [`fisseq-data-pipeline`](https://github.com/Lilferrit/fisseq-data-pipeline),
@@ -42,7 +42,7 @@ them into `cell_table.parquet`, `BUILD_CP_FEATURES` selects them back out,
 and the same downstream shape -- filter, aggregate, OVWT, global pooling
 -- runs again, reusing `QC_FILTER`'s existing output rather than
 QC-filtering twice. See [Architecture](architecture.md) and
-[Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
+[Snakemake Workflow](snakemake.md#cellprofiler-feature-track).
 
 ## Where to go next
 
@@ -50,7 +50,7 @@ QC-filtering twice. See [Architecture](architecture.md) and
 - **[Quickstart](quickstart.md)** -- run the pipeline end to end.
 - **[Architecture](architecture.md)** -- design decisions, repository
   layout, data contracts, and the Cell-DINO inference internals.
-- **[Nextflow Workflow](nextflow.md)** -- how the fifteen pipeline stages
+- **[Snakemake Workflow](snakemake.md)** -- how the fifteen pipeline stages
   (`BUILD_CELL_IMAGES` shared by both tracks, eight more cellDINO-track,
   six optional CellProfiler-track) are orchestrated, and the output
   directory layout.

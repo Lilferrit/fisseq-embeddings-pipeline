@@ -134,15 +134,21 @@ def starcall_cluster_preamble(batch):
     child_image, origin = starcall_child_image()
 
     # A blank value here means the profile interpolated something that was
-    # never set. Left alone it exports the literal string "None" and the
+    # never set. Left alone it exports the literal string "null" and the
     # failure surfaces much later, as an unintelligible scheduler or
     # bind-mount error on every child job. Caught generically so the repo
     # side stays scheduler-agnostic.
+    #
+    # The literal strings count as unset, not just None: `--config
+    # 'starcall_cluster_env={"SGE_ROOT": null}'` parses the value as the
+    # STRING "null" (confirmed against snakemake.cli.parse_config), which is
+    # exactly the shape of the mistake this guard exists for -- a YAML null
+    # that has already been stringified somewhere upstream.
     cluster_env = config.get("starcall_cluster_env") or {}
     unset = sorted(
         k
         for k, v in cluster_env.items()
-        if v is None or not str(v).strip()
+        if v is None or str(v).strip().lower() in ("", "null", "none", "~")
     )
     if unset:
         raise ValueError(

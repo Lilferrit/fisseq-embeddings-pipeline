@@ -47,29 +47,36 @@ for what checkpoint shapes are supported.
 ## 3. Run the pipeline
 
 ```bash
-nextflow run . \
-    --pipeline_dir /path/to/experiment1 \
-    --cell_dino_checkpoint /path/to/checkpoint.pth \
-    -params-file params.yaml
+snakemake --configfile params.yaml \
+    --config pipeline_dir=/path/to/experiment1 \
+             cell_dino_checkpoint=/path/to/checkpoint.pth \
+    --cores 8
 ```
 
-`-params-file params.yaml` is mandatory -- there is no
-`nextflow.config`-embedded fallback for pipeline defaults (see
-[Configuration](configuration.md)). Any field in `params.yaml` can be
-overridden with a bare CLI flag, e.g. `--ovwt_min_cells 500`.
+`--configfile params.yaml` is mandatory -- there is no embedded fallback
+for pipeline defaults (see [Configuration](configuration.md)). Any field in
+`params.yaml` can be overridden by adding it to that same `--config`, e.g.
+`ovwt_min_cells=500`.
 
-By default every process runs inside the Docker image named by
-`container_image`. To run directly against your own Python environment
-instead (no Docker image needed -- useful for local development or CI),
-add `-profile local`:
+`--cores` is how much of *this* machine the outer workflow may use across
+rules; it is unrelated to `snakemake_cores`, which bounds the nested
+starcall invocation inside a single `build_cell_images` job.
+
+That runs every rule against whatever Python environment invoked snakemake
+(this repo's own venv). To run them inside the image named by
+`container_image` instead, add `--profile profiles/apptainer`:
 
 ```bash
-nextflow run . \
-    --pipeline_dir /path/to/experiment1 \
-    --cell_dino_checkpoint /path/to/checkpoint.pth \
-    -params-file params.yaml \
-    -profile local
+snakemake --configfile params.yaml \
+    --config pipeline_dir=/path/to/experiment1 \
+             cell_dino_checkpoint=/path/to/checkpoint.pth \
+    --cores 8 \
+    --profile profiles/apptainer
 ```
+
+Rerunning the same command picks up where it left off -- Snakemake skips
+any rule whose outputs are newer than its inputs, so there is no `-resume`
+flag to remember.
 
 ## 4. Read the outputs
 
@@ -77,7 +84,7 @@ Every stage's output lands under `<pipeline_dir>/`, one subdirectory per
 stage (`cell_images/`, `dataset/`, `qc_filter/`, `embeddings/`,
 `filter_embeddings/`, `feature_select_batchwise/`, `ovwt_batchwise/`,
 `global/`). See
-[Nextflow Workflow](nextflow.md#output-directory-layout) for the full tree
+[Snakemake Workflow](snakemake.md#output-directory-layout) for the full tree
 and [Architecture](architecture.md#data-contracts) for what each Parquet
 file's columns mean.
 

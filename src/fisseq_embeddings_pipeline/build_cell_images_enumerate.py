@@ -2,7 +2,7 @@
 
 Hydra entry point (`python -m
 fisseq_embeddings_pipeline.build_cell_images_enumerate`), backing the first
-of BUILD_CELL_IMAGES' three phases (modules/local/build_cell_images.nf).
+of BUILD_CELL_IMAGES' three phases (the `build_cell_images` rule).
 Resolves each well's tile grid size (explicit override or auto-detected)
 and enumerates existing tile directories directly against
 starcall-workflow's own `phenotyping_dir` tree, then writes:
@@ -13,7 +13,7 @@ starcall-workflow's own `phenotyping_dir` tree, then writes:
   `make_cell_images_bbox` -- see `resources/starcall_overrides/`), the
   segmentation cell table, and the sequencing reads table to exist for
   every discovered tile (plus the CellProfiler CSV, if `cp_features` is
-  set) -- consumed by the Nextflow module's own `snakemake ...
+  set) -- consumed by the rule's own nested `snakemake ...
   $(cat targets.txt)` invocation. Requesting the crop-stack pair (not the
   whole-tile phenotype image/segmentation mask directly) is what lets
   Snakemake's ordinary `temp()` bookkeeping delete those whole-tile
@@ -22,18 +22,19 @@ starcall-workflow's own `phenotyping_dir` tree, then writes:
   cellprofiler_csv,crops_tif,mask_crops_tif`) driving phase 3
   (`build_cell_images_table.py`).
 - `symlinks_out`: a TSV (`relative_path<TAB>absolute_path`) of just the two
-  per-tile crop-stack files, for the Nextflow module's own
+  per-tile crop-stack files, for the rule's own
   symlink-collection loop (phase 2's tail end).
 
 Until this stage's Docker image merged starcall-workflow's own `ops` conda
 env into this repo's main image (see the root `Dockerfile`), this logic
-lived in a standalone `modules/local/build_cell_images_glue.py` that
+lived in a standalone `modules/local/build_cell_images_glue.py` (since
+deleted) that
 deliberately avoided importing `fisseq_embeddings_pipeline`, because it ran
 inside a wholly separate container. That constraint no longer applies --
 this module runs like every other stage, via this repo's own installed
 package -- only the Snakemake invocation between this phase and
 `build_cell_images_table.py` still needs the separate `ops` env, and that's
-a plain shell step in `build_cell_images.nf`, not Python.
+a plain shell step in the `build_cell_images` rule, not Python.
 
 `resolve_grid_size`/`enumerate_tile_names` are conceptually the same
 grid-size-and-tile-discovery problem `dataset.py`'s `discover_tiles`
@@ -56,7 +57,7 @@ correctly; only once neither file sets it does this fall back to a
 subdirectory of `starcall_workflow_dir` matching starcall-workflow's own
 documented default (`phenotyping/`, `segmentation/`, `sequencing/`).
 `segmentation_dir` is resolved here too even though this phase's own logic
-never reads it (only `build_cell_images.nf`'s own `snakemake` invocation
+never reads it (only the `build_cell_images` rule's own `snakemake` invocation
 does) -- see `resolved_dirs_out` below -- so there's exactly one place
 that knows how to find these three directories, not two.
 """
@@ -130,7 +131,7 @@ class BuildCellImagesEnumerateConfig(AppConfig):
         :func:`resolve_data_dir`.
     phenotyping_dir, segmentation_dir, sequencing_dir : str or None
         starcall-workflow's own per-experiment output trees (real,
-        unredirected paths -- see build_cell_images.nf's module docstring
+        unredirected paths -- see the `build_cell_images` rule's module docstring
         on why). All optional: ``None`` (the default) resolves via
         :func:`resolve_data_dir` against `starcall_workflow_dir`; set one
         explicitly only when that tree isn't colocated under
@@ -160,7 +161,7 @@ class BuildCellImagesEnumerateConfig(AppConfig):
         (`{segmentation_type}_crops_{window}.tif`), so this stage needs it
         even though it never crops anything itself. Must match
         `BuildDatasetConfig.window` (the same global `params.window`
-        default routes to both -- see `workflows/embeddings.nf`'s
+        default routes to both -- see `workflows/the `embeddings` rule's
         `cell_images_field_includes`).
     sequencing_reads_params : str
         Suffix threaded into the reads CSV filename
@@ -178,7 +179,7 @@ class BuildCellImagesEnumerateConfig(AppConfig):
         Output filename (under `output_dir`) for the fully-resolved
         `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` -- a
         shell-sourceable `key='value'` file, one line per key, so
-        `build_cell_images.nf`'s own `snakemake` invocation (phase 2) uses
+        the `build_cell_images` rule's own `snakemake` invocation (phase 2) uses
         the exact same resolved paths as this phase, without duplicating
         this module's own resolution logic in Groovy.
     """
@@ -343,7 +344,7 @@ def build_enumeration(
         ``symlinks`` entries are ``(relative_path, absolute_path)`` pairs
         for just the two per-tile crop-stack files (not the CSVs -- those
         are read directly by ``build_cell_images_table.py``, never
-        re-exposed as files of their own; see ``build_cell_images.nf``'s
+        re-exposed as files of their own; see `the `build_cell_images` rule`'s
         Phase 3 comment).
     """
     targets: List[str] = []

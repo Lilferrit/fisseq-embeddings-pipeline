@@ -9,10 +9,10 @@ downsample_amounts/downsample_classes/downsample_seed pseudo-variant
 machinery dropped: per-dimension reproducibility filtering doesn't
 obviously translate to dense, non-interpretable embedding dimensions the
 way it does to named morphological features. Hydra entry point
-(`python -m fisseq_embeddings_pipeline.qcfilter`), backing the Nextflow
-process QC_FILTER (modules/local/qc_filter.nf). Reads BUILD_DATASET's
-metadata.parquet as `cell_files` instead of the raw CSV the upstream
-source expects -- see the two deviations below.
+(`python -m fisseq_embeddings_pipeline.qcfilter`), backing the Snakemake
+rule qc_filter (workflow/rules/cell_images.smk). Reads
+BUILD_CELL_METADATA's metadata.parquet as `cell_files` instead of the raw
+CSV the upstream source expects -- see the two deviations below.
 
 Two deviations from the upstream source, beyond the dropped downsample
 machinery:

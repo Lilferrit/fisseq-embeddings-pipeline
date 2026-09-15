@@ -1,7 +1,7 @@
 """EMBED_CELLS.
 
 Hydra entry point (`python -m fisseq_embeddings_pipeline.embed`), backing
-the Nextflow process EMBED_CELLS (modules/local/embed_cells.nf, the
+the Snakemake rule embed_cells (workflow/rules/embeddings.smk, the
 pipeline's only GPU-bound stage). Streams every cell in a BUILD_DATASET
 WebDataset through a pretrained Cell-DINO checkpoint (Meta's dinov2) and
 writes one row per cell to embeddings.parquet. Not gated by QC_FILTER: this

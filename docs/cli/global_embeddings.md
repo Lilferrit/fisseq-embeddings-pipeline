@@ -1,7 +1,6 @@
 # Global Variant Embeddings (`GLOBAL_VARIANT_EMBEDDINGS`)
 
-`python -m fisseq_embeddings_pipeline.global_embeddings` (Nextflow process
-`GLOBAL_VARIANT_EMBEDDINGS`) cross-experiment median-pools every
+`python -m fisseq_embeddings_pipeline.global_embeddings` (Snakemake rule `global_variant_embeddings`) cross-experiment median-pools every
 experiment's `aggregate.parquet`, then runs PCA at the full retained rank
 -- `min(n_variants, n_retained_feature_dims)`, so every component the data
 can actually support is written, not a fixed subset chosen ahead of time.

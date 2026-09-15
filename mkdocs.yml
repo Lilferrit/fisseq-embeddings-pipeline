@@ -4,7 +4,7 @@ nav:
   - Installation: installation.md
   - Quickstart: quickstart.md
   - Architecture: architecture.md
-  - Nextflow Workflow: nextflow.md
+  - Snakemake Workflow: snakemake.md
   - Configuration: configuration.md
   - Stage Reference:
       - "Cell Images, Phase 1: Enumerate (BUILD_CELL_IMAGES)": cli/build_cell_images_enumerate.md

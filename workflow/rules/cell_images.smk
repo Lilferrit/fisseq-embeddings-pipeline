@@ -72,6 +72,10 @@ rule build_cell_images:
         THREAD_ENV
         + r"""
         mkdir -p {output.images} {output.scratch}
+        # Absolute for two reasons: the collection loop below cds into the
+        # images directory, and phase 3 joins `manifest` onto its own
+        # output_dir with pathlib, where only an absolute value overrides.
+        SCRATCH="$(cd {output.scratch} && pwd)"
 
         # Snakemake's SourceCache mkdir's $XDG_CACHE_HOME/snakemake (falling
         # back to $HOME/.cache) inside Workflow.__init__ -- before it parses a
@@ -86,13 +90,13 @@ rule build_cell_images:
         mkdir -p "$XDG_CACHE_HOME" "$HOME"
 
         python -m fisseq_embeddings_pipeline.build_cell_images_enumerate \
-            output_dir={output.scratch} \
+            output_dir="$SCRATCH" \
             {params.overrides} \
             random_seed={config[random_seed]}
 
         # phenotyping_dir/segmentation_dir/sequencing_dir, fully resolved by
         # phase 1 above -- not recomputed here.
-        source {output.scratch}/resolved_dirs.env
+        source "$SCRATCH/resolved_dirs.env"
 {params.cluster_preamble}
         # The trailing '/' on each --config value (absent from
         # resolved_dirs.env itself) is load-bearing at exactly this crossing
@@ -117,7 +121,7 @@ rule build_cell_images:
                      sequencing_dir="$sequencing_dir/" \
                      starcall_workflow_dir="{params.starcall_dir}" \
             -- \
-            $(cat {output.scratch}/targets.txt)
+            $(cat "$SCRATCH/targets.txt")
 
         # Collect just the two per-tile crop-stack files into this
         # experiment's output directory, preserving the
@@ -127,11 +131,11 @@ rule build_cell_images:
           while IFS=$'\t' read -r rel_path abs_path; do
               mkdir -p "$(dirname "$rel_path")"
               {params.collect} "$abs_path" "$rel_path"
-          done < "{output.scratch}/symlinks.txt" )
+          done < "$SCRATCH/symlinks.txt" )
 
         python -m fisseq_embeddings_pipeline.build_cell_images_table \
             output_dir={output.images} \
-            manifest={output.scratch}/tiles_manifest.csv \
+            manifest="$SCRATCH/tiles_manifest.csv" \
             random_seed={config[random_seed]}
 
         test -s {output.images}/cell_table.parquet

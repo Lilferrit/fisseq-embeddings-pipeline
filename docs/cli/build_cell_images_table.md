@@ -1,9 +1,9 @@
 # Cell Images, Phase 3: Build Table (`BUILD_CELL_IMAGES`)
 
 `python -m fisseq_embeddings_pipeline.build_cell_images_table` is the
-third of `BUILD_CELL_IMAGES`' three phases (Nextflow process
-`BUILD_CELL_IMAGES`, `modules/local/build_cell_images/main.nf`), run after
-`build_cell_images/main.nf`'s own `snakemake` invocation (phase 2 -- the one
+third of `BUILD_CELL_IMAGES`' three phases (Snakemake rule
+the `build_cell_images` rule), run after
+the `build_cell_images` rule's own `snakemake` invocation (phase 2 -- the one
 step needing the `ops` conda env baked into the root `Dockerfile`) has
 materialized every tile's segmentation/reads/CellProfiler CSVs.
 

@@ -3,7 +3,7 @@
 > **This repo is implemented.** `docs/` (built with mkdocs, published to
 > GitHub Pages on every push to `main` — see **CI** below) is the
 > authoritative reference: architecture decisions, data contracts,
-> per-stage config/usage, Nextflow wiring, and output layout. Read it
+> per-stage config/usage, Snakemake wiring, and output layout. Read it
 > before `SPEC.md`/`IMPLEMENTATION_CHECKLIST.md`, which no longer exist —
 > their content was folded into `docs/` once implementation caught up to
 > the design.
@@ -13,7 +13,7 @@
 ## Project overview
 
 `fisseq-embeddings-pipeline` is the embedding-space sibling of
-`fisseq-data-pipeline` — same overall shape (Nextflow DSL2 orchestrating
+`fisseq-data-pipeline` — same overall shape (a workflow engine orchestrating
 Python/Hydra/polars stages, per-experiment batches, a QC → normalize →
 one-vs-wildtype → aggregate → global-pool structure), but scores genetic
 variants against a pretrained **Cell-DINO** vision transformer's learned
@@ -53,7 +53,7 @@ depends on (`make_cell_images`, `extract_embeddings` in
 
 - **Python stages**: each `src/fisseq_embeddings_pipeline/<stage>.py` is a
   Hydra entry point invoked as `python -m fisseq_embeddings_pipeline.<stage>`
-  (see any `modules/local/*.nf` for the exact CLI shape), with a
+  (see any rule in `workflow/rules/` for the exact CLI shape), with a
   `@dataclasses.dataclass class <Stage>Config(AppConfig)` registered via
   `ConfigStore`, matching `fisseq-data-pipeline`'s pattern exactly.
 - **Every config extends `AppConfig`** (`config/app.py`), which carries the
@@ -74,19 +74,18 @@ depends on (`make_cell_images`, `extract_embeddings` in
   write a full copy of another stage's table to disk (rather than a join
   key + something new), stop and check whether that violates the no-copy
   principle — see `docs/architecture.md`'s architecture decisions.
-- **Nextflow modules** (`modules/local/<name>/main.nf`, one directory per
-  module — nf-core's layout convention): `errorStrategy 'ignore'`, one
-  bundled resource `label` (`process_single`/`process_low`/`process_medium`/
-  `process_high`, plus `process_gpu` on `EMBED_CELLS` and
-  `BUILD_CELL_IMAGES`), `container
-  "${params.container_image}"`, `publishDir`, a `when: task.ext.when == null
-  || task.ext.when` gate, a `python -m <pkg>.<module>` script block ending in
-  `random_seed=${params.random_seed}`, and a named `emit:` on the output —
-  see `embed_cells/main.nf` for the fully-worked example. See
-  [`docs/nextflow.md`](docs/nextflow.md#nf-core-conventions) for which
-  nf-core conventions this repo follows and which it deliberately doesn't.
+- **Snakemake rules** (`workflow/rules/*.smk`, grouped by track rather than
+  one file per rule): `container: config["container_image"]`,
+  `threads:`/`resources:`, and a `shell:` body of `THREAD_ENV` plus one
+  `python -m <pkg>.<module>` invocation with `output_dir=$(dirname {output})`
+  and a trailing `random_seed={config[random_seed]}` — see `embed_cells`
+  (`workflow/rules/embeddings.smk`) for the fully-worked example, and
+  `build_cell_images` (`cell_images.smk`) for the one genuine exception.
+  There is no `publishDir`: each rule's `output:` IS its published path,
+  since `workflow/Snakefile` sets `workdir: pipeline_dir`. See
+  [`docs/snakemake.md`](docs/snakemake.md#rules).
 - **Config**: defaults belong in `params.yaml` (repo root), never in
-  `nextflow.config`'s `params {}` block — see
+  a profile — see
   [`docs/configuration.md`](docs/configuration.md).
 
 ## Git workflow
@@ -107,7 +106,7 @@ see **CI** below for what runs where.
   to pass for every single commit, but do run it before merging a branch
   back to `main`.)
 - **Finishing a branch:** once `tests/unit` (plus `tests/integration` if
-  the branch touches Nextflow wiring) pass, merge it back to `main`
+  the branch touches workflow wiring) pass, merge it back to `main`
   (`git checkout main && git merge --no-ff <slug>`; `--no-ff` keeps the
   branch boundary visible in `git log --graph`). Delete the branch after
   merging.
@@ -123,8 +122,8 @@ see **CI** below for what runs where.
 
 ```bash
 uv sync --group dev
-uv run pytest tests/unit                      # fast, no nextflow/GPU needed
-uv run pytest tests/integration                # needs `nextflow` on PATH
+uv run pytest tests/unit                      # fast, no GPU needed
+uv run pytest tests/integration                # drives real `snakemake` runs
 uv run pytest tests/integration --container    # real-starcall instead; needs docker + testing_data/
 uv run ruff check --fix . && uv run ruff format .
 uv run pre-commit run --all-files
@@ -133,7 +132,7 @@ uv run pre-commit run --all-files
 `tests/unit/` mirrors `fisseq-data-pipeline`'s layout (one test module per
 pipeline stage). `tests/integration/test_integration.py` is modeled
 directly on that repo's own integration suite — a synthetic fixture, a
-`subprocess`-driven end-to-end `nextflow run`, and output-file/column
+`subprocess`-driven end-to-end `snakemake` run, and output-file/column
 assertions.
 
 `EMBED_CELLS`' GPU/checkpoint dependency is handled in the integration
@@ -149,14 +148,14 @@ needed to run `tests/integration` anywhere, including CI.
 `uv run pytest tests/integration --container` is the one exception to
 all of the above. The integration suite has two mutually exclusive modes
 (see `tests/integration/conftest.py`): bare `pytest tests/integration`
-runs the 16 synthetic `-profile local` tests, and `--container` instead
+runs the synthetic uncontainerized tests, and `--container` instead
 runs only `test_real_starcall_pipeline_produces_cell_images`, which
-invokes a **real** `snakemake` run against real starcall-workflow data
-(every other test fakes that step with a stub `snakemake` on PATH),
-through a real build of the root Dockerfile. Opt-in only — even with
+invokes a **real** nested `snakemake` run against real starcall-workflow
+data (every other test fakes that step with a stub `snakemake` on PATH),
+through a real build of the root Dockerfile, run via Apptainer. Opt-in only — even with
 `--container` it self-skips unless `testing_data/lmna_t3/` has been
 populated (`uv run python scripts/prepare_real_starcall_test_data.py`,
-downloads ~6.3GB) and `docker`/`nextflow` are on PATH; not run in CI.
+downloads ~6.3GB) and `docker`/`apptainer` are on PATH; not run in CI.
 Needs a Docker daemon that can bind-mount this repo's own temp
 directories — Docker Desktop's file-sharing allowlist can silently block
 that on some local setups (see that test module's own docstring for the
@@ -180,7 +179,7 @@ Three workflows under `.github/workflows/`:
 
 ## Docker / devcontainer
 
-`Dockerfile` (repo root) is the single image every Nextflow process runs
+`Dockerfile` (repo root) is the single image every rule runs
 in — build it locally with `docker build -t
 fisseq-embeddings-pipeline:latest .` and point `params.yaml`'s
 `container_image` at wherever you publish it (see

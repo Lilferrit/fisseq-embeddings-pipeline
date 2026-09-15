@@ -2,8 +2,8 @@
 
 Hydra entry point (`python -m
 fisseq_embeddings_pipeline.build_cell_images_table`), backing the third of
-BUILD_CELL_IMAGES' three phases (modules/local/build_cell_images.nf), run
-after the Nextflow module's own `snakemake` invocation (phase 2, the one
+BUILD_CELL_IMAGES' three phases (the `build_cell_images` rule), run
+after the rule's own nested `snakemake` invocation (phase 2, the one
 step that still needs the separate `ops` conda env -- see the root
 `Dockerfile`) has materialized every tile's segmentation/reads/CellProfiler
 CSVs.
@@ -31,7 +31,8 @@ genotype values -- it now projects with polars via
 
 Until this stage's Docker image merged starcall-workflow's own `ops` conda
 env into this repo's main image (see the root `Dockerfile`), this logic
-lived in a standalone `modules/local/build_cell_images_glue.py` that
+lived in a standalone `modules/local/build_cell_images_glue.py` (since
+deleted) that
 deliberately avoided importing `fisseq_embeddings_pipeline`, because it ran
 inside a wholly separate container. That constraint no longer applies --
 this module runs like every other stage, via this repo's own installed
@@ -98,7 +99,7 @@ def build_tile_table(
     ----------
     segmentation_csv : str
         This tile's ``{segmentation_type}.csv`` (phenotyping_dir-rooted --
-        see ``build_cell_images.nf``'s Phase 1 comment on why
+        see `the `build_cell_images` rule`'s Phase 1 comment on why
         phenotyping_dir specifically, matching ``dataset.py``'s own
         existing, proven-working read path). Provides ``bbox_x1/y1/x2/y2``,
         ``orig_index``, ``mask8``, and this tile's own row index (renamed
@@ -134,7 +135,7 @@ def build_tile_table(
     ValueError
         If the segmentation and reads tables' ``tile_cell_index`` sets
         don't match exactly (index-value join -- see
-        ``build_cell_images.nf``'s module docstring), or if
+        `the `build_cell_images` rule`'s module docstring), or if
         ``cellprofiler_csv`` is given and its row count doesn't match the
         segmentation table's (row-position join).
     """
@@ -159,7 +160,7 @@ def build_tile_table(
             f"reads table {reads_csv!r} have different tile_cell_index "
             f"sets (segmentation-only: {sorted(seg_keys - reads_keys)}, "
             f"reads-only: {sorted(reads_keys - seg_keys)}) -- expected an "
-            "exact match (see build_cell_images.nf's module docstring on "
+            "exact match (see the `build_cell_images` rule's module docstring on "
             "the index-value join this relies on)."
         )
 
@@ -178,7 +179,7 @@ def build_tile_table(
                 f"{len(seg.index)} row(s) but CellProfiler output "
                 f"{cellprofiler_csv!r} has {len(cp.index)} row(s) -- the "
                 "row-position join this relies on requires equal row "
-                "counts (see build_cell_images.nf's module docstring)."
+                "counts (see the `build_cell_images` rule's module docstring)."
             )
         cp = cp.reset_index(drop=True)
         cp.columns = [f"cp_{c}" for c in cp.columns]
@@ -206,7 +207,7 @@ def build_cell_table(tiles: List[Dict[str, Any]]) -> pl.DataFrame:
     pl.DataFrame
         Concatenated ``how="diagonal_relaxed"`` across tiles -- schema
         legitimately varies per experiment (aux-table/CellProfiler columns
-        aren't fixed; see ``build_cell_images.nf``'s module docstring).
+        aren't fixed; see `the `build_cell_images` rule`'s module docstring).
         Empty (no columns) if ``tiles`` is empty.
     """
     frames = []

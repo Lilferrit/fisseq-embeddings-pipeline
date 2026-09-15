@@ -1,8 +1,8 @@
 # Cell Images, Phase 1: Enumerate (`BUILD_CELL_IMAGES`)
 
 `python -m fisseq_embeddings_pipeline.build_cell_images_enumerate` is the
-first of `BUILD_CELL_IMAGES`' three phases (Nextflow process
-`BUILD_CELL_IMAGES`, `modules/local/build_cell_images/main.nf`). It resolves
+first of `BUILD_CELL_IMAGES`' three phases (Snakemake rule
+the `build_cell_images` rule). It resolves
 each well's tile grid size (explicit override or auto-detected from
 `phenotyping_dir`'s own `{well}_grid<N>` directory naming) and enumerates
 that well's existing tile directories directly against
@@ -15,17 +15,17 @@ the rest of the stage consumes:
   `make_cell_images_bbox` -- see `resources/starcall_overrides/`), the
   segmentation cell table, and the sequencing reads table to exist for
   every discovered tile (plus the CellProfiler CSV, if `cp_features` is
-  set). `build_cell_images/main.nf`'s own `snakemake ... $(cat targets.txt)`
+  set). the `build_cell_images` rule's own `snakemake ... $(cat targets.txt)`
   step consumes this.
 - `manifest_out` (`tiles_manifest.csv`) -- drives phase 3
   ([`build_cell_images_table`](build_cell_images_table.md)); columns
   include `crops_tif`/`mask_crops_tif`.
 - `symlinks_out` (`symlinks.txt`) -- a `relative_path<TAB>absolute_path`
   TSV of just the two per-tile crop-stack files, driving
-  `build_cell_images/main.nf`'s own symlink-collection loop.
+  the `build_cell_images` rule's own symlink-collection loop.
 
 This module runs against `starcall-workflow`'s tree directly -- the only
-place in the pipeline besides `build_cell_images/main.nf`'s own `snakemake`
+place in the pipeline besides the `build_cell_images` rule's own `snakemake`
 invocation that does so; see
 [Architecture](../architecture.md#cell-images-buildcellimages-output-from-starcall-workflow).
 

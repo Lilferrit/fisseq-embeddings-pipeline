@@ -1,32 +1,29 @@
 # Configuration reference
 
-## `params.yaml`, not `nextflow.config`
+## `params.yaml`, not the profiles
 
-`fisseq-data-pipeline`'s `nextflow.config` declares every default
-parameter directly in a `params { ... }` block. This repo splits that in
-two:
+Configuration splits in two:
 
 - **`params.yaml`** (repo root) -- every default value, nothing else.
-  Loaded explicitly via `-params-file params.yaml`; Nextflow merges a
-  `-params-file` YAML/JSON document into `params` natively. A per-run
-  override still works the normal way, either as a bare CLI flag
-  (`--ovwt_min_cells 500`, which wins over `params.yaml`) or a whole
-  separate copy of `params.yaml` passed to `-params-file` instead --
-  Nextflow accepts only one `-params-file` per run (`Can only specify
-  option -params-file once`), so there's no way to layer a second, partial
-  file on top of it.
-- **`nextflow.config`** -- executor/profile/process directives only
-  (`process.container`, per-`label` resource requests, `-profile local`,
-  `docker.enabled`). No default parameter values live here at all.
+  Loaded explicitly via `--configfile params.yaml`. A per-run override goes
+  in `--config` (`--config ovwt_min_cells=500`, which wins over
+  `params.yaml`), or you can pass a whole separate copy of the file as a
+  different `--configfile`.
+- **`profiles/`** -- executor/deployment settings only (which executor,
+  per-rule threads and resources, whether to use a container). A profile
+  may also carry a `config:` block, which is injected as `--config` and so
+  outranks `--configfile`; that is how `profiles/apptainer` points the
+  nested starcall invocation at the in-image paths.
 
-`pipeline_dir`, `cell_dino_checkpoint` are required with no default --
-`EmbeddingsPipeline` fails fast with a specific message if either is unset
-(see [Nextflow Workflow](nextflow.md)), rather than letting Nextflow's own
-less-specific "no such property" error surface first.
+`pipeline_dir`, `cell_dino_checkpoint` and a non-empty `experiments` list
+are required with no default. `config/experiments.py`'s `validate_config`
+fails fast with a specific message at parse time, before any job is
+scheduled (see [Snakemake Workflow](snakemake.md)), rather than letting a
+`KeyError` surface from inside a rule.
 
 Each experiment supplies its own map of per-experiment fields as one entry
 of `params.yaml`'s `experiments:` list (see
-[Nextflow Workflow](nextflow.md#per-experiment-configs)), split across up
+[Snakemake Workflow](snakemake.md#per-experiment-configs)), split across up
 to three stages:
 
 - **`BUILD_CELL_IMAGES`** (starcall-workflow-facing, always runs):
@@ -57,7 +54,7 @@ to three stages:
   `experiments:` -- an entry opts itself in by setting `cp_features: true`,
   which also makes `BUILD_CELL_IMAGES` force + fold in that experiment's
   CellProfiler CSV -- see
-  [Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
+  [Snakemake Workflow](snakemake.md#cellprofiler-feature-track).
 
 Four fields that are logically per-experiment but in practice are almost
 always the same across every experiment in a run -- `window`,
@@ -66,12 +63,13 @@ has its own pipeline-wide default below, used for any experiment entry
 that doesn't set its own value for that key; an entry's own value always
 wins over the global default. `window` is routed to *both*
 `BUILD_CELL_IMAGES` and `BUILD_DATASET` this way, via two independent
-fallback blocks in `workflows/embeddings.nf` (one per stage) -- not a
+fallback blocks in `config/experiments.py` (one per stage) -- not a
 single shared mechanism, but the same global default value either way.
-`cell_images_hard_copy` is a *further*
-exception -- it's global-only, with no per-experiment override at all
-(Nextflow's `publishDir` mode must be a static value at process-definition
-time; see `params.yaml`'s own comment on this).
+`cell_images_hard_copy` is a *further* exception -- it's global-only, with
+no per-experiment override. That used to be a hard constraint of Nextflow's
+`publishDir`; it now just picks `ln -s` vs `cp -L` in `build_cell_images`'
+collection loop, so it simply isn't wired up per-experiment (see
+`params.yaml`'s own comment).
 
 ### Fields
 
@@ -85,8 +83,8 @@ time; see `params.yaml`'s own comment on this).
 | `cellprofiler_pipeline` | `null` (required, here or per `cp_features: true` entry, once any experiment sets `cp_features: true`) | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_pipeline`) |
 | `cellprofiler_cycle` | `""` | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_cycle`) |
 | `cell_images_hard_copy` | `false` | `BUILD_CELL_IMAGES` (global-only, see above -- `false` symlinks the collected per-cell crop-stack files (`make_cell_images_bbox`'s output -- small, not whole-tile images) from their real `starcall-workflow` location, `true` hard-copies them) |
-| `snakemake_cores` | `4` | `BUILD_CELL_IMAGES` (`--cores` for its own `snakemake` invocation, distinct from Nextflow's own executor parallelism across experiments). **Local mode only** -- see [Snakemake on a cluster](#snakemake-on-a-cluster) |
-| `starcall_child_image` | `null` (-> the image Nextflow already cached for the task) | `BUILD_CELL_IMAGES`, cluster mode only: the `.sif` each per-rule scheduler job re-enters the image with. Optional -- see [Snakemake on a cluster](#snakemake-on-a-cluster) |
+| `snakemake_cores` | `4` | `BUILD_CELL_IMAGES` (`--cores` for its own nested `snakemake` invocation, distinct from the outer `snakemake --cores` budget across rules). **Local mode only** -- see [Snakemake on a cluster](#snakemake-on-a-cluster) |
+| `starcall_child_image` | `null` (-> the image Snakemake already cached under its `--apptainer-prefix`) | `BUILD_CELL_IMAGES`, cluster mode only: the `.sif` each per-rule scheduler job re-enters the image with. Optional -- see [Snakemake on a cluster](#snakemake-on-a-cluster) |
 | `snakemake_cache_dir` | `null` (-> `<pipeline_dir>/.snakemake_cache`) | `BUILD_CELL_IMAGES` (where its `snakemake` invocation points `$XDG_CACHE_HOME`/`$HOME` -- see [read-only `$HOME`](#snakemake-and-a-read-only-home) below) |
 | `starcall_gpu` | `true` | `BUILD_CELL_IMAGES` (request a GPU for its `snakemake` invocation -- `starcall-workflow`'s stardist/cellpose segmentation; set `false` on a GPU-less host) |
 | `random_seed` | `0` | every stochastic stage |
@@ -124,7 +122,7 @@ CellProfiler-feature track's own `aggregate_methods_cp_features` stays
 bare. The two `*_cumulative_variance_explained` params each have their own
 CellProfiler-track counterpart above; `ovwt_*`, by contrast, is genuinely
 shared between both tracks' OVWT stages (scoring methodology, not tied to
-feature type) -- see [Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
+feature type) -- see [Snakemake Workflow](snakemake.md#cellprofiler-feature-track).
 See each [Stage Reference](cli/dataset.md) page for the full field list a
 given stage's Hydra config accepts beyond what `params.yaml` exposes (e.g.
 `QC_FILTER`'s optional `n_variants` downsampling cap, off by default).
@@ -146,10 +144,10 @@ stage then dies with
 OSError: [Errno 30] Read-only file system: '/net/noble'
 ```
 
-before doing any work -- and because every module carries `errorStrategy
-'ignore'`, `nextflow run` still exits 0, with only a missing
-`cell_table.parquet` to show for it (the same silent-failure shape
-described in [Nextflow Workflow](nextflow.md#docker-and-singularityapptainer-arbitrary-host-paths)).
+before doing any work. Under Nextflow this was especially nasty: every
+module carried `errorStrategy 'ignore'`, so `nextflow run` exited 0 with
+only a missing `cell_table.parquet` to show for it. `keep-going` still runs
+the rest of the DAG, but Snakemake reports the failure in its exit code.
 
 `snakemake_cache_dir` fixes this: the module exports it as both
 `$XDG_CACHE_HOME` and (with a `home/` suffix) `$HOME` for that one
@@ -158,93 +156,78 @@ because `--use-conda` shells out to a bare `conda`, which reads
 `~/.condarc` and appends to `~/.conda/environments.txt`.
 
 The default, `<pipeline_dir>/.snakemake_cache`, is writable and persists
-across tasks and runs, so the source cache is built once rather than per
-task. Point it at shared scratch if you'd rather it not live under
-`pipeline_dir`. Whatever it resolves to is bind-mounted into the
-container by `nextflow.config`'s `BUILD_CELL_IMAGES` `containerOptions`
-(`pipeline_dir` is otherwise never bind-mounted -- Nextflow publishes
-outputs from the host side, so no task has previously needed to see it
-from inside).
+across jobs and runs, so the source cache is built once rather than per
+job. Point it at shared scratch if you'd rather it not live under
+`pipeline_dir`. Whatever it resolves to is bind-mounted into every
+containerized rule automatically (`config/binds.py`).
 
 ## Snakemake on a cluster
 
 `BUILD_CELL_IMAGES`' phase-2 `snakemake` runs in local mode by default, so on
 a cluster every starcall rule for an experiment runs inside the single
-scheduler job Nextflow submitted for that task. Per-rule submission is opt-in
-via an executor profile; see
-[Nextflow](nextflow.md#running-starcalls-rules-as-their-own-cluster-jobs) for
-how it works and `scratch/nextflow.config`'s `sge` profile for a worked
-example. The knobs:
+scheduler job submitted for that rule. Per-rule submission is opt-in via a
+profile; see
+[Snakemake Workflow](snakemake.md#running-starcalls-rules-as-their-own-cluster-jobs) for
+how it works and `profiles/sge/config.yaml` for a worked example. The
+knobs:
 
-| Setting | Where | Meaning |
-| --- | --- | --- |
-| `ext.snakemake_cluster_args` | process directive | Empty = local mode. Set to a complete `--cluster ... --jobs ...` block to opt in. |
-| `ext.snakemake_cluster_cores` | process directive | `--cores` in cluster mode -- the *global* budget across submitted jobs. Caps each rule's `threads:`, so it must not be small. |
-| `ext.starcall_cluster_env` | process directive | Map of site-specific env vars for the submit script (scheduler project/queue/runtime, `SGE_ROOT`, ...). A null/empty value fails the stage rather than exporting `"null"`. |
-| `ext.starcall_apptainer_bin` | process directive | Container engine the per-rule job wrapper uses on a bare exec node. |
-| `ext.starcall_host_overrides_dir` | process directive | **Host** path to `resources/starcall_overrides`, on storage the exec nodes can read. |
-| `ext.starcall_singularity_cache_dir` | process directive | Mirror of `singularity.cacheDir`, used only to resolve `starcall_child_image` when it is null. |
-| `starcall_child_image` | `params.yaml` | Pre-built `.sif` the child jobs exec. |
+| Setting | Meaning |
+| --- | --- |
+| `snakemake_cluster_args` | Empty = local mode. Set to a complete `--cluster ... --jobs ...` block to opt in. |
+| `snakemake_cluster_cores` | `--cores` in cluster mode -- the *global* budget across submitted jobs. Caps each rule's `threads:`, so it must not be small. |
+| `starcall_cluster_env` | Map of site-specific env vars for the submit script (scheduler project/queue/runtime, `SGE_ROOT`, ...). A null/empty value fails the rule rather than exporting `"null"`. |
+| `starcall_apptainer_bin` | Container engine the per-rule job wrapper uses on a bare exec node. |
+| `starcall_host_overrides_dir` | **Host** path to `resources/starcall_overrides`, on storage the exec nodes can read. |
+| `apptainer_prefix` | Mirror of the profile's own `apptainer-prefix:`, used only to resolve `starcall_child_image` when it is null. |
+| `starcall_child_image` | Pre-built `.sif` the child jobs exec. |
 
-These are **`ext` process directives, not `params.yaml` keys** (except
-`starcall_child_image`, which is deployment data rather than a profile switch),
-for the same reason `ext.snakemake_bin` is: a `-params-file` value outranks a
-profile's own `params.*` assignments in Nextflow's config precedence, so a
-profile could not override a `params.yaml` value at all.
+All of these are ordinary `params.yaml` keys set from a profile's `config:`
+block. Under Nextflow they had to be `ext` process directives, because a
+`-params-file` value outranked a profile's own `params.*` assignments;
+Snakemake's precedence runs the other way (`--config`, which a profile's
+`config:` becomes, beats `--configfile`), so the workaround is gone.
 
-`$SGE_ROOT` has to be both bind-mounted into the task's container (so the
-`qsub` client exists) and exported within it (so `qsub` can find qmaster). Its
-value should come from the scheduler rather than being hard-coded: SGE sets
-`SGE_ROOT`/`SGE_CELL` in the environment of every job it runs, and
-`scratch/run.sh` runs as one, so it reads them there and passes them on as
-`--sge_root`/`--sge_cell`. The `sge` profile then interpolates the same param
-into both the bind and the env map, so the two cannot disagree. Any entry in
-`ext.starcall_cluster_env` that ends up null fails `BUILD_CELL_IMAGES`
-immediately with the key named.
+`$SGE_ROOT` has to be both bind-mounted into the rule's container (so the
+`qsub` client exists) and exported within it (so `qsub` can find qmaster).
+Put it in `extra_bind_paths` and in `starcall_cluster_env`, as
+`profiles/sge/config.yaml` does; any entry in `starcall_cluster_env` that
+ends up null -- including the *string* `"null"`, which is what a stringified
+YAML null looks like by the time it reaches a rule -- fails
+`BUILD_CELL_IMAGES` immediately with the key named.
 
 The two helper scripts under `resources/starcall_overrides/` are addressed by
 different paths on purpose, and it is the easiest thing here to get wrong:
-`sge_submit.sh` is invoked *by snakemake*, inside the task's own container, so
-it uses the in-image `ext.starcall_overrides_dir`; `sge_job_wrapper.sh` is what
+`sge_submit.sh` is invoked *by snakemake*, inside the rule's own container, so
+it uses the in-image `starcall_overrides_dir`; `sge_job_wrapper.sh` is what
 the *scheduler* runs, on a bare exec node with no container around it, so it
-needs the host `ext.starcall_host_overrides_dir` -- the in-image `/opt/...`
+needs the host `starcall_host_overrides_dir` -- the in-image `/opt/...`
 path does not exist there. `BUILD_CELL_IMAGES` fails fast if the latter isn't
 readable.
 
 The child jobs need a real `.sif` **file**, not the `docker://` URI
-`container_image` carries on the cluster: each runs on a bare exec node outside
-Nextflow's container handling, and having hundreds of them concurrently
-re-resolve a registry URI against one shared cache -- each needing
-`SINGULARITY_DOCKER_USERNAME`/`PASSWORD` -- is what this avoids.
+`container_image` carries on the cluster: each runs on a bare exec node
+outside the outer snakemake's container handling, and having hundreds of them
+concurrently re-resolve a registry URI against one shared cache -- each
+needing registry credentials -- is what this avoids.
 
 **`starcall_child_image` is optional.** Left `null`, `BUILD_CELL_IMAGES` uses
-the image Nextflow has *already* pulled and converted for that very task, so
-nothing extra is needed. It has to reconstruct the path rather than ask for it:
-`task.container` returns the raw `docker://` URI, and the `singularity` config
-scope isn't readable from a task context at all. What it rebuilds is Nextflow's
-own cache filename -- strip the scheme, turn `/` and `:` into `-`, append
-`.img` (not `.sif`):
+the image Snakemake has *already* pulled and converted under its
+`--apptainer-prefix`, so nothing extra is needed. It has to reconstruct the
+path rather than ask for it, since the deployment setting isn't readable from
+inside a rule -- hence mirroring it into the `apptainer_prefix` config key.
+What it rebuilds is Snakemake's own cache filename,
+`md5(container_image).hexdigest() + ".simg"`
+(`snakemake/deployment/singularity.py`'s `Image`). A `container_image` that is
+already a local path is used as-is, exactly as Snakemake itself does.
 
-| `container_image` | cached as |
-| --- | --- |
-| `docker://busybox` | `busybox.img` |
-| `docker://quay.io/biocontainers/foo:1.0--py_0` | `quay.io-biocontainers-foo-1.0--py_0.img` |
-| `docker://ghcr.io/Owner/Repo:v1.2.3` | `ghcr.io-Owner-Repo-v1.2.3.img` |
-
-That rule is `SingularityCache.simpleName()`, which is package-private -- an
-implementation detail, not an API. The risk is bounded: if a Nextflow upgrade
-changes it the path stops existing and the stage fails immediately with both
-candidates named, rather than dying hundreds of times on the nodes. An
-integration test pins the rule, so a change surfaces in CI.
+That naming is an implementation detail, not an API. The risk is bounded: if a
+Snakemake upgrade changes it, the path stops existing and the rule fails
+immediately with the candidate named, rather than dying hundreds of times on
+the nodes. An integration test pins the rule, so a change surfaces in CI.
 
 **Set it explicitly** to opt out of that entirely, to point the child jobs at a
 separately built image, or to run the children on a different image than the
-tasks. An explicit value always wins.
-
-The cache directory is found via `ext.starcall_singularity_cache_dir` and then
-`$NXF_SINGULARITY_CACHEDIR`. A profile that sets `singularity.cacheDir` must
-mirror it into that `ext` (the config scope is invisible from a task context);
-using the environment variable instead needs no mirroring.
+submitting rule. An explicit value always wins.
 
 ## Docker image versioning & publishing
 

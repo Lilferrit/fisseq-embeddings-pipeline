@@ -1,6 +1,6 @@
 """Validation and per-experiment field routing for ``params.yaml``.
 
-Ported from ``workflows/embeddings.nf``'s Groovy (deleted in the Snakemake
+Ported from ``config/experiments.py``'s Groovy (deleted in the Snakemake
 rewrite), which validated ``params.experiments`` inline and routed each
 entry's keys to the stage(s) that own them via three disjoint
 include/exclude sets. Living here instead of inside a ``.smk`` file makes
@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Mapping
 #: Keys routed to ``BUILD_CELL_IMAGES`` only -- the starcall-workflow-facing
 #: fields plus the three ``cp_features``-related ones it folds into
 #: ``cell_table.parquet``. Mirrors ``cell_images_field_includes`` in the
-#: deleted ``workflows/embeddings.nf``.
+#: deleted ``config/experiments.py``.
 CELL_IMAGES_FIELDS = frozenset(
     {
         "starcall_workflow_dir",
@@ -65,7 +65,7 @@ def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
 
     Fails fast with a specific message for every required-with-no-default
     param, rather than letting a missing-key error surface deep inside a
-    rule. Mirrors ``workflows/embeddings.nf``'s own validation block.
+    rule. Mirrors ``config/experiments.py``'s own validation block.
 
     Parameters
     ----------

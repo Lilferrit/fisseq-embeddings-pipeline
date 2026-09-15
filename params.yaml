@@ -120,7 +120,7 @@ experiments: []
 # "Per-experiment configs" above), but in practice are almost always the
 # same value across every experiment in a run -- one crop size per
 # Cell-DINO checkpoint, one CellProfiler pipeline per run. Set the shared
-# value once here; `workflows/embeddings.nf` fills it in (via two
+# value once here; `config/experiments.py` fills it in (via two
 # independent fallback blocks, one per stage) for any `experiments:` entry
 # that doesn't set its own value for that key, and an entry that *does* set
 # its own value always wins over the global default here.
