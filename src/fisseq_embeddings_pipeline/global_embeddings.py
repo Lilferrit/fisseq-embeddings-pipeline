@@ -75,7 +75,6 @@ from .utils.constants import (
 from .utils.dimreduction import compute_pca
 from .utils.globalfeatureselect import median_across_batches
 from .utils.log import setup_logging
-from .utils.nextflow_staging import reconstruct_staged_paths
 from .utils.vectors import compute_impact_score
 
 
@@ -271,13 +270,14 @@ class GlobalVariantEmbeddingsConfig(AppConfig):
 
     Attributes
     ----------
+    input_files : List[str]
+        Paths to the per-experiment ``aggregate.parquet`` files to pool, one
+        per AGGREGATE_EMBEDDINGS output. Required, non-empty, and positionally
+        paired with ``batch_stems``.
     batch_stems : List[str]
         This run's experiment identifiers, one per contributing
-        AGGREGATE_EMBEDDINGS output. Required, non-empty. Same order and
-        length as the staged aggregate files (see :func:`main` --
-        reconstructed from Nextflow's ``stageAs`` numbering rather than
-        passed as an explicit path list, avoiding the identically-named
-        ``aggregate.parquet``-per-experiment collision).
+        AGGREGATE_EMBEDDINGS output. Required, non-empty. Same order
+        and length as ``input_files``.
     label_column : str
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     cumulative_variance_explained : float
@@ -293,6 +293,7 @@ class GlobalVariantEmbeddingsConfig(AppConfig):
     additional ``pca_reduced.parquet``.
     """
 
+    input_files: List[str] = MISSING
     batch_stems: List[str] = MISSING
     label_column: str = "meta_aa_changes"
     cumulative_variance_explained: float = 0.9
@@ -307,10 +308,9 @@ def main(cfg: DictConfig) -> None:
     """
     Hydra entry point: cross-experiment median pooling then full-rank PCA.
 
-    Reads one ``aggregate.parquet`` per entry in ``batch_stems``, staged by
-    the calling Nextflow process as ``agg_input_1.parquet``,
-    ``agg_input_2.parquet``, ... in the same order (see
-    ``modules/local/global_variant_embeddings.nf``), calls
+    Reads the ``aggregate.parquet`` files named by ``input_files``,
+    positionally paired with ``batch_stems`` (the Snakemake rule
+    ``global_variant_embeddings`` passes both in the same order), calls
     :func:`global_variant_embeddings`, and writes five output files to
     ``output_dir``.
 
@@ -331,6 +331,7 @@ def main(cfg: DictConfig) -> None:
 
         python -m fisseq_embeddings_pipeline.global_embeddings \\
             output_dir=./out \\
+            'input_files=[expt1/aggregate.parquet,expt2/aggregate.parquet]' \\
             'batch_stems=[expt1,expt2]' \\
             random_seed=0
     """
@@ -343,10 +344,17 @@ def main(cfg: DictConfig) -> None:
 
     if not ge_cfg.batch_stems:
         raise ValueError("batch_stems must be a non-empty list")
+    if not ge_cfg.input_files:
+        raise ValueError("input_files must be a non-empty list")
 
     prefix = f"{ge_cfg.output_root}." if ge_cfg.output_root is not None else ""
 
-    agg_paths = reconstruct_staged_paths(len(ge_cfg.batch_stems), "agg_input")
+    agg_paths = list(ge_cfg.input_files)
+    if len(agg_paths) != len(ge_cfg.batch_stems):
+        raise ValueError(
+            "input_files and batch_stems must be the same length "
+            f"(got {len(agg_paths)} and {len(ge_cfg.batch_stems)})"
+        )
     logging.info(
         "Reading %d per-experiment aggregate file(s): %s",
         len(agg_paths),
