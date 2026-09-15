@@ -23,14 +23,11 @@ wheels/
 # Generated docs output
 site/
 
-# Nextflow
-.nextflow/
-.nextflow.log*
-work/
-nf-report*.html
-nf-timeline*.html
-nf-trace*.txt
-nf-dag*.html
+# Snakemake
+.snakemake/
+# Rendered DAG images from `snakemake --dag | dot -Tsvg`
+dag.svg
+dag.png
 
 # Model checkpoints / large artifacts (kept out of git; documented in README)
 *.pth
