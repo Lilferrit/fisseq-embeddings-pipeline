@@ -26,7 +26,7 @@
 # the container. Moving the submitter out of the container -- onto a host-side
 # "thin" snakemake env -- would bake a host path in instead and require
 # rewriting every jobscript before exec'ing it. Don't do that without also
-# adding the rewrite; see docs/nextflow.md.
+# adding the rewrite; see docs/snakemake.md.
 set -euo pipefail
 
 jobscript="$1"
@@ -59,7 +59,7 @@ export SINGULARITYENV_XDG_CACHE_HOME="$XDG_CACHE_HOME"
 # --nv only for the rules that asked for a GPU (sge_submit.sh passes the same
 # value it used to decide `-l cuda=1`). Unconditionally passing it fails
 # outright on a node with no GPU/driver, exactly as `docker run --gpus all`
-# does on a GPU-less host -- see nextflow.config's process_gpu comment for
+# does on a GPU-less host -- see config/binds.py's container_env for
 # that same failure on the Nextflow side.
 nv=()
 if [ "${cuda}" -eq 1 ]; then
@@ -76,7 +76,7 @@ fi
 # there makes the job die on its very first `cd`.
 #
 # Paths are bound at their own unchanged locations (src == dest) for the same
-# reason nextflow.config's containerOptions closures do it: starcall's rules
+# reason config/binds.py binds src:src: starcall's rules
 # build every output path by literal string concatenation onto
 # phenotyping_dir/segmentation_dir/sequencing_dir, so an in-container path
 # that merely *reaches* the data isn't enough -- it has to match the host path

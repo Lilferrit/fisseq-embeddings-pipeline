@@ -29,7 +29,6 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 from .config import AppConfig
 from .filter import variant_classification
 from .utils.log import setup_logging
-from .utils.nextflow_staging import reconstruct_staged_paths
 from .utils.normalizer import Normalizer
 
 
@@ -115,18 +114,19 @@ class GlobalVariantDistinguishabilityConfig(AppConfig):
 
     Attributes
     ----------
+    input_files : List[str]
+        Paths to the per-experiment ``results.parquet`` files to pool, one
+        per OVWT_BATCHWISE output. Required, non-empty, and positionally
+        paired with ``batch_stems``.
     batch_stems : List[str]
         This run's experiment identifiers, one per contributing
         OVWT_BATCHWISE results.parquet. Required, non-empty. Same order
-        and length as the staged results files (see :func:`main` --
-        reconstructed from Nextflow's ``stageAs`` numbering rather than
-        passed as an explicit path list, avoiding the identically-named
-        ``results.parquet``-per-experiment collision, same as
-        GLOBAL_VARIANT_EMBEDDINGS -- see global_embeddings.py).
+        and length as ``input_files``.
     label_column : str
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     """
 
+    input_files: List[str] = MISSING
     batch_stems: List[str] = MISSING
     label_column: str = "meta_aa_changes"
 
@@ -144,10 +144,9 @@ def main(cfg: DictConfig) -> None:
     """
     Hydra entry point: per-experiment synonymous z-score, then cross-experiment median.
 
-    Reads one ``results.parquet`` per entry in ``batch_stems``, staged by
-    the calling Nextflow process as ``res_input_1.parquet``,
-    ``res_input_2.parquet``, ... in the same order (see
-    ``modules/local/global_variant_distinguishability.nf``), calls
+    Reads the ``results.parquet`` files named by ``input_files``,
+    positionally paired with ``batch_stems`` (the Snakemake rule
+    ``global_variant_distinguishability`` passes both in the same order), calls
     :func:`global_variant_distinguishability`, and writes
     ``{prefix}global_scores.parquet`` to ``output_dir``.
 
@@ -164,6 +163,7 @@ def main(cfg: DictConfig) -> None:
 
         python -m fisseq_embeddings_pipeline.global_distinguishability \\
             output_dir=./out \\
+            'input_files=[expt1/results.parquet,expt2/results.parquet]' \\
             'batch_stems=[expt1,expt2]'
     """
     gd_cfg: GlobalVariantDistinguishabilityConfig = OmegaConf.to_object(cfg)
@@ -175,10 +175,17 @@ def main(cfg: DictConfig) -> None:
 
     if not gd_cfg.batch_stems:
         raise ValueError("batch_stems must be a non-empty list")
+    if not gd_cfg.input_files:
+        raise ValueError("input_files must be a non-empty list")
 
     prefix = f"{gd_cfg.output_root}." if gd_cfg.output_root is not None else ""
 
-    results_paths = reconstruct_staged_paths(len(gd_cfg.batch_stems), "res_input")
+    results_paths = list(gd_cfg.input_files)
+    if len(results_paths) != len(gd_cfg.batch_stems):
+        raise ValueError(
+            "input_files and batch_stems must be the same length "
+            f"(got {len(results_paths)} and {len(gd_cfg.batch_stems)})"
+        )
     logging.info(
         "Reading %d per-experiment results file(s): %s",
         len(results_paths),

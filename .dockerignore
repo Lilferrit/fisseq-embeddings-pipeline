@@ -7,7 +7,7 @@ __pycache__
 .ruff_cache
 .pytest_cache
 work/
-.nextflow/
+.snakemake/
 site/
 docs/
 tests/

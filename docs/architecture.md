@@ -35,7 +35,7 @@ Global Variant Distinguish-ability Scores    (once, across all experiments)
                                                                                   Distinguish-ability Scores
 ```
 
-"Cell Images" here is `BUILD_CELL_IMAGES` (`modules/local/build_cell_images/main.nf`)
+"Cell Images" here is `BUILD_CELL_IMAGES` (the `build_cell_images` rule)
 -- the only stage that reads `starcall-workflow`'s tree or invokes Snakemake;
 see [Data contracts](#cell-images-buildcellimages-output-from-starcall-workflow)
 below. "Cell Info Table" no longer appears as its own node: the genotype/
@@ -100,8 +100,9 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
 ## Architecture decisions
 
 1. **Standalone repo**, sibling to `fisseq-data-pipeline` and
-   `starcall-workflow`, following the same Nextflow DSL2 + Python (Hydra +
-   polars) conventions.
+   `starcall-workflow`, following the same Python (Hydra + polars)
+   conventions. Orchestration was Nextflow DSL2 until the Snakemake
+   rewrite, which is why several decisions below are framed against it.
 2. **Fully standalone**: vendors the small pieces of `fisseq-data-pipeline`
    it actually needs (`Normalizer`, `load_batches`, `xgbparams` helpers,
    `compute_pca`, the Hydra config base classes, `classify_variant`)
@@ -145,14 +146,14 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     entire run's stochastic stages (`OVWT_BATCHWISE`'s CV/XGBoost/
     calibration, `GLOBAL_VARIANT_EMBEDDINGS`'s PCA) at once.
 12. **Default pipeline parameters live in a YAML file (`params.yaml`,
-    repo root), not in `nextflow.config`'s `params {}` block**.
-    `nextflow.config` is left for what Nextflow actually needs a
-    `.config` file for (executor/profile/container settings); see
-    [Configuration](configuration.md).
-13. **The pipeline is containerized**: one Docker image bundles the
+    repo root), not in a profile**. Profiles carry executor/deployment
+    settings only; see [Configuration](configuration.md).
+13. **The pipeline can run containerized**: one Docker image bundles the
     Python package, its dependencies, and (for `EMBED_CELLS`) the
-    CUDA/torch stack; every Nextflow process runs inside that image via
-    `process.container`.
+    CUDA/torch stack; `--profile profiles/apptainer` runs every rule
+    inside it. Unlike the Nextflow version this is opt-in rather than the
+    default, since Snakemake has no Docker backend -- see
+    [Snakemake Workflow](snakemake.md#containers).
 14. **The CellProfiler-feature track is a set of thin wrappers, not a
     fork.** `filter.py`/`global_embeddings.py`/`global_distinguishability.py`
     were already feature-agnostic (keyed off `FEATURE_SELECTOR`/
@@ -242,7 +243,7 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     `include:` + `ruleorder:`, not `module:`.** `resources/
     starcall_overrides/wrapper.smk` (`include: "<starcall_workflow_dir>/
     workflow/Snakefile"` then `include: "fixed_cell_images.smk"`) is what
-    `build_cell_images/main.nf` now points `--snakefile` at, instead of
+    the `build_cell_images` rule now points `--snakefile` at, instead of
     starcall-workflow's own `workflow/Snakefile` directly.  Plain
     `include:` shares one Python global namespace across every included
     file -- confirmed `origin/devel`'s own `workflow/Snakefile` already
@@ -262,11 +263,11 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     same output" when two rules genuinely share an output pattern -- more
     robust than hoping a same-named redeclaration silently wins (a true
     duplicate rule name raises `WorkflowError`/`AmbiguousRuleException`).
-    `build_cell_images/main.nf` passes `--snakefile` pointing directly at
-    the static `wrapper.smk` template, from a fixed path baked into the
-    Docker image (`process.ext.starcall_overrides_dir`, `nextflow.config`;
-    `-profile local` points this at the checked-out repo's own `resources/
-    starcall_overrides/` instead, since that profile has no baked image).
+    The `build_cell_images` rule passes `--snakefile` pointing directly at
+    the static `wrapper.smk` template. `starcall_overrides_dir` defaults to
+    the checked-out repo's own `resources/starcall_overrides/`;
+    `profiles/apptainer` points it at the copy baked into the image
+    instead.
     `starcall_workflow_dir` (per-experiment, not known until task-generation
     time) is threaded into `wrapper.smk`'s first `include:` via `--config`
     -- the same mechanism already used on the same invocation for
@@ -334,11 +335,11 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
 20. **Snakemake's own cluster submission is opt-in, and its submitter
     stays inside the container.** `BUILD_CELL_IMAGES`' phase-2 `snakemake`
     runs in local mode by default (`--cores`), so on a scheduler every
-    starcall rule for an experiment runs inside the one job Nextflow
-    submitted for that task -- parallelism across experiments, none within
-    one. An executor profile can opt into per-rule submission by setting
-    `process.ext.snakemake_cluster_args`; everything the cluster path adds
-    is gated on that, so the default and `-profile local` invocations are
+    starcall rule for an experiment runs inside the one job submitted for
+    that rule -- parallelism across experiments, none within
+    one. A profile can opt into per-rule submission by setting
+    `snakemake_cluster_args`; everything the cluster path adds
+    is gated on that, so the default invocation is
     unchanged byte-for-byte.
 
     The submitter deliberately stays *inside* the task's container rather
@@ -353,14 +354,12 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     child jobs must re-enter the image regardless: starcall's rules are
     overwhelmingly `run:` blocks, which execute in-process in the child
     snakemake and import the `ops` stack, and snakemake never containerizes
-    a `run:` body. See [Nextflow](nextflow.md#running-starcalls-rules-as-their-own-cluster-jobs).
+    a `run:` body. See [Snakemake Workflow](snakemake.md#running-starcalls-rules-as-their-own-cluster-jobs).
 
 ## Repository layout
 
 ```text
 fisseq-embeddings-pipeline/
-  main.nf
-  nextflow.config                 # executor/profile/container settings only
   params.yaml                     # every default pipeline parameter
   Dockerfile                      # this repo's own image (torch/Cell-DINO/polars),
                                    # plus starcall-workflow's own Snakemake/
@@ -377,29 +376,26 @@ fisseq-embeddings-pipeline/
                                     # used only when an executor profile opts
                                     # into per-rule cluster submission
                                     # (decision 20)
-  workflows/
-    embeddings.nf                 # the one pipeline_mode this repo has
-  modules/local/
-    build_cell_images/main.nf          # the only stage touching starcall-workflow's tree
-    build_cell_metadata/main.nf        # cell_table.parquet -> QC_FILTER's input (decision 19)
-    build_dataset/main.nf
-    qc_filter/main.nf
-    embed_cells/main.nf
-    filter_embeddings/main.nf
-    aggregate_embeddings/main.nf
-    ovwt_batchwise/main.nf
-    global_variant_embeddings/main.nf
-    global_variant_distinguishability/main.nf
-    build_cp_features/main.nf
-    filter_cp_features/main.nf
-    aggregate_cp_features/main.nf
-    ovwt_batchwise_cp_features/main.nf
-    global_variant_cp_features/main.nf
-    global_variant_distinguishability_cp_features/main.nf
+  workflow/
+    Snakefile                     # config load, validation, workdir, rule all
+    rules/
+      common.smk                  # validation, experiment plan, binds, THREAD_ENV
+      cell_images.smk             # build_cell_images (the only rule touching
+                                   # starcall-workflow's tree), build_cell_metadata
+                                   # (decision 19), qc_filter
+      embeddings.smk              # build_dataset -> ovwt_batchwise
+      cp_features.smk             # the CellProfiler track
+      global_stages.smk           # the four cross-experiment rules
+    profiles/default/             # auto-applied: keep-going, rerun-triggers
+  profiles/
+    apptainer/                    # run every rule in the image (opt-in)
+    sge/                          # SGE deployment via cluster-generic
   src/fisseq_embeddings_pipeline/
     config/
       app.py                      # AppConfig -- vendored, + random_seed
       input.py                    # InputConfig, LabeledInputConfig -- vendored
+      experiments.py              # params.yaml validation + per-experiment routing
+      binds.py                    # host paths every containerized rule needs
     cell_metadata.py              # BUILD_CELL_METADATA
     dataset.py                    # BUILD_DATASET
     build_cell_images_enumerate.py # BUILD_CELL_IMAGES phase 1 (grid/tile discovery)
@@ -426,14 +422,13 @@ fisseq-embeddings-pipeline/
       dimreduction.py             # vendored (compute_pca), + random_state passthrough
       globalfeatureselect.py      # vendored (median_across_batches only)
       vectors.py                  # vendored (compute_impact_score/compute_cosine_distance)
-      nextflow_staging.py         # stageAs-numbered-filename reconstruction helper
       cell_table.py               # shared cell_table.parquet -> meta_* projection
                                    # (BUILD_CELL_METADATA + BUILD_CP_FEATURES)
       log.py                      # vendored
   docs/
   tests/
     unit/
-    integration/                  # end-to-end nextflow run + output assertions
+    integration/                  # end-to-end snakemake run + output assertions
 ```
 
 New dependency versus `fisseq-data-pipeline`'s stack: **`webdataset`**
@@ -459,7 +454,7 @@ This pipeline tracks `starcall-workflow`'s `origin/devel` branch, not
 
 ### Cell Images (`BUILD_CELL_IMAGES` output, from `starcall-workflow`)
 
-`BUILD_CELL_IMAGES` (`modules/local/build_cell_images/main.nf`,
+`BUILD_CELL_IMAGES` (the `build_cell_images` rule,
 `build_cell_images_enumerate.py`, `build_cell_images_table.py`) is the only stage that reads
 `starcall-workflow`'s tree directly or invokes Snakemake. For every tile of
 every configured well, it forces real `starcall-workflow` outputs to

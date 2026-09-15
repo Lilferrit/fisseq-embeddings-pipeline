@@ -9,7 +9,7 @@
 #   sge_submit.sh <rule> <jobid> <threads> <mem_mb> <cuda> "<jobscript>"
 #
 # i.e. the five --cluster format placeholders this repo passes (see
-# scratch/nextflow.config's ext.snakemake_cluster_args) followed by the
+# profiles/sge/config.yaml's snakemake_cluster_args) followed by the
 # generated jobscript path, which snakemake always appends LAST. It must print
 # the scheduler's job id as the first line of stdout -- hence `qsub -terse`.
 #
@@ -30,7 +30,8 @@ mem_mb="$4"
 cuda="$5"
 jobscript="$6"
 
-# Exported by the module's script block (modules/local/build_cell_images/main.nf).
+# Exported by the build_cell_images rule's cluster preamble
+# (workflow/rules/common.smk).
 # Fail loudly here rather than emitting a malformed qsub line: a qsub that fails
 # to submit surfaces as a snakemake WorkflowError naming this script, whereas a
 # qsub that submits something wrong surfaces N minutes later as a dead job.

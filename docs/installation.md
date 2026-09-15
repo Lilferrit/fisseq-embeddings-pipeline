@@ -26,21 +26,23 @@ inference is vendored directly under
 [Architecture](architecture.md#vendored-code)), so no separate `dinov2`
 install step is needed.
 
-## Nextflow
+## Snakemake
 
-The pipeline is orchestrated by [Nextflow](https://www.nextflow.io/)
-(&ge; 23.10), which needs Java on `PATH`:
+The pipeline is orchestrated by
+[Snakemake](https://snakemake.readthedocs.io/) (&ge; 8). It is an ordinary
+dependency, so `uv sync` above already installed it -- there is no separate
+install step and no Java runtime to provision.
 
-```bash
-# e.g. via SDKMAN
-sdk install java 17.0.2-tem
-curl -s https://get.nextflow.io | bash
-```
+## Containers
 
-## Docker
+Running containerized is optional: a bare `snakemake` runs every rule
+against the `uv`-managed venv from above. To run them inside the image
+instead you need [Apptainer](https://apptainer.org/) (or Singularity) on
+`PATH` -- Snakemake has no Docker backend, though it runs the `docker://`
+image below unchanged.
 
-Every Nextflow process, including `BUILD_CELL_IMAGES`, runs inside a
-single container image, built from the repo-root `Dockerfile`:
+Every rule, including `build_cell_images`, uses the same single image,
+built from the repo-root `Dockerfile`:
 
 ```bash
 docker build -t fisseq-embeddings-pipeline:latest .
@@ -49,11 +51,12 @@ docker build -t fisseq-embeddings-pipeline:latest .
 Point `params.yaml`'s `container_image` (or a `--container_image`
 override) at wherever you publish it -- see
 [Configuration](configuration.md#docker-image-versioning-publishing) for
-the registry/tagging convention this repo's CI uses. A `-profile local`
-run (see [Nextflow Workflow](nextflow.md#profiles)) needs no Docker image
-at all -- every process runs directly against your own `uv`-managed venv.
+the registry/tagging convention this repo's CI uses. A plain `snakemake`
+run (see [Snakemake Workflow](snakemake.md#containers)) needs no image at
+all -- every rule runs directly against your own `uv`-managed venv.
 
-`BUILD_CELL_IMAGES` invokes `starcall-workflow`'s own Snakemake pipeline,
+`build_cell_images` invokes `starcall-workflow`'s own Snakemake pipeline
+as a nested run,
 whose dependency stack (tensorflow/stardist/cellpose) is kept isolated
 from this repo's own torch/Cell-DINO/polars stack via a second, dedicated
 conda env (`ops`) baked into this same image, rather than a separate
@@ -67,5 +70,5 @@ before relying on it in production.
 ## Development environment
 
 `.devcontainer/` provides a containerized dev environment (VS Code /
-Claude Code) with `nextflow`, Java, and Docker-outside-of-Docker access
+Claude Code) with `snakemake` and Docker-outside-of-Docker access
 already configured, mirroring `fisseq-data-pipeline`'s own `.devcontainer/`.

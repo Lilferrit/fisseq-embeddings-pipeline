@@ -1,13 +1,13 @@
 """BUILD_DATASET.
 
 Hydra entry point (`python -m fisseq_embeddings_pipeline.dataset`), backing
-the Nextflow process BUILD_DATASET (modules/local/build_dataset.nf).
+the Snakemake rule build_dataset (workflow/rules/embeddings.smk).
 Gathers one experiment's cells into a sharded WebDataset (dataset-*.tar)
 plus a companion metadata.parquet, with no hand-authored tile manifest --
 the tile layout is discovered directly (see `discover_tiles`).
 
-Reads from BUILD_CELL_IMAGES' output directory (modules/local/
-build_cell_images.nf), not starcall-workflow's tree directly -- that stage
+Reads from BUILD_CELL_IMAGES' output directory (the `build_cell_images`
+rule), not starcall-workflow's tree directly -- that stage
 is now the ONLY place in the pipeline that touches phenotyping_dir/
 segmentation_dir/sequencing_dir or invokes Snakemake. Concretely, this
 module reads:
@@ -74,8 +74,8 @@ class BuildDatasetConfig(AppConfig):
     Attributes
     ----------
     cell_images_dir : str
-        BUILD_CELL_IMAGES' per-experiment output directory (modules/local/
-        build_cell_images.nf) -- holds `{well}_grid<N>/tile<x>x<y>y/`
+        BUILD_CELL_IMAGES' per-experiment output directory (the
+        `build_cell_images` rule) -- holds `{well}_grid<N>/tile<x>x<y>y/`
         subdirectories (each with one `*_crops_*.tif` and one
         `*_mask_crops_*.tif` pre-cropped stack) plus `cell_table.parquet`.
         Replaces the old `phenotyping_dir`/`wells`/`grid_size`/

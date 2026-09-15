@@ -13,7 +13,7 @@ Crucially, this stage's ``qc_passed_file`` is **not** a new QC run --
 it's the *same* QC_FILTER ``filtered_cells.parquet`` FILTER_EMBEDDINGS
 already consumes (the cellDINO and CellProfiler tracks score the same
 cells, so QC filtering -- which only ever looks at meta_* columns -- is
-computed once and reused; see ``workflows/embeddings.nf``).
+computed once and reused; see ``config/experiments.py``).
 """
 
 import dataclasses

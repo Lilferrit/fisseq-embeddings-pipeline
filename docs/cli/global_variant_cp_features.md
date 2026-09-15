@@ -1,7 +1,7 @@
 # Global Variant CP Features (`GLOBAL_VARIANT_CP_FEATURES`)
 
 `python -m fisseq_embeddings_pipeline.global_variant_cp_features`
-(Nextflow process `GLOBAL_VARIANT_CP_FEATURES`) is the CellProfiler-feature
+(Snakemake rule `global_variant_cp_features`) is the CellProfiler-feature
 analog of `GLOBAL_VARIANT_EMBEDDINGS`: the exact same cross-experiment
 median pooling + full-rank PCA + variance-thresholded `pca_reduced.parquet`
 described on the [Global Variant Embeddings](global_embeddings.md) page,

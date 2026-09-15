@@ -1,7 +1,6 @@
 # Filter CP Features (`FILTER_CP_FEATURES`)
 
-`python -m fisseq_embeddings_pipeline.filter_cp_features` (Nextflow
-process `FILTER_CP_FEATURES`) is the CellProfiler-feature analog of
+`python -m fisseq_embeddings_pipeline.filter_cp_features` (Snakemake rule `filter_cp_features`) is the CellProfiler-feature analog of
 `FILTER_EMBEDDINGS`: it determines which of `BUILD_CP_FEATURES`' cells
 pass QC and fits the synonymous z-score against them, publishing only the
 join key and the fitted statistics.

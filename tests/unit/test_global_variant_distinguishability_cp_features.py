@@ -7,7 +7,7 @@ test_global_distinguishability.py, and requires no code changes to run
 for the CellProfiler-feature track -- it only ever touches
 auroc_pooled/auroc_median_barcode, never the underlying feature space) --
 these tests confirm the wrapper's own config defaults and that its CLI,
-including the `stageAs`-numbered staged-file reconstruction, works
+including the explicit ``input_files`` path list, works
 end-to-end.
 """
 
@@ -61,12 +61,20 @@ def test_config_default_label_column():
 
 def _write_staged_results_files(
     tmp_path: Path, batches: list[pl.DataFrame]
-) -> list[str]:
-    stems = []
+) -> tuple[list[str], list[str]]:
+    """Write batches[i] to ``expt{i+1}/results.parquet`` -- the per-experiment
+    layout the Snakemake rule passes via ``input_files`` -- and return the
+    parallel (batch_stems, input_files) lists."""
+    stems, files = [], []
     for i, batch_df in enumerate(batches, start=1):
-        batch_df.write_parquet(tmp_path / f"res_input_{i}.parquet")
-        stems.append(f"expt{i}")
-    return stems
+        stem = f"expt{i}"
+        batch_dir = tmp_path / stem
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        path = batch_dir / "results.parquet"
+        batch_df.write_parquet(path)
+        stems.append(stem)
+        files.append(str(path))
+    return stems, files
 
 
 def _run_global_variant_distinguishability_cp_features(
@@ -92,12 +100,13 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path) -> None:
     df2 = _results_df(
         ["A1A", "A2A", "A3A", "M1K"], [0.4, 0.5, 0.6, 0.85], [0.4, 0.5, 0.6, 0.85]
     )
-    batch_stems = _write_staged_results_files(tmp_path, [df1, df2])
+    batch_stems, input_files = _write_staged_results_files(tmp_path, [df1, df2])
     output_dir = tmp_path / "out"
 
     result = _run_global_variant_distinguishability_cp_features(
         tmp_path,
         f"output_dir={output_dir}",
+        f"input_files=[{','.join(input_files)}]",
         f"batch_stems=[{','.join(batch_stems)}]",
     )
     assert result.returncode == 0, result.stderr
@@ -119,6 +128,7 @@ def test_main_raises_on_empty_batch_stems(tmp_path: Path) -> None:
         tmp_path,
         f"output_dir={output_dir}",
         "batch_stems=[]",
+        "input_files=[]",
     )
     assert result.returncode != 0
     assert "batch_stems must be a non-empty list" in result.stderr

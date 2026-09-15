@@ -1,8 +1,8 @@
 """BUILD_CP_FEATURES.
 
 Input conversion for the CellProfiler-feature track: reads
-BUILD_CELL_IMAGES' already-joined ``cell_table.parquet`` (modules/local/
-build_cell_images.nf) and selects its ``cp_*``-prefixed CellProfiler
+BUILD_CELL_IMAGES' already-joined ``cell_table.parquet`` (the
+``build_cell_images`` rule) and selects its ``cp_*``-prefixed CellProfiler
 feature columns, into one per-experiment ``cp_features.parquet`` -- the
 CellProfiler-feature analog of EMBED_CELLS' ``embeddings.parquet``, and
 the input to FILTER_CP_FEATURES (filter_cp_features.py).
@@ -51,8 +51,8 @@ class CpFeaturesConfig(AppConfig):
     Attributes
     ----------
     cell_images_dir : str
-        BUILD_CELL_IMAGES' per-experiment output directory (modules/local/
-        build_cell_images.nf) -- holds ``cell_table.parquet``, which
+        BUILD_CELL_IMAGES' per-experiment output directory (the
+        ``build_cell_images`` rule) -- holds ``cell_table.parquet``, which
         already carries this experiment's CellProfiler feature columns
         (``cp_*``-prefixed) alongside its cell metadata/genotype columns.
         Replaces the old ``phenotyping_dir``/``wells``/``grid_size``/

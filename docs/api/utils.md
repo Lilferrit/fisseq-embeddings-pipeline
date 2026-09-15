@@ -24,6 +24,4 @@ Shared helpers used across pipeline stages -- most are vendored from
 
 ::: fisseq_embeddings_pipeline.utils.vectors
 
-::: fisseq_embeddings_pipeline.utils.nextflow_staging
-
 ::: fisseq_embeddings_pipeline.utils.log

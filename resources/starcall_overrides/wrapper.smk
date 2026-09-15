@@ -1,10 +1,10 @@
 # Composes starcall-workflow's real Snakefile with this repo's own rule
 # patch, via plain `include:` (shares one Python namespace). Both files in
 # this directory are used as-is, straight from
-# `task.ext.starcall_overrides_dir` (nextflow.config) -- build_cell_images/
-# main.nf passes `--snakefile` pointing directly here, no per-task copy or
+# `starcall_overrides_dir` (params.yaml) -- the build_cell_images rule
+# passes `--snakefile` pointing directly here, no per-task copy or
 # text substitution needed. `starcall_workflow_dir` is threaded in via
-# `--config` (the same mechanism build_cell_images/main.nf already uses for
+# `--config` (the same mechanism the build_cell_images rule already uses for
 # phenotyping_dir/segmentation_dir/sequencing_dir on the same invocation)
 # rather than templated into this file, since Snakemake directives are
 # plain Python: `include:` accepts any expression, not just a string

@@ -1,6 +1,6 @@
 # FISSEQ Embeddings Pipeline
 
-A Nextflow + Python workflow for scoring genetic variants against learned
+A Snakemake + Python workflow for scoring genetic variants against learned
 **Cell-DINO** embeddings from FISSEQ (Fluorescence In-Situ Sequencing)
 experiments -- the embedding-space sibling of
 [`fisseq-data-pipeline`](https://github.com/Lilferrit/fisseq-data-pipeline),
@@ -25,7 +25,7 @@ Cell Info Table + Cell Images (starcall-workflow)
 
 See **[the documentation site](https://lilferrit.github.io/fisseq-embeddings-pipeline/)**
 for the full design (architecture decisions, data contracts, per-stage
-usage, Nextflow orchestration, output layout).
+usage, Snakemake orchestration, output layout).
 
 ## Quick start
 
@@ -37,13 +37,18 @@ cd fisseq-embeddings-pipeline
 uv sync --group dev
 ```
 
-Run the full pipeline end to end with [Nextflow](https://www.nextflow.io/) (≥ 23.10):
+Run the full pipeline end to end with
+[Snakemake](https://snakemake.readthedocs.io/) (≥ 8, installed by `uv sync`):
 
 ```bash
-nextflow run . --pipeline_dir /path/to/experiment \
-    --cell_dino_checkpoint /path/to/checkpoint.pth \
-    -params-file params.yaml
+snakemake --configfile params.yaml \
+    --config pipeline_dir=/path/to/experiment \
+             cell_dino_checkpoint=/path/to/checkpoint.pth \
+    --cores 8
 ```
+
+That runs against this repo's own venv. To run every rule in the published
+container image instead, add `--profile profiles/apptainer`.
 
 See [Installation](https://lilferrit.github.io/fisseq-embeddings-pipeline/installation/)
 and [Quickstart](https://lilferrit.github.io/fisseq-embeddings-pipeline/quickstart/)

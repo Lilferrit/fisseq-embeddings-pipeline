@@ -1,7 +1,7 @@
 # Global Variant Distinguish-ability Scores, CellProfiler Track (`GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES`)
 
 `python -m fisseq_embeddings_pipeline.global_variant_distinguishability_cp_features`
-(Nextflow process `GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES`) is the
+(Snakemake rule `global_variant_distinguishability_cp_features`) is the
 CellProfiler-feature analog of `GLOBAL_VARIANT_DISTINGUISHABILITY`: the
 same per-experiment synonymous z-score then cross-experiment median
 described on the
