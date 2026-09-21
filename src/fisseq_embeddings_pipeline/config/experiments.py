@@ -84,8 +84,11 @@ def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
         If ``pipeline_dir`` or ``cell_dino_checkpoint`` is unset, if
         ``experiments`` is missing/empty/not a list, if any entry is not a
         mapping, if any entry lacks a non-blank string ``batch_stem``, if
-        any entry's ``cp_features`` is not a boolean, or if two entries
-        share a ``batch_stem``.
+        any entry's ``cp_features`` is not a boolean, if two entries
+        share a ``batch_stem``, if ``aggregate_methods`` /
+        ``aggregate_methods_passthrough`` name an unknown aggregator or
+        overlap each other, or if ``reproducibility_bootstrap_reps`` is
+        below 2.
     """
     if config.get("pipeline_dir") is None:
         raise ValueError("pipeline_dir is required (--config pipeline_dir=...).")
@@ -124,7 +127,103 @@ def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
             "Every experiment's batch_stem must be unique."
         )
 
+    _validate_aggregate_methods(config)
+    _validate_reproducibility(config)
+
     return [dict(entry) for entry in experiments]
+
+
+def _validate_aggregate_methods(config: Mapping[str, Any]) -> None:
+    """
+    Check both aggregator lists name real aggregators and stay disjoint.
+
+    Validated here, at parse time, rather than being left to each stage's
+    own Hydra config: the method names are interpolated straight into a
+    rule's shell command and into its output paths, so a bad entry
+    otherwise surfaces as a confusing Snakemake wildcard or a shell-level
+    failure long before any Python validation could fire. This is the
+    Python counterpart of the ``aggregatorKeys()`` check
+    fisseq-data-pipeline does in Groovy.
+    """
+    from ..aggregate import _AGGREGATORS
+
+    known = sorted(_AGGREGATORS)
+    lists = {
+        "aggregate_methods": config.get("aggregate_methods") or [],
+        "aggregate_methods_cp_features": config.get("aggregate_methods_cp_features")
+        or [],
+        "aggregate_methods_passthrough": config.get("aggregate_methods_passthrough")
+        or [],
+    }
+    for key, value in lists.items():
+        if not isinstance(value, list):
+            raise ValueError(
+                f"{key} must be a list of aggregator names, got {value!r}."
+            )
+        unknown = sorted(set(value) - set(known))
+        if unknown:
+            raise ValueError(
+                f"{key} has unrecognized entry/entries: {', '.join(unknown)}. "
+                f"Choose from: {', '.join(known)}."
+            )
+        duplicates = sorted({m for m in value if value.count(m) > 1})
+        if duplicates:
+            raise ValueError(
+                f"{key} has duplicate entry/entries: {', '.join(duplicates)}."
+            )
+
+    if not lists["aggregate_methods"]:
+        raise ValueError("aggregate_methods must name at least one aggregator.")
+
+    overlap = sorted(
+        set(lists["aggregate_methods"]) & set(lists["aggregate_methods_passthrough"])
+    )
+    if overlap:
+        raise ValueError(
+            "aggregate_methods_passthrough overlaps aggregate_methods: "
+            f"{', '.join(overlap)}. A method is either reproducibility-filtered "
+            "or passed through, never both."
+        )
+
+
+def _validate_reproducibility(config: Mapping[str, Any]) -> None:
+    """
+    Check the reproducibility-filtering knobs.
+
+    ``reproducibility_bootstrap_reps`` must be at least 2: BLOCKLIST takes
+    a median across replicates, and a median of one value is that value --
+    a single replicate would make the whole verdict hostage to one random
+    split.
+    """
+    reps = config.get("reproducibility_bootstrap_reps")
+    if not isinstance(reps, int) or isinstance(reps, bool) or reps < 2:
+        raise ValueError(
+            "reproducibility_bootstrap_reps must be an integer >= 2 (got "
+            f"{reps!r}); BLOCKLIST medians across replicates, so one "
+            "replicate is not a reproducibility test."
+        )
+
+    min_corr = config.get("reproducibility_min_correlation")
+    if not isinstance(min_corr, (int, float)) or isinstance(min_corr, bool):
+        raise ValueError(
+            f"reproducibility_min_correlation must be a number, got {min_corr!r}."
+        )
+    if not (-1.0 <= float(min_corr) <= 1.0):
+        raise ValueError(
+            "reproducibility_min_correlation must be a Pearson r in [-1, 1], got "
+            f"{min_corr!r}."
+        )
+
+    min_batches = config.get("reproducibility_global_min_batches_ok")
+    if min_batches is not None and (
+        not isinstance(min_batches, int)
+        or isinstance(min_batches, bool)
+        or min_batches < 1
+    ):
+        raise ValueError(
+            "reproducibility_global_min_batches_ok must be null or an integer "
+            f">= 1, got {min_batches!r}."
+        )
 
 
 def _with_fallbacks(

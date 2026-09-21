@@ -24,6 +24,7 @@ import pytest
 import scipy.special
 import scipy.stats
 import sklearn.metrics
+from polars.testing import assert_frame_equal
 
 import fisseq_embeddings_pipeline.aggregate as m
 from fisseq_embeddings_pipeline.filter import JOIN_KEYS, filter_and_fit_normalizer
@@ -860,9 +861,109 @@ def test_main_is_hydra_entry_point() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Column batching (feature_chunk_size) -- a pure memory dial
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 3, 5, 1000, None])
+def test_chunking_does_not_change_the_output(
+    agg_embeddings_lf: pl.LazyFrame, chunk_size
+) -> None:
+    """The load-bearing property of feature_chunk_size: it changes how much
+    memory one query needs and nothing else. Run across every aggregator,
+    including the reference-based ones whose cross-joined control pool is
+    what the chunking is really for."""
+    methods = ["mean", "median", "KS", "AUROC", "KSnegLogP", "AUROCnegLogP"]
+    reference = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", methods, feature_chunk_size=None
+    )
+    result = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", methods, feature_chunk_size=chunk_size
+    )
+    assert_frame_equal(reference, result, check_column_order=True)
+
+
+def test_chunking_preserves_column_order(agg_embeddings_lf: pl.LazyFrame) -> None:
+    """Chunk results are joined back in order, so a narrow chunk must not
+    interleave dimensions differently from a single wide one."""
+    one = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", ["median"], feature_chunk_size=None
+    )
+    many = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", ["median"], feature_chunk_size=1
+    )
+    assert one.columns == many.columns
+
+
+def test_output_is_sorted_by_label(agg_embeddings_lf: pl.LazyFrame) -> None:
+    """group_by is not order-preserving under Polars' multithreaded
+    execution, so aggregate() sorts -- without which the per-chunk joins,
+    and every file downstream, would vary run to run."""
+    result = m.MedianAggregator().aggregate(agg_embeddings_lf).collect()
+    labels = result["meta_aa_changes"].to_list()
+    assert labels == sorted(labels)
+
+
+def test_feature_chunk_size_below_one_raises() -> None:
+    with pytest.raises(ValueError, match="feature_chunk_size must be >= 1 or None"):
+        m.MedianAggregator(feature_chunk_size=0)
+
+
+def test_default_feature_chunk_size_is_32() -> None:
+    assert m.DEFAULT_FEATURE_CHUNK_SIZE == 32
+    assert m.MedianAggregator().feature_chunk_size == 32
+
+
+# ---------------------------------------------------------------------------
+# aggregate_embeddings -- lean mode and the bare-median switch, both used by
+# AGGREGATE_HALF / AGGREGATE_PASSTHROUGH
+# ---------------------------------------------------------------------------
+
+
+def test_include_metadata_false_returns_a_lean_frame(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    lean = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", ["median"], include_metadata=False
+    )
+    assert [c for c in lean.columns if c.startswith("meta_")] == ["meta_aa_changes"]
+
+
+def test_include_metadata_false_does_not_change_the_statistics(
+    agg_embeddings_lf: pl.LazyFrame,
+) -> None:
+    full = m.aggregate_embeddings(agg_embeddings_lf, "meta_aa_changes", ["median"])
+    lean = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", ["median"], include_metadata=False
+    )
+    assert_frame_equal(full.select(lean.columns), lean)
+
+
+def test_bare_median_false_keeps_the_suffix(agg_embeddings_lf: pl.LazyFrame) -> None:
+    """AGGREGATE_HALF needs its column names to match an aggregate.parquet
+    built from a multi-method aggregate_methods, where median columns are
+    suffixed."""
+    suffixed = m.aggregate_embeddings(
+        agg_embeddings_lf, "meta_aa_changes", ["median"], bare_median=False
+    )
+    assert "emb_0000_median" in suffixed.columns
+    assert "emb_0000" not in suffixed.columns
+
+
+def test_bare_median_default_is_unchanged(agg_embeddings_lf: pl.LazyFrame) -> None:
+    bare = m.aggregate_embeddings(agg_embeddings_lf, "meta_aa_changes", ["median"])
+    assert "emb_0000" in bare.columns
+
+
+# ---------------------------------------------------------------------------
 # AggregateEmbeddingsConfig -- dropped-fields regression: no per_barcode
-# pooling option, no WT-null-bootstrap/block_list reproducibility-gate
-# machinery
+# pooling option, no WT-null-bootstrap machinery, and no in-stage blocklist.
+#
+# Reproducibility filtering DOES exist in this pipeline now, but as the
+# separate GENERATE_SPLIT -> ... -> FILTER_AGGREGATE chain, not as a field on
+# this stage's config -- aggregate.py still computes every dimension and
+# FILTER_AGGREGATE drops the ones the blocklist condemns. See
+# test_filter_aggregate.py.
 # ---------------------------------------------------------------------------
 
 

@@ -56,7 +56,7 @@ cosine-distance impact score against the control median"):
 import dataclasses
 import logging
 import pathlib
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import hydra
 import polars as pl
@@ -175,6 +175,7 @@ def global_variant_embeddings(
     label_column: str,
     random_seed: int,
     cumulative_variance_explained: float = 0.9,
+    blocklist_df: Optional[pl.DataFrame] = None,
 ) -> Tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """
     Median-pool each experiment's per-variant aggregate embedding, then PCA
@@ -197,6 +198,14 @@ def global_variant_embeddings(
         Threshold in ``(0, 1]`` used to select the leading components kept
         in ``reduced_df`` (see :func:`_n_components_for_variance`). Defaults
         to ``0.9``.
+    blocklist_df : pl.DataFrame or None
+        GLOBAL_BLOCKLIST's cross-experiment reproducibility verdict
+        (``feature``/``feature_ok``). When given, every column it marks
+        not-ok is dropped from each experiment's aggregate *before*
+        median-pooling, so neither the median nor the PCA ever sees a
+        non-reproducible dimension. ``None`` (the default) applies no
+        filtering, which is what the CellProfiler track passes -- the
+        reproducibility chain is cellDINO-only.
 
     Returns
     -------
@@ -231,6 +240,21 @@ def global_variant_embeddings(
             "cumulative_variance_explained must be in (0, 1], got "
             f"{cumulative_variance_explained}"
         )
+
+    if blocklist_df is not None:
+        blocked = set(
+            blocklist_df.filter(~pl.col("feature_ok").fill_null(False))[
+                "feature"
+            ].to_list()
+        )
+        logging.info(
+            "Applying the global blocklist: %d non-reproducible dimension(s)",
+            len(blocked),
+        )
+        batch_aggregate_lfs = [
+            lf.drop([c for c in lf.collect_schema().names() if c in blocked])
+            for lf in batch_aggregate_lfs
+        ]
 
     median_df = median_across_batches(batch_aggregate_lfs, label_column, batch_labels)
 
@@ -284,6 +308,12 @@ class GlobalVariantEmbeddingsConfig(AppConfig):
         Threshold in ``(0, 1]`` selecting the leading components kept in
         ``pca_reduced.parquet`` (see this module's docstring). Defaults to
         ``0.9``.
+    blocklist_file : str or None
+        Path to GLOBAL_BLOCKLIST's cross-experiment ``blocklist.parquet``.
+        When set, non-reproducible dimensions are dropped from every
+        experiment's aggregate before pooling. ``None`` (the default) is
+        what GLOBAL_VARIANT_CP_FEATURES passes -- reproducibility
+        filtering is cellDINO-only.
 
     No ``n_components`` field -- see this module's docstring: every
     retained principal component is always computed and written (to
@@ -297,6 +327,7 @@ class GlobalVariantEmbeddingsConfig(AppConfig):
     batch_stems: List[str] = MISSING
     label_column: str = "meta_aa_changes"
     cumulative_variance_explained: float = 0.9
+    blocklist_file: Optional[str] = None
 
 
 _cs = ConfigStore.instance()
@@ -362,6 +393,11 @@ def main(cfg: DictConfig) -> None:
     )
     batch_aggregate_lfs = [pl.scan_parquet(p) for p in agg_paths]
 
+    blocklist_df = None
+    if ge_cfg.blocklist_file:
+        logging.info("Reading global blocklist from %s", ge_cfg.blocklist_file)
+        blocklist_df = pl.read_parquet(ge_cfg.blocklist_file)
+
     median_df, scores_df, components_df, variance_df, reduced_df = (
         global_variant_embeddings(
             batch_aggregate_lfs,
@@ -369,6 +405,7 @@ def main(cfg: DictConfig) -> None:
             ge_cfg.label_column,
             ge_cfg.random_seed,
             ge_cfg.cumulative_variance_explained,
+            blocklist_df=blocklist_df,
         )
     )
 

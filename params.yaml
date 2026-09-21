@@ -341,6 +341,84 @@ filter_label_column: "meta_aa_changes"
 # want evidence strength alongside effect size.
 aggregate_methods: ["median", "KS", "AUROC"]
 
+# Embedding dimensions each aggregator evaluates per Polars query. Aggregating
+# every dimension in one query is what OOM-kills a full-size AGGREGATE_EMBEDDINGS
+# or AGGREGATE_HALF task: peak memory scales with chunk_size x n_variant_labels,
+# and for the reference-based aggregators (KS/AUROC and the two *negLogP
+# variants) with the cross-joined control pool on top of that.
+#
+# THIS VALUE IS SIZED TO THE MEMORY ONE TASK IS GRANTED, not to the embedding
+# dimensionality. fisseq-data-pipeline measured the reference-based aggregators
+# at roughly 3 GB (AUROC) to 4.5 GB (KS, the worst) per feature in the chunk at
+# production shape, giving:
+#
+#     chunk_size ~= (memory_per_task_GB - 1) / 4.5
+#
+#   16 GB/task -> 4      64 GB/task -> 14
+#   32 GB/task -> 8     128 GB/task -> 32   <- the default below
+#
+# mean/median are not the constraint at any chunk size in this range. Runtime is
+# dominated by the NUMBER of chunks rather than their width, so raising this only
+# helps until memory runs out; if KS/AUROC tasks come back killed (exit 137),
+# halve it first. A run using only mean/median can raise it freely.
+#
+# It is a pure memory dial: the output is identical at every value, which
+# tests/unit/test_aggregate.py asserts directly. null disables chunking entirely
+# (every dimension in one query) -- an escape hatch for small inputs, not a
+# setting for a full-size batch. Shared by both tracks (AGGREGATE_EMBEDDINGS,
+# AGGREGATE_CP_FEATURES, AGGREGATE_HALF, AGGREGATE_PASSTHROUGH) for the same
+# reason: it is about the task's memory, not the feature space.
+aggregate_feature_chunk_size: 32
+
+# ── Passthrough aggregates (AGGREGATE_PASSTHROUGH, cellDINO track only) ──────
+# Methods that are computed and reported per variant but kept out of
+# reproducibility filtering entirely: no bootstrap halves, no correlation, no
+# blocklist -- and, critically, out of the cross-experiment median and the PCA.
+#
+# Intended for the p-value statistics (KSnegLogP, AUROCnegLogP), which are wanted
+# in the output but are not reproducibility statistics: a median-correlation
+# threshold is not a meaningful test for a p-value, and blocking a dimension's
+# p-value while keeping its statistic would make the output incoherent.
+#
+# Must not overlap aggregate_methods (validate_config rejects that up front);
+# [] = none, the default.
+#
+# Passthrough columns land ONLY in
+# feature_select_batchwise/<batch>/aggregate_with_passthrough.parquet, never in
+# filtered_aggregate.parquet. That file split is what keeps them out of PCA --
+# GLOBAL_VARIANT_EMBEDDINGS re-reads its input from disk and picks feature
+# columns with FEATURE_SELECTOR (exclude meta_*), which would happily match a
+# stat-suffixed emb_0000_KSnegLogP. aggregate_with_passthrough.parquet is
+# terminal: nothing in-pipeline reads it, and any future stage that does must not
+# assume FEATURE_SELECTOR over IT yields reproducibility-filtered features.
+aggregate_methods_passthrough: []
+
+# ── Reproducibility filtering (cellDINO track only) ──────────────────────────
+# GENERATE_SPLIT -> AGGREGATE_HALF -> CORRELATE_FEATURES -> BLOCKLIST ->
+# COMBINE_BLOCKLISTS -> FILTER_AGGREGATE, sitting between AGGREGATE_EMBEDDINGS'
+# aggregate.parquet and GLOBAL_VARIANT_EMBEDDINGS. A dimension is reproducible
+# if the variant-to-variant pattern it reports from one random half of an
+# experiment's cells is the pattern it reports from the other half.
+#
+# Deliberately NOT applied to the CellProfiler track: its columns are
+# hand-engineered and already curated, and the two tracks' aggregates are meant
+# to stay directly comparable to the published CellProfiler analysis.
+#
+# Number of pseudo-replicate splits per experiment. Each one is a fresh
+# stratified 50/50 split at random_seed + rep, and BLOCKLIST takes the MEDIAN
+# correlation across them, so one pathological split cannot condemn or rescue a
+# dimension. Must be >= 2. The cost is linear: reps x 2 x len(aggregate_methods)
+# AGGREGATE_HALF jobs per experiment.
+reproducibility_bootstrap_reps: 10
+# Minimum median Pearson r (across replicates) for a dimension to be kept.
+reproducibility_min_correlation: 0.5
+# GLOBAL_BLOCKLIST's cross-experiment vote: the minimum number of experiments
+# that must mark a dimension reproducible in their own blocklist for it to be
+# globally reproducible. null = it must be ok in every experiment that reported
+# on it. Lower it to tolerate one bad experiment without losing a dimension
+# everywhere.
+reproducibility_global_min_batches_ok: null
+
 # ── Aggregation (AGGREGATE_CP_FEATURES) ──────────────────────────────────────
 # Same choices as aggregate_methods above, applied to the CellProfiler-
 # feature track. Stays median-only by default -- CellProfiler features are

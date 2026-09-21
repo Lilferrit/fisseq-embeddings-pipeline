@@ -16,6 +16,13 @@ nav:
       - Filter Embeddings (FILTER_EMBEDDINGS): cli/filter.md
       - Aggregation (AGGREGATE_EMBEDDINGS): cli/aggregate.md
       - OVWT Distinguish-ability (OVWT_BATCHWISE): cli/ovwt.md
+      - "Pseudo-Replicate Split (GENERATE_SPLIT)": cli/generatesplit.md
+      - "Half / Passthrough Aggregation (AGGREGATE_HALF)": cli/aggregate_half.md
+      - "Half Correlation (CORRELATE_FEATURES)": cli/correlatefeatures.md
+      - "Reproducibility Blocklist (BLOCKLIST)": cli/blocklist.md
+      - "Combine Blocklists (COMBINE_BLOCKLISTS)": cli/combineblocklists.md
+      - "Filtered Aggregates (FILTER_AGGREGATE)": cli/filter_aggregate.md
+      - "Global Blocklist (GLOBAL_BLOCKLIST)": cli/global_blocklist.md
       - Global Variant Embeddings: cli/global_embeddings.md
       - Global Variant Distinguish-ability: cli/global_distinguishability.md
       - "CellProfiler Feature Dataset (BUILD_CP_FEATURES)": cli/cp_features.md
@@ -34,6 +41,13 @@ nav:
       - filter: api/filter.md
       - aggregate: api/aggregate.md
       - ovwt: api/ovwt.md
+      - generatesplit: api/generatesplit.md
+      - aggregate_half: api/aggregate_half.md
+      - correlatefeatures: api/correlatefeatures.md
+      - blocklist: api/blocklist.md
+      - combineblocklists: api/combineblocklists.md
+      - filter_aggregate: api/filter_aggregate.md
+      - global_blocklist: api/global_blocklist.md
       - global_embeddings: api/global_embeddings.md
       - global_distinguishability: api/global_distinguishability.md
       - cp_features: api/cp_features.md
