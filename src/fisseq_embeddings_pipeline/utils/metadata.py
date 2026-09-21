@@ -1,10 +1,18 @@
 """Per-variant metadata aggregation helpers.
 
-Vendored unchanged from fisseq-data-pipeline's
+Vendored from fisseq-data-pipeline's
 src/fisseq_data_pipeline/utils/metadata.py. Defines
 :func:`get_aggregate_meta_data`, used by AGGREGATE_EMBEDDINGS to attach
 per-variant cell counts and barcode/batch frequency summaries to its
 output.
+
+One divergence from the vendored source: the ``*_counts`` list columns are
+sorted. ``value_counts()`` returns its entries in an order Polars does not
+define, so two runs over identical input produced identical numbers in a
+different order -- which made aggregate.parquet non-byte-reproducible.
+That was harmless while nothing compared two runs; it stops being harmless
+once the reproducibility-filtering chain exists and a rerun at the same
+random_seed is expected to yield the same blocklist.
 """
 
 import logging
@@ -26,7 +34,9 @@ def get_aggregate_meta_data(lf: pl.LazyFrame, label_col: str) -> pl.LazyFrame:
     Always produces ``meta_num_cells`` (row count per label group). For each
     of ``meta_barcode`` and ``meta_batch``, produces two additional columns:
     ``{col}_num_unique`` (distinct value count per group) and ``{col}_counts``
-    (per-value frequencies as a list of structs ``{col: str, count: u32}``).
+    (per-value frequencies as a list of structs ``{col: str, count: u32}``,
+    sorted by value so the output is byte-reproducible -- see this module's
+    docstring).
     A warning is logged for any of these columns that is absent from the input;
     the column pair is silently omitted from the result.
 
@@ -67,4 +77,14 @@ def get_aggregate_meta_data(lf: pl.LazyFrame, label_col: str) -> pl.LazyFrame:
             ]
         )
 
-    return label_lgb.agg(agg_exprs)
+    counts_cols = [
+        f"{col}_counts" for col in [META_BARCODE_COL, META_BATCH_COL] if col in cols
+    ]
+    # Sorted after the aggregation, not inside it: within .agg() the
+    # value_counts() expression is still a Struct per row, and only the
+    # aggregated column is a list. .list.sort() orders the structs by their
+    # first field -- the barcode/batch value itself. See the module docstring
+    # for why value_counts()' own order is not relied on.
+    return label_lgb.agg(agg_exprs).with_columns(
+        [pl.col(c).list.sort() for c in counts_cols]
+    )

@@ -21,11 +21,25 @@ from fisseq_embeddings_pipeline.config.experiments import (
 
 
 def _config(**overrides):
-    """A minimal valid config, with one single-key experiment."""
+    """A minimal valid config, with one single-key experiment.
+
+    Carries the aggregation/reproducibility keys too. They have defaults in
+    params.yaml rather than being required-with-no-default like
+    pipeline_dir, but validate_config still insists on them being present:
+    a config without them is a config params.yaml was never loaded into,
+    and every rule in the reproducibility chain interpolates them straight
+    into a shell command or an output path.
+    """
     config = {
         "pipeline_dir": "/data/run1",
         "cell_dino_checkpoint": "/weights/ckpt.pth",
         "experiments": [{"batch_stem": "expt1", "starcall_workflow_dir": "/data/e1"}],
+        "aggregate_methods": ["median", "KS", "AUROC"],
+        "aggregate_methods_cp_features": ["median"],
+        "aggregate_methods_passthrough": [],
+        "reproducibility_bootstrap_reps": 10,
+        "reproducibility_min_correlation": 0.5,
+        "reproducibility_global_min_batches_ok": None,
     }
     config.update(overrides)
     return config
@@ -44,6 +58,86 @@ def test_returned_entries_are_copies():
     returned = validate_config(config)
     returned[0]["batch_stem"] = "mutated"
     assert config["experiments"][0]["batch_stem"] == "expt1"
+
+
+# ── validate_config: aggregation methods ───────────────────────────────────
+
+
+def test_unknown_aggregate_method_raises():
+    with pytest.raises(ValueError, match="aggregate_methods has unrecognized"):
+        validate_config(_config(aggregate_methods=["median", "nonsense"]))
+
+
+def test_unknown_passthrough_method_raises():
+    with pytest.raises(
+        ValueError, match="aggregate_methods_passthrough has unrecognized"
+    ):
+        validate_config(_config(aggregate_methods_passthrough=["nope"]))
+
+
+def test_passthrough_overlapping_aggregate_methods_raises():
+    """A method is either reproducibility-filtered or passed through. Both
+    would mean blocklisting a column and then re-attaching an unfiltered
+    copy of it under the same name."""
+    with pytest.raises(ValueError, match="overlaps aggregate_methods"):
+        validate_config(
+            _config(
+                aggregate_methods=["median", "KS"],
+                aggregate_methods_passthrough=["KS"],
+            )
+        )
+
+
+def test_duplicate_aggregate_method_raises():
+    with pytest.raises(ValueError, match="has duplicate entry"):
+        validate_config(_config(aggregate_methods=["median", "median"]))
+
+
+def test_empty_aggregate_methods_raises():
+    with pytest.raises(ValueError, match="at least one aggregator"):
+        validate_config(_config(aggregate_methods=[]))
+
+
+def test_valid_passthrough_selection_is_accepted():
+    validate_config(
+        _config(
+            aggregate_methods=["median", "KS"],
+            aggregate_methods_passthrough=["KSnegLogP", "AUROCnegLogP"],
+        )
+    )
+
+
+# ── validate_config: reproducibility knobs ─────────────────────────────────
+
+
+@pytest.mark.parametrize("reps", [1, 0, -1, None, "ten", True])
+def test_bootstrap_reps_below_two_raises(reps):
+    """BLOCKLIST medians across replicates -- one replicate is not a
+    reproducibility test, it is a single coin flip."""
+    with pytest.raises(ValueError, match="reproducibility_bootstrap_reps"):
+        validate_config(_config(reproducibility_bootstrap_reps=reps))
+
+
+@pytest.mark.parametrize("r", [1.5, -2, "x", None])
+def test_out_of_range_min_correlation_raises(r):
+    with pytest.raises(ValueError, match="reproducibility_min_correlation"):
+        validate_config(_config(reproducibility_min_correlation=r))
+
+
+@pytest.mark.parametrize("r", [-1.0, 0.0, 0.5, 1.0])
+def test_in_range_min_correlation_is_accepted(r):
+    validate_config(_config(reproducibility_min_correlation=r))
+
+
+@pytest.mark.parametrize("n", [0, -1, "two"])
+def test_invalid_global_min_batches_ok_raises(n):
+    with pytest.raises(ValueError, match="reproducibility_global_min_batches_ok"):
+        validate_config(_config(reproducibility_global_min_batches_ok=n))
+
+
+def test_null_global_min_batches_ok_is_accepted():
+    """null means unanimity -- the default."""
+    validate_config(_config(reproducibility_global_min_batches_ok=None))
 
 
 def test_missing_pipeline_dir_raises():

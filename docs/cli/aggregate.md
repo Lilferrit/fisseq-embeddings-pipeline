@@ -49,13 +49,46 @@ Extends the [common config fields](#common-config-fields) below.
 | `normalizer_file` | **required** | Path to `FILTER_EMBEDDINGS`' `normalizer.parquet`. |
 | `label_column` | `"meta_aa_changes"` | Name of the variant label column. |
 | `aggregators` | `["median", "KS", "AUROC"]` | One or more of `"mean"`, `"median"`, `"KS"`, `"AUROC"`, `"KSnegLogP"`, `"AUROCnegLogP"`. |
+| `feature_chunk_size` | `32` | Embedding dimensions evaluated per Polars query. A memory dial only -- identical output at every value. `null` disables chunking. See below. |
+
+## Column batching (`feature_chunk_size`)
+
+Each aggregator evaluates `feature_chunk_size` dimensions per Polars query,
+projecting the input down to the label column, the control flag and that
+chunk's dimensions *before* grouping. That projection is the point: it lets
+the Parquet scan read only those columns and keeps both the grouped list
+columns and the reference-based aggregators' cross-joined control pool
+proportional to the chunk width rather than to the total dimension count.
+The per-chunk results -- one row per variant, a few hundred columns -- are
+joined back together on the label.
+
+It is a **pure memory dial**: the output is identical at every chunk size,
+which `tests/unit/test_aggregate.py` asserts directly across every
+aggregator. Runtime is dominated by the *number* of chunks rather than their
+width, so raising it only helps until memory runs out.
+
+Peak memory scales with `chunk_size x n_variant_labels`, and for the
+reference-based aggregators with the control pool on top. Size it to the
+memory one task is granted -- roughly
+`chunk_size ~= (memory_per_task_GB - 1) / 4.5` -- and see
+[`params.yaml`](../configuration.md)'s own `aggregate_feature_chunk_size`
+comment for the measured per-aggregator costs behind that rule. If `KS`/`AUROC`
+tasks come back OOM-killed, halve it first.
 
 ## Output file
 
-`aggregate.parquet` -- one row per non-control variant. With
+`aggregate.parquet` -- one row per non-control variant, **sorted by
+`label_column`** (Polars' `group_by` and joins are not order-preserving under
+multithreaded execution, so without the sort the same input would produce the
+same numbers in a different order run to run). With
 `aggregators=["median"]`: `emb_0000..emb_{D-1}` (variant-level,
 median-pooled and synonymous-corrected) plus `meta_num_cells`,
 `meta_barcode_num_unique`, etc.
+
+This file is **not** the final per-experiment feature table. It carries every
+dimension, reproducible or not; the reproducibility verdict is applied
+downstream by [FILTER_AGGREGATE](filter_aggregate.md), which writes
+`filtered_aggregate.parquet`. See [Architecture](../architecture.md).
 
 ## Example
 

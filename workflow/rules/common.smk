@@ -43,10 +43,34 @@ STARCALL_OVERRIDES_DIR = str(
 # is actually in play.
 apply_container_env(config, EXPERIMENTS)
 
+# The reproducibility-filtering fan-out (cellDINO track only): one split per
+# bootstrap replicate, two halves per split, one aggregation method per half.
+# See docs/architecture.md and params.yaml's own comments.
+REPS = list(range(1, int(config["reproducibility_bootstrap_reps"]) + 1))
+HALVES = [1, 2]
+AGG_METHODS = list(config["aggregate_methods"])
+PASSTHROUGH_METHODS = list(config["aggregate_methods_passthrough"] or [])
+
+# Bare emb_0000 columns only when aggregate_methods is EXACTLY ["median"] --
+# aggregate_embeddings' own rule. AGGREGATE_HALF runs one method per job and so
+# cannot work this out for itself, but its column names have to match
+# aggregate.parquet's exactly or FILTER_AGGREGATE's blocklist finds nothing to
+# drop. Hence deciding it here, from the whole list, and passing it in.
+BARE_COLUMNS = str(AGG_METHODS == ["median"]).lower()
+
 # Only ever a known batch_stem -- stops a wildcard from matching across a
-# '/' and silently inventing a rule match for a path we never meant.
+# '/' and silently inventing a rule match for a path we never meant. Same
+# reasoning for method: constrained to the methods this run actually asked
+# for, so a stray path can't conjure an AGGREGATE_HALF job for one it didn't.
 wildcard_constraints:
     batch="|".join(re.escape(b) for b in BATCHES) if BATCHES else "^$",
+    rep=r"\d+",
+    half="[12]",
+    method=(
+        "|".join(re.escape(m) for m in sorted(set(AGG_METHODS) | set(PASSTHROUGH_METHODS)))
+        if (AGG_METHODS or PASSTHROUGH_METHODS)
+        else "^$"
+    ),
 
 
 # Replaces scratch/nextflow.config's `beforeScript`, which exported these

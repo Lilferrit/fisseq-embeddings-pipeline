@@ -19,14 +19,14 @@ available as an explicit opt-in via ``aggregators``.
 import dataclasses
 import logging
 import pathlib
-from typing import List
+from typing import List, Optional
 
 import hydra
 import polars as pl
 from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, DictConfig, OmegaConf
 
-from .aggregate import aggregate_embeddings
+from .aggregate import DEFAULT_FEATURE_CHUNK_SIZE, aggregate_embeddings
 from .config import AppConfig
 from .filter import load_filtered_embeddings
 from .utils.constants import FEATURE_SELECTOR
@@ -63,6 +63,12 @@ class AggregateCpFeaturesConfig(AppConfig):
         :func:`~fisseq_embeddings_pipeline.aggregate.aggregate_embeddings`).
         Contrast AGGREGATE_EMBEDDINGS' ``AggregateEmbeddingsConfig.aggregators``,
         whose default is ``["median", "KS", "AUROC"]``.
+    feature_chunk_size : int or None
+        Feature columns evaluated per Polars query -- a memory dial only,
+        identical output at every value (see
+        :data:`~fisseq_embeddings_pipeline.aggregate.DEFAULT_FEATURE_CHUNK_SIZE`).
+        Shared with AGGREGATE_EMBEDDINGS rather than track-specific: it is
+        sized to the memory one task is granted, not to the feature space.
     """
 
     cp_features_file: str = MISSING
@@ -70,6 +76,7 @@ class AggregateCpFeaturesConfig(AppConfig):
     normalizer_file: str = MISSING
     label_column: str = "meta_aa_changes"
     aggregators: List[str] = dataclasses.field(default_factory=lambda: ["median"])
+    feature_chunk_size: Optional[int] = DEFAULT_FEATURE_CHUNK_SIZE
 
 
 _cs = ConfigStore.instance()
@@ -130,12 +137,17 @@ def main(cfg: DictConfig) -> None:
     logging.info("Reconstructing QC-passed, synonymous-corrected features")
     filtered_lf = load_filtered_embeddings(cp_features_lf, filtered_keys_lf, normalizer)
 
-    logging.info("Aggregating via %s", agg_cfg.aggregators)
+    logging.info(
+        "Aggregating via %s (feature_chunk_size=%s)",
+        agg_cfg.aggregators,
+        agg_cfg.feature_chunk_size,
+    )
     agg_df = aggregate_embeddings(
         filtered_lf,
         agg_cfg.label_column,
         agg_cfg.aggregators,
         feature_selector=FEATURE_SELECTOR,
+        feature_chunk_size=agg_cfg.feature_chunk_size,
     )
 
     out_path = output_dir / f"{prefix}aggregate.parquet"

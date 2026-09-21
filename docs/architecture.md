@@ -25,9 +25,20 @@ Batch Aggregates And Variant Scores          (per experiment, runs independently
                                                           │                          Corrected)
                                                           ▼                                ▼
                                               Experiment N Aggregates          Experiment N Distinguish-
-                                                                                ability Scores
+                                                          │                     ability Scores
+                                                          │
+Reproducibility Filtering                    (per experiment; cellDINO track only)
+  Filter Embeddings ─► Pseudo-Replicate Split (x reps) ─► Half Aggregation (x 2 halves x methods)
+                            └─► Half Correlation ─► Blocklist (median r) ─► Combine Blocklists
+                                                                                 │
+  Experiment N Aggregates ──────────────────────────────────────────────────────┤
+  Passthrough Aggregation (methods kept out of filtering) ──────────────────────┤
+                                                                                 ▼
+                                             Experiment N Filtered Aggregates + Passthrough View
 
 Global Variant Embeddings                    (once, across all experiments)
+  Experiment {1..N} Blocklists ─► Cross-experiment vote ─► Global Blocklist ─┐
+                                                                              ▼
   Experiment {1..N} Aggregates ─► Variant-wise median pooling ─► PCA ─► Global Variant Embeddings
 
 Global Variant Distinguish-ability Scores    (once, across all experiments)
@@ -87,6 +98,13 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
 | Filter Embeddings | `FILTER_EMBEDDINGS` (adapted) | `normalize.py`'s `Normalizer`, retargeted to a synonymous control query -- publishes a join key + fitted stats, not a normalized copy of the embeddings |
 | Aggregation (Synonymous STD Corrected) | `AGGREGATE_EMBEDDINGS` (adapted) | `aggregate.py`'s aggregator classes + `get_aggregate_meta_data` |
 | OVWT Distinguish-ability Scores (Synonymous STD Corrected) | `OVWT_BATCHWISE` (adapted) | `ovwt.py` + `utils/xgbparams.py`, training/eval primitives reused per-fold under a *k*-fold CV loop |
+| Pseudo-Replicate Split | `GENERATE_SPLIT` (adapted) | `generatesplit.py`, retargeted from a positional row index to the `JOIN_KEYS` composite cell key -- see decision 22 |
+| Half Aggregation / Passthrough Aggregation | `AGGREGATE_HALF` / `AGGREGATE_PASSTHROUGH` (adapted) | `aggregatefeaturetype.py` -- one module, two rules, exactly as that repo includes one Nextflow process under two aliases |
+| Half Correlation | `CORRELATE_FEATURES` (adapted) | `correlatefeatures.py`'s `compute_feature_correlations`, plus a NaN->null normalization -- see decision 22 |
+| Blocklist | `BLOCKLIST` (vendored, ~unchanged) | `blocklist.py` |
+| Combine Blocklists | `COMBINE_BLOCKLISTS` (vendored, ~unchanged) | `combineblocklists.py` |
+| Filtered Aggregates | `FILTER_AGGREGATE` (adapted) | the blocklist-drop and passthrough-join halves of `featureselect.py`; its pycytominer variance/correlation filtering is deliberately not ported -- see decision 22 |
+| Cross-experiment blocklist vote | `GLOBAL_BLOCKLIST` (adapted) | `globalfeatureselect.py`'s `combine_batch_blocklists` |
 | Variant-wise median pooling (embeddings branch) | `GLOBAL_VARIANT_EMBEDDINGS` -- median step | `globalfeatureselect.py`'s `median_across_batches` |
 | PCA | `GLOBAL_VARIANT_EMBEDDINGS` -- PCA step | `utils/dimreduction.py`'s `compute_pca` |
 | Variant-wise median pooling (scores branch) | `GLOBAL_VARIANT_DISTINGUISHABILITY` | per-experiment synonymous z-score then a `median_across_batches`-style pool, adapted for two scalar (AUROC) columns instead of a feature matrix |
@@ -356,6 +374,99 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
     snakemake and import the `ops` stack, and snakemake never containerizes
     a `run:` body. See [Snakemake Workflow](snakemake.md#running-starcalls-rules-as-their-own-cluster-jobs).
 
+21. **Per-dimension reproducibility filtering is back, for the cellDINO
+    track only, as its own chain of stages between the aggregates and the
+    filtered aggregates.** This reverses an earlier decision. `aggregate.py`
+    was originally adapted without `fisseq-data-pipeline`'s bootstrap
+    feature-selection machinery, on the theory that per-feature
+    reproducibility "doesn't obviously translate to dense,
+    non-interpretable embedding dimensions the way it does to named
+    morphological features". Analysis since showed it matters: filtering on
+    reproducibility materially improves the embeddings PCA consumes.
+
+    The chain mirrors the sibling repo's, including its fan-out --
+    `GENERATE_SPLIT` per bootstrap replicate, `AGGREGATE_HALF` per
+    (replicate, half, method), `CORRELATE_FEATURES` per (replicate, method),
+    then `BLOCKLIST` per method as the single synchronization point across
+    replicates, `COMBINE_BLOCKLISTS` per experiment, and `FILTER_AGGREGATE`.
+    A dimension is kept when the variant-to-variant pattern it reports from
+    one random half of an experiment's cells is the pattern it reports from
+    the other half, at median Pearson *r* >=
+    `reproducibility_min_correlation` across replicates.
+
+    One method per `AGGREGATE_HALF` job is what keeps the reference-based
+    aggregators' peak memory bounded -- together with **column batching**
+    (`aggregate_feature_chunk_size`), ported from the sibling's
+    `aggregate.py` at the same time and for the same reason. Chunking is a
+    pure memory dial with no effect on the numbers, and it applies to both
+    tracks since it is sized to a task's memory rather than to the feature
+    space.
+
+    **The CellProfiler track is deliberately excluded.** Its columns are
+    hand-engineered and already curated, and the two tracks' aggregates are
+    meant to stay directly comparable to the published CellProfiler
+    analysis. `aggregate_cp_features.py` gains the chunking knob and nothing
+    else.
+
+    The sibling's pycytominer step (variance threshold, its own static
+    blocklist, correlation-threshold redundancy removal) is **not** ported.
+    Those filters are written for named morphological features; the
+    reproducibility verdict is the only selection this pipeline applies.
+
+22. **Three deliberate divergences from the sibling's implementation of
+    that chain**, each forced by something structural about this pipeline:
+
+    - **Split files name cells by `JOIN_KEYS`, not by row index.** The
+      sibling's `GENERATE_SPLIT` writes positional row indices, which is
+      safe there because both it and `AGGREGATE_HALF` read the same
+      already-materialized normalized parquet in the same order. This
+      pipeline never materializes a normalized cell-level table (decision
+      10) -- both stages reconstruct it via `load_filtered_embeddings`,
+      i.e. through a join, whose row order Polars does not guarantee to be
+      stable across two processes. The composite cell key is
+      order-independent by construction, and `GENERATE_SPLIT` can then read
+      `filtered_keys.parquet` alone rather than the full embeddings.
+
+    - **Passthrough aggregates live in a separate output file, not just a
+      later join.** The sibling keeps passthrough columns out of selection
+      and PCA by joining them last, within one process. That is not enough
+      here: `GLOBAL_VARIANT_EMBEDDINGS` is a *separate* stage that re-reads
+      its input from disk and selects features with `FEATURE_SELECTOR`
+      (exclude `meta_*`), which happily matches a stat-suffixed
+      `emb_0000_KSnegLogP`. So `FILTER_AGGREGATE` writes two files:
+      `filtered_aggregate.parquet` (PCA's input, no passthrough) and the
+      terminal `aggregate_with_passthrough.parquet`. A passthrough column
+      that never enters the first cannot leak into the PCA however a future
+      consumer uses the selector.
+
+    - **`GLOBAL_VARIANT_EMBEDDINGS` reads the *unfiltered* per-experiment
+      aggregates and applies the global blocklist itself.** Reading the
+      per-experiment `filtered_aggregate.parquet` instead would let
+      `median_across_batches`' column intersection silently reduce every
+      setting to "reproducible in every experiment", making
+      `reproducibility_global_min_batches_ok` inert. This is the same split
+      the sibling makes between its batchwise `FINALIZE_FEATURE_SELECT` and
+      its `GLOBAL_FEATURE_SELECT`.
+
+    A fourth, smaller one: `CORRELATE_FEATURES` normalizes a NaN
+    correlation (a dimension constant in one half) to null, where the
+    sibling passes NaN through. NaN would propagate through `BLOCKLIST`'s
+    median and condemn a dimension on the strength of one degenerate
+    replicate; null is skipped by `median`, so the dimension is judged on
+    the replicates that produced a number.
+
+23. **`aggregate.parquet` is sorted by the label column, and
+    `get_aggregate_meta_data`'s `*_counts` lists are sorted by value.**
+    Polars' `group_by`, its joins, and `value_counts` are all free to
+    return rows in an implementation-defined order under multithreaded
+    execution, so two runs over identical input produced identical numbers
+    in a different order. That was harmless while nothing compared two
+    runs; it stops being harmless once a rerun at the same `random_seed` is
+    expected to reproduce the same blocklist. Both sorts are cheap (one row
+    per variant) and make every published per-experiment table
+    byte-reproducible. This is a divergence from `utils/metadata.py`'s
+    otherwise-unchanged vendored source.
+
 ## Repository layout
 
 ```text
@@ -405,6 +516,14 @@ fisseq-embeddings-pipeline/
     filter.py                     # FILTER_EMBEDDINGS
     aggregate.py                  # AGGREGATE_EMBEDDINGS
     ovwt.py                       # OVWT_BATCHWISE
+    generatesplit.py              # GENERATE_SPLIT            \
+    aggregate_half.py             # AGGREGATE_HALF /           |
+                                  #   AGGREGATE_PASSTHROUGH    | reproducibility
+    correlatefeatures.py          # CORRELATE_FEATURES         > filtering
+    blocklist.py                  # BLOCKLIST                  | (cellDINO only)
+    combineblocklists.py          # COMBINE_BLOCKLISTS         |
+    filter_aggregate.py           # FILTER_AGGREGATE          /
+    global_blocklist.py           # GLOBAL_BLOCKLIST
     global_embeddings.py          # GLOBAL_VARIANT_EMBEDDINGS
     global_distinguishability.py  # GLOBAL_VARIANT_DISTINGUISHABILITY
     cp_features.py                     # BUILD_CP_FEATURES
@@ -418,6 +537,7 @@ fisseq-embeddings-pipeline/
       constants.py                # vendored
       variant.py                  # vendored (classify_variant)
       batches.py                  # vendored (load_batches)
+      splits.py                   # split files, keyed on JOIN_KEYS (decision 22)
       xgbparams.py                # vendored, one retargeted seed field
       dimreduction.py             # vendored (compute_pca), + random_state passthrough
       globalfeatureselect.py      # vendored (median_across_batches only)
@@ -712,10 +832,17 @@ dense embedding dimensions, far more columns than named CellProfiler
 features. Two properties to keep in mind when reading the output: no
 multiple-testing correction is applied (these are raw per-(variant,
 dimension) p-values), and precision degrades near `p = 1`. `MAD`, `std`,
-`signedKS` and `QQ` remain unported; the WT-null bootstrap those
-aggregators feed in the sibling repo has no counterpart here, so the
-sibling's `null_statistic_transform` opt-outs on the two p-value classes
-were dropped rather than ported.
+`signedKS` and `QQ` remain unported.
+
+The sibling's WT-null bootstrap -- the `null_statistic_transform` /
+`null_comparison_statistic` machinery those aggregators feed -- is still
+unported, and its opt-outs on the two p-value classes were dropped rather
+than ported. That is a separate mechanism from **reproducibility
+filtering**, which this pipeline now does have: see decision 22. The two
+p-value aggregators are the intended occupants of
+`params.aggregate_methods_passthrough`, precisely because a
+median-correlation reproducibility threshold is not a meaningful test for
+a p-value.
 
 ### 6. Configurable input channels and per-channel masking
 

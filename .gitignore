@@ -45,3 +45,8 @@ scratch/*
 # somewhere to put it.
 testing_data/*
 !testing_data/README.md
+
+# Hydra CLI runs default to ./outputs/<date>/<time>/ when a stage is invoked
+# by hand without output_dir pointing elsewhere. Never a pipeline result --
+# every rule passes an explicit output_dir under pipeline_dir.
+outputs/

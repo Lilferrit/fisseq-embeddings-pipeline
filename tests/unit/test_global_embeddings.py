@@ -523,3 +523,71 @@ def test_global_variant_embeddings_config_has_no_n_components_field() -> None:
     """Revision, per request: no n_components config knob."""
     field_names = {f.name for f in dataclasses.fields(GlobalVariantEmbeddingsConfig)}
     assert "n_components" not in field_names
+
+
+# ---------------------------------------------------------------------------
+# blocklist_file -- the global reproducibility verdict, applied before pooling
+# ---------------------------------------------------------------------------
+
+
+def _blocklist(ok: dict[str, bool]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "feature": list(ok),
+            "n_batches": [2] * len(ok),
+            "n_ok": [2 if v else 0 for v in ok.values()],
+            "feature_ok": list(ok.values()),
+        }
+    )
+
+
+def _two_batches() -> list[pl.LazyFrame]:
+    labels = ["A1B", "C2D", "E3F", "WT"]
+    rng = np.random.default_rng(0)
+    return [
+        _batch_aggregate(labels, rng.normal(size=(4, 3)).tolist()) for _ in range(2)
+    ]
+
+
+def test_blocklist_drops_non_reproducible_dimensions_before_pooling() -> None:
+    median_df, *_ = global_variant_embeddings(
+        _two_batches(),
+        ["e1", "e2"],
+        LABEL_COLUMN,
+        random_seed=0,
+        blocklist_df=_blocklist(
+            {"emb_0000": True, "emb_0001": False, "emb_0002": True}
+        ),
+    )
+    assert "emb_0001" not in median_df.columns
+    assert "emb_0000" in median_df.columns
+
+
+def test_blocked_dimensions_do_not_reach_the_pca() -> None:
+    """The point of applying the blocklist here rather than leaving it to
+    the per-experiment filtered aggregates: a non-reproducible dimension
+    must not contribute a loading to any principal component."""
+    _, _, components_df, _, _ = global_variant_embeddings(
+        _two_batches(),
+        ["e1", "e2"],
+        LABEL_COLUMN,
+        random_seed=0,
+        blocklist_df=_blocklist(
+            {"emb_0000": True, "emb_0001": False, "emb_0002": True}
+        ),
+    )
+    assert "emb_0001" not in components_df.columns
+
+
+def test_no_blocklist_keeps_every_dimension() -> None:
+    """None is what GLOBAL_VARIANT_CP_FEATURES passes -- the CellProfiler
+    track gets no reproducibility filtering."""
+    median_df, *_ = global_variant_embeddings(
+        _two_batches(), ["e1", "e2"], LABEL_COLUMN, random_seed=0
+    )
+    assert {"emb_0000", "emb_0001", "emb_0002"} <= set(median_df.columns)
+
+
+def test_blocklist_file_defaults_to_none() -> None:
+    cfg = GlobalVariantEmbeddingsConfig(input_files=["x"], batch_stems=["e1"])
+    assert cfg.blocklist_file is None

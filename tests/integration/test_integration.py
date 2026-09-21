@@ -419,6 +419,15 @@ def _write_synthetic_experiment(
     params["window"] = _WINDOW
     params["cellprofiler_pipeline"] = _CELLPROFILER_PIPELINE
     params["snakemake_cores"] = 1
+    # Two bootstrap replicates rather than params.yaml's production 10: the
+    # fan-out is reps x 2 halves x len(aggregate_methods) jobs per
+    # experiment, and 2 is the minimum that still exercises BLOCKLIST's
+    # median-across-replicates (validate_config rejects 1).
+    params["reproducibility_bootstrap_reps"] = 2
+    # Exercise the passthrough path for real: KSnegLogP must reach
+    # aggregate_with_passthrough.parquet and must NOT reach
+    # filtered_aggregate.parquet or the PCA.
+    params["aggregate_methods_passthrough"] = ["KSnegLogP"]
     params["experiments"] = [{"batch_stem": "batch1", **batch_config}]
     with open(exp_dir / "params.yaml", "w") as f:
         yaml.safe_dump(params, f)
@@ -880,6 +889,147 @@ def test_aggregate_and_ovwt_outputs_exist(pipeline_outputs):
     assert {"auroc_pooled", "auroc_median_barcode"}.issubset(results.columns)
 
 
+# ---------------------------------------------------------------------------
+# Reproducibility filtering + passthrough aggregates (cellDINO track)
+# ---------------------------------------------------------------------------
+
+
+def test_reproducibility_chain_outputs_exist(pipeline_outputs):
+    """Every stage of GENERATE_SPLIT -> ... -> FILTER_AGGREGATE produced its
+    file, at the fan-out the rules declare (2 replicates x 2 halves x the
+    three default aggregate_methods)."""
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    for rep in (1, 2):
+        assert (base / "splits" / f"rep{rep}" / "half1.parquet").exists()
+        assert (base / "splits" / f"rep{rep}" / "half2.parquet").exists()
+        for half in (1, 2):
+            for method in ("median", "KS", "AUROC"):
+                assert (
+                    base
+                    / "half_aggregates"
+                    / f"rep{rep}"
+                    / f"half{half}"
+                    / f"{method}.parquet"
+                ).exists()
+        for method in ("median", "KS", "AUROC"):
+            assert (base / "correlations" / f"rep{rep}" / f"{method}.parquet").exists()
+
+    for method in ("median", "KS", "AUROC"):
+        assert (base / "blocklists" / f"{method}.parquet").exists()
+    assert (base / "blocklist.parquet").exists()
+    assert (base / "filtered_aggregate.parquet").exists()
+    assert (base / "aggregate_with_passthrough.parquet").exists()
+    assert (exp_dir / "global" / "embeddings" / "blocklist.parquet").exists()
+
+
+def test_halves_partition_the_qc_passed_cells(pipeline_outputs):
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+    keys = pl.read_parquet(
+        exp_dir / "filter_embeddings" / "batch1" / "filtered_keys.parquet"
+    ).select(JOIN_KEYS)
+
+    half1 = pl.read_parquet(base / "splits" / "rep1" / "half1.parquet")
+    half2 = pl.read_parquet(base / "splits" / "rep1" / "half2.parquet")
+
+    assert half1.height + half2.height == keys.height
+    assert half1.join(half2, on=JOIN_KEYS, how="inner").height == 0
+
+
+def test_blocklist_covers_every_aggregate_column(pipeline_outputs):
+    """The blocklist keys features by column name, so its coverage of
+    aggregate.parquet's feature columns is what makes FILTER_AGGREGATE's
+    drop meaningful. A mismatch here (bare vs suffixed names, say) would
+    silently filter nothing at all."""
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    agg = pl.read_parquet(base / "aggregate.parquet")
+    blocklist = pl.read_parquet(base / "blocklist.parquet")
+
+    feature_cols = {c for c in agg.columns if not c.startswith("meta_")}
+    assert feature_cols == set(blocklist["feature"].to_list())
+
+
+def test_filtered_aggregate_is_a_column_subset_of_aggregate(pipeline_outputs):
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    agg = pl.read_parquet(base / "aggregate.parquet")
+    filtered = pl.read_parquet(base / "filtered_aggregate.parquet")
+
+    assert set(filtered.columns) <= set(agg.columns)
+    assert filtered.height == agg.height
+    # Metadata is never filtered -- only feature columns carry a verdict.
+    assert {c for c in agg.columns if c.startswith("meta_")} <= set(filtered.columns)
+
+
+def test_passthrough_columns_reach_only_the_terminal_file(pipeline_outputs):
+    """aggregate_methods_passthrough is ["KSnegLogP"] in this fixture. Those
+    columns belong in the per-experiment deliverable and nowhere else --
+    above all not in the PCA, which is what the filtered/with-passthrough
+    file split exists to guarantee across a process boundary."""
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    with_pt = pl.read_parquet(base / "aggregate_with_passthrough.parquet")
+    filtered = pl.read_parquet(base / "filtered_aggregate.parquet")
+    components = pl.read_parquet(
+        exp_dir / "global" / "embeddings" / "pca_components.parquet"
+    )
+
+    assert any(c.endswith("_KSnegLogP") for c in with_pt.columns)
+    assert not any(c.endswith("_KSnegLogP") for c in filtered.columns)
+    assert not any(c.endswith("_KSnegLogP") for c in components.columns)
+
+
+def test_passthrough_methods_are_not_blocklisted(pipeline_outputs):
+    """A passthrough method never goes through the bootstrap halves, so it
+    has no reproducibility verdict at all -- that is the entire point of
+    the second list."""
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    blocklist = pl.read_parquet(base / "blocklist.parquet")
+    assert not any(f.endswith("_KSnegLogP") for f in blocklist["feature"].to_list())
+    assert not (base / "blocklists" / "KSnegLogP.parquet").exists()
+
+
+def test_global_blocklist_is_the_cross_experiment_vote(pipeline_outputs):
+    """One experiment here, so the vote is trivial -- but the schema and the
+    unanimity arithmetic are what GLOBAL_VARIANT_EMBEDDINGS consumes."""
+    exp_dir, _ = pipeline_outputs
+
+    batch_bl = pl.read_parquet(
+        exp_dir / "feature_select_batchwise" / "batch1" / "blocklist.parquet"
+    )
+    global_bl = pl.read_parquet(exp_dir / "global" / "embeddings" / "blocklist.parquet")
+
+    assert set(global_bl.columns) == {"feature", "n_batches", "n_ok", "feature_ok"}
+    assert set(global_bl["feature"].to_list()) == set(batch_bl["feature"].to_list())
+    assert global_bl["n_batches"].to_list() == [1] * global_bl.height
+    assert global_bl["feature_ok"].to_list() == (
+        batch_bl.sort("feature")["feature_ok"].to_list()
+    )
+
+
+def test_pca_sees_only_globally_reproducible_dimensions(pipeline_outputs):
+    """GLOBAL_VARIANT_EMBEDDINGS reads the unfiltered aggregates and applies
+    the global verdict itself -- so no blocked dimension may appear as a
+    principal component loading."""
+    exp_dir, _ = pipeline_outputs
+
+    global_bl = pl.read_parquet(exp_dir / "global" / "embeddings" / "blocklist.parquet")
+    components = pl.read_parquet(
+        exp_dir / "global" / "embeddings" / "pca_components.parquet"
+    )
+
+    blocked = set(global_bl.filter(~pl.col("feature_ok"))["feature"].to_list())
+    assert blocked.isdisjoint(set(components.columns))
+
+
 def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
     """grid_size can be omitted from an experiment entry entirely -- proves
     auto-detection works through the real Snakemake/Hydra override
@@ -1103,16 +1253,24 @@ def reproducibility_outputs(tmp_path_factory):
     checkpoint_path = tmp_path_factory.mktemp("weights_repro") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
 
-    ovwt_results = []
+    runs = []
     for i in range(2):
         exp_dir = tmp_path_factory.mktemp(f"nf_repro_{i}")
         _write_synthetic_experiment(exp_dir)
         result = _run_snakemake(exp_dir, checkpoint_path)
         assert result.returncode == 0, result.stderr
-        ovwt_results.append(
-            pl.read_parquet(exp_dir / "ovwt_batchwise" / "batch1" / "results.parquet")
+        base = exp_dir / "feature_select_batchwise" / "batch1"
+        runs.append(
+            {
+                "ovwt": pl.read_parquet(
+                    exp_dir / "ovwt_batchwise" / "batch1" / "results.parquet"
+                ),
+                "blocklist": pl.read_parquet(base / "blocklist.parquet"),
+                "aggregate": pl.read_parquet(base / "aggregate.parquet"),
+                "filtered": pl.read_parquet(base / "filtered_aggregate.parquet"),
+            }
         )
-    return ovwt_results
+    return runs
 
 
 def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs):
@@ -1122,7 +1280,7 @@ def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs
     the actual numeric scores must match, since it's the numbers
     (auroc_pooled/auroc_median_barcode) downstream analyses actually
     compare across pipeline versions/reruns."""
-    first, second = reproducibility_outputs
+    first, second = (r["ovwt"] for r in reproducibility_outputs)
     first = first.sort("meta_aa_changes")
     second = second.sort("meta_aa_changes")
 
@@ -1133,6 +1291,36 @@ def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs
         np.testing.assert_allclose(
             first[col].to_numpy(), second[col].to_numpy(), err_msg=col
         )
+
+
+def test_rerunning_with_same_seed_reproduces_the_blocklist(reproducibility_outputs):
+    """The reproducibility chain is itself reproducible. Each replicate's
+    50/50 split is drawn at random_seed + bootstrap_idx, so two independent
+    from-scratch runs at the same seed must reach the same verdict -- the
+    same median r per dimension, not merely the same set of dimensions.
+
+    This is the assertion that would catch the split silently depending on
+    row order, or an unsorted group_by leaking into a correlation."""
+    first, second = (r["blocklist"] for r in reproducibility_outputs)
+    first = first.sort("feature")
+    second = second.sort("feature")
+
+    assert first["feature"].to_list() == second["feature"].to_list()
+    assert first["feature_ok"].to_list() == second["feature_ok"].to_list()
+    np.testing.assert_allclose(
+        first["median_r"].to_numpy(), second["median_r"].to_numpy()
+    )
+
+
+def test_rerunning_reproduces_aggregate_row_order(reproducibility_outputs):
+    """aggregate.parquet and filtered_aggregate.parquet are byte-stable
+    across runs, row order included. Polars' group_by and joins are not
+    order-preserving under multithreaded execution, so this only holds
+    because aggregate_embeddings sorts -- without which the blocklist above
+    would still match while the published files quietly differed."""
+    for key in ("aggregate", "filtered"):
+        first, second = (r[key] for r in reproducibility_outputs)
+        assert first.equals(second), key
 
 
 # ===========================================================================

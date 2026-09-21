@@ -103,6 +103,11 @@ collection loop, so it simply isn't wired up per-experiment (see
 | `filter_label_column` | `"meta_aa_changes"` | `QC_FILTER`, `FILTER_EMBEDDINGS`, `AGGREGATE_EMBEDDINGS`, `OVWT_BATCHWISE`, both global stages, and their CellProfiler-track counterparts |
 | `aggregate_methods` | `["median", "KS", "AUROC"]` | `AGGREGATE_EMBEDDINGS` |
 | `aggregate_methods_cp_features` | `["median"]` | `AGGREGATE_CP_FEATURES` |
+| `aggregate_feature_chunk_size` | `32` | `AGGREGATE_EMBEDDINGS`, `AGGREGATE_CP_FEATURES`, `AGGREGATE_HALF`, `AGGREGATE_PASSTHROUGH` |
+| `aggregate_methods_passthrough` | `[]` | `AGGREGATE_PASSTHROUGH`, `FILTER_AGGREGATE` |
+| `reproducibility_bootstrap_reps` | `10` | `GENERATE_SPLIT`, and the fan-out of every stage downstream of it |
+| `reproducibility_min_correlation` | `0.5` | `BLOCKLIST` |
+| `reproducibility_global_min_batches_ok` | `null` | `GLOBAL_BLOCKLIST` |
 | `ovwt_wt_label` | `"WT"` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
 | `ovwt_n_folds` | `5` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
 | `ovwt_calibrate` | `true` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
@@ -119,7 +124,40 @@ its own override. `aggregate_methods` defaults to `["median", "KS",
 (`emb_0000_median`, `emb_0000_KS`, `emb_0000_AUROC`, ...); the
 CellProfiler-feature track's own `aggregate_methods_cp_features` stays
 `["median"]`, so `AGGREGATE_CP_FEATURES`' default output columns remain
-bare. The two `*_cumulative_variance_explained` params each have their own
+bare.
+
+### Reproducibility filtering and passthrough aggregates
+
+The four `reproducibility_*` / `aggregate_methods_passthrough` params drive
+the cellDINO track's reproducibility-filtering chain (`GENERATE_SPLIT`
+through `FILTER_AGGREGATE`, plus `GLOBAL_BLOCKLIST`) -- see
+[Architecture](architecture.md) decision 21. The CellProfiler track is
+deliberately not filtered, so it has no `_cp_features` counterparts for any
+of them.
+
+`reproducibility_bootstrap_reps` must be at least 2 (`BLOCKLIST` medians
+across replicates, so one replicate is a single coin flip, not a test) and
+sets the fan-out directly: per experiment, it produces `reps`
+`GENERATE_SPLIT` jobs, `reps x 2 x len(aggregate_methods)` `AGGREGATE_HALF`
+jobs, and `reps x len(aggregate_methods)` `CORRELATE_FEATURES` jobs.
+
+`aggregate_methods_passthrough` must not overlap `aggregate_methods` --
+`validate_config` rejects that at parse time, before a single job is
+submitted, because both lists are interpolated into rule shell commands and
+output paths. Its intended occupants are `KSnegLogP`/`AUROCnegLogP`:
+statistics wanted in the output that must not influence which dimensions
+are kept. Passthrough columns reach only
+`feature_select_batchwise/<batch>/aggregate_with_passthrough.parquet`, never
+`filtered_aggregate.parquet` or the PCA -- see
+[FILTER_AGGREGATE](cli/filter_aggregate.md).
+
+`aggregate_feature_chunk_size` is the one knob here shared with the
+CellProfiler track, because it is sized to the memory one task is granted
+rather than to the feature space. It is a pure memory dial -- identical
+output at every value -- and `params.yaml`'s own comment carries the
+measured per-aggregator sizing rule.
+
+The two `*_cumulative_variance_explained` params each have their own
 CellProfiler-track counterpart above; `ovwt_*`, by contrast, is genuinely
 shared between both tracks' OVWT stages (scoring methodology, not tied to
 feature type) -- see [Snakemake Workflow](snakemake.md#cellprofiler-feature-track).

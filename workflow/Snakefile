@@ -43,6 +43,15 @@ rule all:
     input:
         "global/embeddings/pca_reduced.parquet",
         "global/distinguishability/global_scores.parquet",
+        # The reproducibility chain's per-experiment terminal deliverable.
+        # Requested explicitly because nothing downstream reads it --
+        # global_variant_embeddings consumes the unfiltered aggregate plus
+        # the global blocklist (see global_stages.smk) -- so without this it
+        # would never be built.
+        expand(
+            "feature_select_batchwise/{batch}/aggregate_with_passthrough.parquet",
+            batch=BATCHES,
+        ),
         (
             [
                 "global/cp_features/pca_reduced.parquet",

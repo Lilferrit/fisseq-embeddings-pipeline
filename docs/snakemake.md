@@ -91,6 +91,37 @@ BUILD_DATASET ──► EMBED_CELLS
         ▼                              ▼
 AGGREGATE_EMBEDDINGS            OVWT_BATCHWISE
         │                              │
+        │  (reproducibility filtering, cellDINO track only)
+        │                              │
+        │   FILTER_EMBEDDINGS          │
+        │        │                     │
+        │        ▼                     │
+        │   GENERATE_SPLIT        (x reps)
+        │        │                     │
+        │        ▼                     │
+        │   AGGREGATE_HALF   (x reps x 2 halves x methods)
+        │        │                     │
+        │        ▼                     │
+        │   CORRELATE_FEATURES    (x reps x methods)
+        │        │                     │
+        │        ▼                     │
+        │   BLOCKLIST             (x methods; gathers all reps)
+        │        │                     │
+        │        ▼                     │
+        │   COMBINE_BLOCKLISTS         │
+        │        │                     │
+        └────────┤                     │
+                 │   AGGREGATE_PASSTHROUGH (x passthrough methods)
+                 │        │            │
+                 ▼        ▼            │
+            FILTER_AGGREGATE           │
+      (filtered_aggregate.parquet +    │
+       aggregate_with_passthrough)     │
+                                       │
+        │        │                     │
+        │        ▼ (collected)         │
+        │   GLOBAL_BLOCKLIST           │
+        │        │                     │
         ▼ (collected, all experiments) ▼ (collected, all experiments)
 GLOBAL_VARIANT_EMBEDDINGS   GLOBAL_VARIANT_DISTINGUISHABILITY
 ```
@@ -120,6 +151,38 @@ the other two are informational QC-report files). Both
 (`embeddings.parquet`, `filtered_keys.parquet`, `normalizer.parquet`) and
 reconstruct the QC-passed, synonymous-corrected embedding table themselves
 via `load_filtered_embeddings()` -- neither reads a pre-normalized file.
+
+### Reproducibility filtering
+
+`GENERATE_SPLIT` through `FILTER_AGGREGATE` sit between
+`AGGREGATE_EMBEDDINGS`' `aggregate.parquet` and the global stages, on the
+cellDINO track only -- see [Architecture](architecture.md) decision 21 for
+what they compute and why. Three things about the *wiring* are worth
+knowing:
+
+- **The fan-out is set by config, at parse time.** `common.smk` derives
+  `REPS`, `AGG_METHODS` and `PASSTHROUGH_METHODS` from
+  `reproducibility_bootstrap_reps`, `aggregate_methods` and
+  `aggregate_methods_passthrough`, and constrains the `rep`/`half`/`method`
+  wildcards to them -- so a stray path cannot conjure a job for a method
+  this run never asked for. `validate_config` has already rejected an
+  unknown or overlapping method name by then, because both lists are
+  interpolated straight into rule shell commands and output paths.
+
+- **`BLOCKLIST` is the one gather across replicates.** Every other rule in
+  the chain fans out per replicate; `BLOCKLIST` takes `expand(...)` over
+  every `rep` for its one method, then hands the module a glob over the
+  same paths.
+
+- **`GLOBAL_VARIANT_EMBEDDINGS` takes the *unfiltered* aggregates** plus
+  `global/embeddings/blocklist.parquet`, not the per-experiment
+  `filtered_aggregate.parquet`. `median_across_batches` intersects feature
+  columns across experiments, so consuming the filtered files would make
+  `reproducibility_global_min_batches_ok` inert.
+
+`aggregate_with_passthrough.parquet` is terminal -- nothing downstream reads
+it -- so `rule all` requests it explicitly per experiment. Without that it
+would never be built.
 
 The two global stages collect one output file *per experiment* into a
 single job. `expand()` gives them real, distinct paths, which each stage
@@ -418,9 +481,9 @@ track rather than one file per rule:
 | File | Rules |
 |---|---|
 | `cell_images.smk` | `build_cell_images`, `build_cell_metadata`, `qc_filter` |
-| `embeddings.smk` | `build_dataset`, `embed_cells`, `filter_embeddings`, `aggregate_embeddings`, `ovwt_batchwise` |
+| `embeddings.smk` | `build_dataset`, `embed_cells`, `filter_embeddings`, `aggregate_embeddings`, `ovwt_batchwise`, plus the reproducibility chain: `generate_split`, `aggregate_half`, `aggregate_passthrough`, `correlate_features`, `blocklist`, `combine_blocklists`, `filter_aggregate` |
 | `cp_features.smk` | the five CellProfiler-track rules |
-| `global_stages.smk` | the four cross-experiment rules |
+| `global_stages.smk` | the five cross-experiment rules (`global_blocklist` + the four pooling stages) |
 
 `common.smk` holds the parse-time setup they share: validation, the
 per-experiment plan, the container bind environment, and the small helpers
@@ -499,13 +562,22 @@ sending them there is what keeps them out of the published
     filtered_keys.parquet                 # QC-passed join key + meta_is_control -- no emb_* columns
     normalizer.parquet                    # fitted synonymous z-score stats
   feature_select_batchwise/<batch>/
-    aggregate.parquet                     # Experiment N Aggregates
+    aggregate.parquet                     # Experiment N Aggregates -- EVERY dimension, unfiltered
+    splits/rep<N>/half{1,2}.parquet       # JOIN_KEYS rows only; which cells are in which half
+    half_aggregates/rep<N>/half<H>/<method>.parquet   # lean: label + that method's stat columns
+    correlations/rep<N>/<method>.parquet  # feature, r, r_squared
+    blocklists/<method>.parquet           # feature, median_r, feature_ok -- per method
+    blocklist.parquet                     # the per-method blocklists concatenated
+    passthrough_aggregates/<method>.parquet           # one per aggregate_methods_passthrough entry
+    filtered_aggregate.parquet            # blocklist applied -- GLOBAL_VARIANT_EMBEDDINGS' per-experiment view
+    aggregate_with_passthrough.parquet    # + passthrough columns; TERMINAL, nothing in-pipeline reads it
   ovwt_batchwise/<batch>/
     results.parquet                       # auroc_pooled, auroc_median_barcode
     cell_scores.parquet                   # per-cell out-of-fold scores, one row per cell per variant scored against
     models.pkl                            # dict[variant] -> list[(model, calibrator)], one pair per CV fold
   global/
     embeddings/
+      blocklist.parquet                   # cross-experiment vote: feature, n_batches, n_ok, feature_ok
       median_aggregate.parquet            # cross-experiment median, pre-PCA
       pca_scores.parquet                  # full retained rank
       pca_components.parquet              # loadings only

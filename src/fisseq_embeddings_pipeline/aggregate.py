@@ -4,13 +4,32 @@ Adapted from fisseq-data-pipeline's aggregate.py, generalized to support any
 combination of mean, median, KS, AUROC, KSnegLogP and AUROCnegLogP
 aggregation -- mirroring fisseq-data-pipeline's BaseAggregator/
 ReferenceBasedAggregator class hierarchy (vendored here, trimmed down: no
-per_barcode, no block_list, no WT-null-bootstrap
-null_statistic_transform/null_comparison_statistic machinery --
-per-dimension reproducibility filtering doesn't obviously translate to
-dense, non-interpretable embedding dimensions the way it does to named
-morphological features, and MAD/std/signedKS/QQ aren't needed here; add
-another BaseAggregator subclass + a _AGGREGATORS entry if one of those is
-ever needed later).
+per_barcode, no WT-null-bootstrap
+null_statistic_transform/null_comparison_statistic machinery, and
+MAD/std/signedKS/QQ aren't needed here; add another BaseAggregator
+subclass + a _AGGREGATORS entry if one of those is ever needed later).
+
+Per-dimension **reproducibility filtering** is no longer absent from this
+pipeline -- it was originally dropped here on the theory that it doesn't
+translate to dense, non-interpretable embedding dimensions the way it does
+to named morphological features, and analysis has since shown otherwise.
+It does not live in this module, though: it is the separate bootstrap
+chain GENERATE_SPLIT -> AGGREGATE_HALF -> CORRELATE_FEATURES -> BLOCKLIST
+-> COMBINE_BLOCKLISTS -> FILTER_AGGREGATE that sits between this stage's
+``aggregate.parquet`` and GLOBAL_VARIANT_EMBEDDINGS, exactly as it does in
+fisseq-data-pipeline. This module's only part in it is
+:func:`aggregate_embeddings`' ``include_metadata=False`` lean mode (what
+AGGREGATE_HALF aggregates each pseudo-replicate half with) and the column
+batching below. See docs/architecture.md and docs/cli/filter_aggregate.md.
+
+**Column batching** (``feature_chunk_size``, ported from
+fisseq-data-pipeline's aggregate.py) is what makes the per-half
+aggregation affordable: peak memory scales with ``chunk_size x n_labels``
+(times the cross-joined control pool, for the reference-based
+aggregators), so aggregating every dimension in one Polars query is what
+OOM-kills a full-size batch. It is a pure memory dial -- the output is
+identical at every chunk size, which tests/unit/test_aggregate.py asserts
+directly. ``params.aggregate_feature_chunk_size`` is the knob.
 
 The two ``*negLogP`` aggregators report ``-log10(p)`` for the same KS and
 AUROC statistics their parent classes compute -- evidence strength rather
@@ -72,14 +91,37 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
 from .filter import load_filtered_embeddings
-from .utils.constants import CONTROL_COLUMN, EMBEDDING_SELECTOR
+from .utils.constants import CONTROL_COLUMN, CONTROL_COLUMN_NAME, EMBEDDING_SELECTOR
 from .utils.log import setup_logging
 from .utils.metadata import get_aggregate_meta_data
 from .utils.normalizer import Normalizer
 
+#: Number of embedding dimensions aggregated per Polars query when no explicit
+#: ``feature_chunk_size`` is given. Aggregating every dimension in one query is
+#: what OOM-kills a full-size AGGREGATE_HALF/AGGREGATE_EMBEDDINGS task: peak
+#: memory scales with ``chunk_size x n_variant_labels``, and for the
+#: reference-based aggregators (KS/AUROC and their two ``*negLogP`` variants)
+#: with the cross-joined control pool on top of that.
+#:
+#: Sized to the memory ONE task is granted. fisseq-data-pipeline measured the
+#: reference-based aggregators at roughly 3 GB (AUROC) to 4.5 GB (KS, the
+#: worst) per feature in the chunk at production shape, giving
+#:
+#:     chunk_size ~= (memory_per_task_GB - 1) / 4.5
+#:
+#:   16 GB/task -> 4      64 GB/task -> 14
+#:   32 GB/task -> 8     128 GB/task -> 32   <- the default here
+#:
+#: mean/median are not the constraint at any chunk size in this range. Runtime
+#: is dominated by the number of chunks, not the chunk width, so raising this
+#: only helps until memory runs out. ``None`` disables chunking entirely (every
+#: dimension in one query) -- an escape hatch for small inputs, not a setting
+#: for a full-size batch.
+DEFAULT_FEATURE_CHUNK_SIZE: int = 32
+
 
 class BaseAggregator(abc.ABC):
-    """
+    r"""
     Base class for all aggregators.
 
     Subclasses declare :attr:`_stat_suffix` (e.g. ``"_mean"``, ``"_KS"``)
@@ -116,9 +158,30 @@ class BaseAggregator(abc.ABC):
         self,
         label_col: str = "meta_aa_changes",
         feature_selector: pl.Expr = EMBEDDING_SELECTOR,
+        feature_chunk_size: Optional[int] = DEFAULT_FEATURE_CHUNK_SIZE,
     ) -> None:
+        if feature_chunk_size is not None and feature_chunk_size < 1:
+            raise ValueError(
+                f"feature_chunk_size must be >= 1 or None, got {feature_chunk_size}"
+            )
         self.label_col = label_col
         self.feature_selector = feature_selector
+        self.feature_chunk_size = feature_chunk_size
+
+    def _feature_chunks(self, feature_cols: list[str]) -> list[list[str]]:
+        """
+        Split ``feature_cols`` into :attr:`feature_chunk_size`-wide chunks.
+
+        A :attr:`feature_chunk_size` of ``None`` yields one chunk holding
+        every dimension. An empty ``feature_cols`` still yields one (empty)
+        chunk rather than no chunks at all -- :meth:`aggregate` must emit its
+        one-row-per-label frame either way.
+        """
+        size = self.feature_chunk_size
+        if size is None:
+            return [feature_cols]
+        chunks = [feature_cols[i : i + size] for i in range(0, len(feature_cols), size)]
+        return chunks or [[]]
 
     def _feature_columns(self, lf: pl.LazyFrame) -> list[str]:
         return lf.select(self.feature_selector).collect_schema().names()
@@ -194,6 +257,16 @@ class BaseAggregator(abc.ABC):
         """
         Compute per-label statistics for every embedding dimension.
 
+        Dimensions are processed :attr:`feature_chunk_size` at a time. Each
+        chunk projects ``lf`` down to the label column, the control flag and
+        that chunk's dimensions *before* grouping -- that projection is the
+        whole point, since it lets the Parquet scan read only those columns
+        and keeps both the grouped list columns and the cross-joined
+        reference pool proportional to the chunk width rather than to the
+        total dimension count. The per-chunk results (one row per label, a
+        few hundred columns each) are joined back together on the label,
+        which costs nothing next to the grouped cell-level data.
+
         Parameters
         ----------
         lf : pl.LazyFrame
@@ -204,19 +277,46 @@ class BaseAggregator(abc.ABC):
         Returns
         -------
         pl.LazyFrame
-            One row per non-control variant group with computed statistics.
+            One row per non-control variant group with computed statistics,
+            sorted by the label column.
         """
         feature_cols = self._feature_columns(lf)
+        chunks = self._feature_chunks(feature_cols)
         logging.info(
-            "%s: %d embedding dimension(s) to aggregate",
+            "%s: %d embedding dimension(s) to aggregate in %d chunk(s) of <=%s",
             type(self).__name__,
             len(feature_cols),
+            len(chunks),
+            self.feature_chunk_size if self.feature_chunk_size is not None else "all",
         )
-        reference_lf = self._reference_lf(lf, feature_cols)
-        exprs = [self._feature_expr(f) for f in feature_cols]
-        return self._native_aggregate_feature_batch(
-            lf, feature_cols, exprs, reference_lf
-        )
+
+        meta_cols = [self.label_col, CONTROL_COLUMN_NAME]
+        result: Optional[pl.DataFrame] = None
+        for chunk_idx, chunk in enumerate(chunks, start=1):
+            logging.debug(
+                "%s: chunk %d/%d (%d dimension(s))",
+                type(self).__name__,
+                chunk_idx,
+                len(chunks),
+                len(chunk),
+            )
+            sub = lf.select(meta_cols + chunk)
+            reference_lf = self._reference_lf(sub, chunk)
+            exprs = [self._feature_expr(f) for f in chunk]
+            part = self._native_aggregate_feature_batch(
+                sub, chunk, exprs, reference_lf
+            ).collect()
+            result = (
+                part
+                if result is None
+                else result.join(part, on=self.label_col, how="left")
+            )
+
+        # Required, not cosmetic: group_by is not order-preserving under
+        # Polars' multithreaded execution, so without this the row order
+        # (and therefore every downstream file) varies run to run.
+        assert result is not None  # _feature_chunks never returns []
+        return result.sort(self.label_col).lazy()
 
     @abc.abstractmethod
     def _feature_expr(self, feat: str) -> pl.Expr:
@@ -741,6 +841,9 @@ def aggregate_embeddings(
     label_column: str,
     aggregators: Sequence[str] = ("median",),
     feature_selector: pl.Expr = EMBEDDING_SELECTOR,
+    feature_chunk_size: Optional[int] = DEFAULT_FEATURE_CHUNK_SIZE,
+    include_metadata: bool = True,
+    bare_median: bool = True,
 ) -> pl.DataFrame:
     """
     Aggregate synonymous-corrected embeddings per variant via one or more methods.
@@ -773,11 +876,34 @@ def aggregate_embeddings(
         aggregator. Defaults to ``EMBEDDING_SELECTOR``; pass
         ``FEATURE_SELECTOR`` for CellProfiler-shaped columns (see this
         module's docstring).
+    feature_chunk_size : int or None
+        Number of feature columns each aggregator evaluates per Polars
+        query -- a pure memory dial with no effect on the output. ``None``
+        disables chunking (every dimension in one query). Defaults to
+        :data:`DEFAULT_FEATURE_CHUNK_SIZE`.
+    include_metadata : bool
+        When ``True`` (the default), join in
+        :func:`~fisseq_embeddings_pipeline.utils.metadata.get_aggregate_meta_data`'s
+        ``meta_num_cells``/``meta_barcode_num_unique``/... columns. When
+        ``False``, return the lean ``[label_column] + stat columns`` frame
+        only -- what AGGREGATE_HALF and AGGREGATE_PASSTHROUGH want, since
+        those feed a per-column correlation or a join and would otherwise
+        each carry a redundant (and, for the halves, *wrong*) copy of the
+        per-variant cell counts.
+    bare_median : bool
+        Whether the exact selection ``("median",)`` strips its ``_median``
+        suffix, leaving bare ``emb_0000..emb_{D-1}`` columns. ``True`` (the
+        default) is AGGREGATE_EMBEDDINGS' long-standing behaviour. Pass the
+        run's own setting through from AGGREGATE_HALF/AGGREGATE_PASSTHROUGH
+        so a single-method job's column names match whatever the run's full
+        ``aggregate_methods`` produced -- the blocklist keys features by
+        column name, so the two must agree exactly.
 
     Returns
     -------
     pl.DataFrame
-        One row per non-control variant group. If ``aggregators`` is
+        One row per non-control variant group, sorted by ``label_column``.
+        If ``aggregators`` is
         exactly ``("median",)``, embedding columns are bare
         ``emb_0000..emb_{D-1}``; otherwise each is suffixed by its
         aggregator's ``_stat_suffix`` (e.g. ``emb_0000_mean``,
@@ -808,7 +934,9 @@ def aggregate_embeddings(
     result_lf: Optional[pl.LazyFrame] = None
     for name in aggregators:
         agg_lf = _AGGREGATORS[name](
-            label_col=label_column, feature_selector=feature_selector
+            label_col=label_column,
+            feature_selector=feature_selector,
+            feature_chunk_size=feature_chunk_size,
         ).aggregate(filtered_lf)
         result_lf = (
             agg_lf
@@ -816,15 +944,25 @@ def aggregate_embeddings(
             else result_lf.join(agg_lf, on=label_column, how="inner")
         )
 
-    if aggregators == ("median",):
+    if bare_median and aggregators == ("median",):
         suffix = MedianAggregator._stat_suffix
         schema_names = result_lf.collect_schema().names()
         rename_map = {c: c[: -len(suffix)] for c in schema_names if c.endswith(suffix)}
         result_lf = result_lf.rename(rename_map)
 
+    # Sorted, not merely collected. Each aggregator's own output is already
+    # sorted (BaseAggregator.aggregate), but a join is not order-preserving
+    # under Polars' multithreaded execution, so the multi-method join above
+    # and the metadata join below can both reshuffle rows. Without this the
+    # same input produces the same numbers in a different order run to run,
+    # which makes aggregate.parquet non-byte-reproducible and defeats
+    # `--rerun-triggers`-style change detection downstream.
+    if not include_metadata:
+        return result_lf.sort(label_column).collect()
+
     meta_lf = get_aggregate_meta_data(filtered_lf, label_column)
     result_lf = result_lf.join(meta_lf, on=label_column, how="inner")
-    return result_lf.collect()
+    return result_lf.sort(label_column).collect()
 
 
 @dataclasses.dataclass
@@ -860,6 +998,11 @@ class AggregateEmbeddingsConfig(AppConfig):
         columns (see :func:`aggregate_embeddings`). Contrast
         AGGREGATE_CP_FEATURES' ``AggregateCpFeaturesConfig.aggregators``,
         whose default stays ``["median"]``.
+    feature_chunk_size : int or None
+        Embedding dimensions evaluated per Polars query -- a memory dial
+        only, identical output at every value. Lower it if the task is
+        OOM-killed; ``None`` disables chunking. Defaults to
+        :data:`DEFAULT_FEATURE_CHUNK_SIZE`.
     """
 
     embeddings_file: str = MISSING
@@ -869,6 +1012,7 @@ class AggregateEmbeddingsConfig(AppConfig):
     aggregators: List[str] = dataclasses.field(
         default_factory=lambda: ["median", "KS", "AUROC"]
     )
+    feature_chunk_size: Optional[int] = DEFAULT_FEATURE_CHUNK_SIZE
 
 
 _cs = ConfigStore.instance()
@@ -925,9 +1069,16 @@ def main(cfg: DictConfig) -> None:
     logging.info("Reconstructing QC-passed, synonymous-corrected embeddings")
     filtered_lf = load_filtered_embeddings(embeddings_lf, filtered_keys_lf, normalizer)
 
-    logging.info("Aggregating via %s", agg_cfg.aggregators)
+    logging.info(
+        "Aggregating via %s (feature_chunk_size=%s)",
+        agg_cfg.aggregators,
+        agg_cfg.feature_chunk_size,
+    )
     agg_df = aggregate_embeddings(
-        filtered_lf, agg_cfg.label_column, agg_cfg.aggregators
+        filtered_lf,
+        agg_cfg.label_column,
+        agg_cfg.aggregators,
+        feature_chunk_size=agg_cfg.feature_chunk_size,
     )
 
     out_path = output_dir / f"{prefix}aggregate.parquet"
