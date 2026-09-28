@@ -13,24 +13,20 @@ rule build_cell_images:
 
     1. `build_cell_images_enumerate` resolves phenotyping_dir/
        segmentation_dir/sequencing_dir (writing resolved_dirs.env), resolves
-       each well's grid size, enumerates existing tiles, and writes
-       targets.txt / tiles_manifest.csv / symlinks.txt.
-    2. One `snakemake <targets>` against the REAL, unredirected data dirs
-       (so starcall's own mtime caching reuses whatever is already
-       computed), then a collection loop over symlinks.txt.
+       each well's grid size, enumerates tiles, and writes targets.txt /
+       tiles_manifest.csv.
+    2. One `snakemake <targets>` against starcall-workflow's own,
+       unmodified Snakefile and the REAL, unredirected data dirs (so
+       starcall's own mtime caching reuses whatever is already computed).
     3. `build_cell_images_table` joins the per-tile CSVs into the one
-       self-sufficient cell_table.parquet everything downstream reads.
+       self-sufficient cell_table.parquet everything downstream reads,
+       plus tiles.parquet naming each tile's whole-tile image and mask.
 
-    Phase 1's four scratch files go to a SEPARATE declared directory rather
+    Phase 1's scratch files go to a SEPARATE declared directory rather
     than into cell_images/{batch}/, which would otherwise publish
     targets.txt and friends into the output tree. Their config fields are
     joined with pathlib's `/`, so an absolute value overrides output_dir.
 
-    `directory()` outputs, not the stable file alone: a rerun then always
-    starts from an empty directory (Snakemake rmtree's a directory output
-    before the job runs), so a shrinking input can't leave stale per-tile
-    trees behind for the next stage's glob to pick up. In symlink mode that
-    rmtree removes symlinks only, never their targets under phenotyping_dir.
     The trailing `test -s` turns "wrote nothing" into a non-zero exit, which
     is what makes Snakemake discard the incomplete directory.
     """
@@ -40,13 +36,8 @@ rule build_cell_images:
     params:
         overrides=lambda wc: cell_images_args(wc.batch),
         starcall_dir=lambda wc: BY_STEM[wc.batch]["starcall_workflow_dir"],
-        # Was publishDir's `mode:`; now just which command the collection
-        # loop runs. -L so a hard copy dereferences starcall's own symlinks
-        # rather than copying a dangling link.
-        collect="cp -L" if config["cell_images_hard_copy"] else "ln -s",
         cache_dir=config.get("snakemake_cache_dir")
         or f"{PIPELINE_DIR}/.snakemake_cache",
-        overrides_dir=STARCALL_OVERRIDES_DIR,
         # --use-conda shells out to a bare `conda` whatever snakemake_bin's
         # own absolute path is, and conda's base env is deliberately kept off
         # the image's PATH -- so scope it on for this one invocation only.
@@ -72,9 +63,8 @@ rule build_cell_images:
         THREAD_ENV
         + r"""
         mkdir -p {output.images} {output.scratch}
-        # Absolute for two reasons: the collection loop below cds into the
-        # images directory, and phase 3 joins `manifest` onto its own
-        # output_dir with pathlib, where only an absolute value overrides.
+        # Absolute because phase 3 joins `manifest` onto its own output_dir
+        # with pathlib, where only an absolute value overrides.
         SCRATCH="$(cd {output.scratch} && pwd)"
 
         # Snakemake's SourceCache mkdir's $XDG_CACHE_HOME/snakemake (falling
@@ -110,7 +100,7 @@ rule build_cell_images:
         # otherwise keeps consuming tokens past its key=value entries -- from
         # swallowing the target paths as bogus config entries.
         {params.conda_prefix}{params.snakemake_bin} \
-            --snakefile "{params.overrides_dir}/wrapper.smk" \
+            --snakefile "{params.starcall_dir}/workflow/Snakefile" \
             --directory "{params.starcall_dir}" \
             {params.cluster_args} \
             --cores {params.cores} \
@@ -119,19 +109,8 @@ rule build_cell_images:
             --config phenotyping_dir="$phenotyping_dir/" \
                      segmentation_dir="$segmentation_dir/" \
                      sequencing_dir="$sequencing_dir/" \
-                     starcall_workflow_dir="{params.starcall_dir}" \
             -- \
             $(cat "$SCRATCH/targets.txt")
-
-        # Collect just the two per-tile crop-stack files into this
-        # experiment's output directory, preserving the
-        # {{well}}_grid{{N}}/tile{{x}}x{{y}}y/ substructure. The CSVs are read
-        # by phase 3 straight from their real locations.
-        ( cd {output.images} && \
-          while IFS=$'\t' read -r rel_path abs_path; do
-              mkdir -p "$(dirname "$rel_path")"
-              {params.collect} "$abs_path" "$rel_path"
-          done < "$SCRATCH/symlinks.txt" )
 
         python -m fisseq_embeddings_pipeline.build_cell_images_table \
             output_dir={output.images} \

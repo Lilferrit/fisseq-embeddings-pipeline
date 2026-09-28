@@ -201,7 +201,6 @@ def test_dataset_overrides_drops_starcall_and_non_stage_keys():
     entry = {
         "batch_stem": "expt1",
         "cp_features": True,
-        "cell_images_hard_copy": True,
         "starcall_workflow_dir": "/data/e1",
         "wells": ["w1"],
         "shard_maxcount": 500,
@@ -213,12 +212,23 @@ def test_dataset_overrides_drops_starcall_and_non_stage_keys():
     }
 
 
-def test_cp_features_overrides_matches_dataset_minus_window_fallback():
+def test_cp_features_overrides_matches_dataset_minus_window():
     entry = {"batch_stem": "expt1", "barcode_col_name": "bc"}
     config = {"window": 224}
     assert cp_features_overrides(entry, config) == {"barcode_col_name": "bc"}
     # window IS filled for BUILD_DATASET, but CpFeaturesConfig has no such field
     assert dataset_overrides(entry, config) == {"barcode_col_name": "bc", "window": 224}
+    # ...even when the entry sets its own.
+    entry["window"] = 180
+    assert "window" not in cp_features_overrides(entry, config)
+
+
+def test_window_routes_to_dataset_not_cell_images():
+    """BUILD_DATASET does the cropping now; BUILD_CELL_IMAGES only asks
+    starcall for whole-tile outputs and has no window field."""
+    entry = {"batch_stem": "expt1", "window": 180}
+    assert "window" not in cell_images_overrides(entry, {"window": 224})
+    assert dataset_overrides(entry, {"window": 224})["window"] == 180
 
 
 # ── global fallbacks ───────────────────────────────────────────────────────
@@ -228,7 +238,6 @@ def test_global_defaults_fill_unset_keys():
     config = {"window": 224, "cellprofiler_pipeline": "pipe", "cellprofiler_cycle": ""}
     overrides = cell_images_overrides({"batch_stem": "expt1"}, config)
     assert overrides == {
-        "window": 224,
         "cellprofiler_pipeline": "pipe",
         "cellprofiler_cycle": "",
     }
@@ -236,9 +245,10 @@ def test_global_defaults_fill_unset_keys():
 
 def test_entry_value_wins_over_global_default():
     config = {"window": 224, "cellprofiler_pipeline": "global_pipe"}
-    entry = {"batch_stem": "expt1", "window": 180}
-    overrides = cell_images_overrides(entry, config)
-    assert overrides["window"] == 180
+    entry = {"batch_stem": "expt1", "window": 180, "cellprofiler_cycle": "3"}
+    assert dataset_overrides(entry, config)["window"] == 180
+    overrides = cell_images_overrides(entry, {**config, "cellprofiler_cycle": ""})
+    assert overrides["cellprofiler_cycle"] == "3"
     assert overrides["cellprofiler_pipeline"] == "global_pipe"
 
 

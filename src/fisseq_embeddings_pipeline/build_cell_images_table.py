@@ -73,10 +73,15 @@ class BuildCellImagesTableConfig(AppConfig):
     output : str
         Output parquet filename (relative to `output_dir`). Defaults to
         ``"cell_table.parquet"``.
+    tiles_output : str
+        Output parquet filename (relative to `output_dir`) for the per-tile
+        image table -- see :func:`build_tiles_table`. Defaults to
+        ``"tiles.parquet"``.
     """
 
     manifest: str = "tiles_manifest.csv"
     output: str = "cell_table.parquet"
+    tiles_output: str = "tiles.parquet"
 
 
 def _read_indexed_csv(path: str) -> pd.DataFrame:
@@ -225,6 +230,30 @@ def build_cell_table(tiles: List[Dict[str, Any]]) -> pl.DataFrame:
     return pl.concat(frames, how="diagonal_relaxed")
 
 
+TILES_SCHEMA: Dict[str, pl.DataType] = {
+    "well": pl.String,
+    "tile": pl.String,
+    "image_tif": pl.String,
+    "mask_tif": pl.String,
+}
+
+
+def build_tiles_table(tiles: List[Dict[str, Any]]) -> pl.DataFrame:
+    """One row per tile: where starcall-workflow left its whole-tile
+    phenotype image and segmentation mask.
+
+    BUILD_DATASET crops every cell out of these itself (see
+    ``dataset.py``'s ``crop_cell``). They're kept in a sidecar rather than
+    as ``cell_table.parquet`` columns so a tile-level fact isn't repeated
+    on every one of that tile's cell rows, and so ``cell_table.parquet``
+    stays purely per-cell.
+    """
+    return pl.DataFrame(
+        [{key: tile_info[key] for key in TILES_SCHEMA} for tile_info in tiles],
+        schema=TILES_SCHEMA,
+    )
+
+
 def _read_tiles_manifest(path: str) -> List[Dict[str, str]]:
     with open(path, newline="") as f:
         return [dict(row) for row in csv.DictReader(f)]
@@ -248,7 +277,8 @@ def main(cfg: DictConfig) -> None:
         python -m fisseq_embeddings_pipeline.build_cell_images_table \\
             output_dir=./out \\
             manifest=tiles_manifest.csv \\
-            output=cell_table.parquet
+            output=cell_table.parquet \\
+            tiles_output=tiles.parquet
     """
     table_cfg: BuildCellImagesTableConfig = OmegaConf.to_object(cfg)
 
@@ -263,6 +293,7 @@ def main(cfg: DictConfig) -> None:
 
     output_path = output_dir / table_cfg.output
     table.write_parquet(output_path)
+    build_tiles_table(tiles).write_parquet(output_dir / table_cfg.tiles_output)
 
     logging.info(
         "Wrote %s (%d cell(s) across %d tile(s))",

@@ -12,15 +12,15 @@ The routing contract, unchanged from the Nextflow version:
   tree, so every starcall-facing key (:data:`CELL_IMAGES_FIELDS`) routes
   to it and to nothing else.
 - ``BUILD_DATASET`` and ``BUILD_CP_FEATURES`` each get whatever keys are
-  left after excluding the starcall-facing set plus ``batch_stem``,
-  ``cp_features`` and ``cell_images_hard_copy``. ``cell_images_dir`` is
+  left after excluding the starcall-facing set plus ``batch_stem`` and
+  ``cp_features`` (and, for ``BUILD_CP_FEATURES``, ``window``). ``cell_images_dir`` is
   injected by the workflow from ``BUILD_CELL_IMAGES``' own output, never
   set by the user.
 - ``window``, ``cellprofiler_pipeline`` and ``cellprofiler_cycle`` each
   have a pipeline-wide default in ``params.yaml``; an entry that doesn't
   set its own value inherits it. An entry's own value always wins.
-  ``window`` is filled independently for the ``BUILD_CELL_IMAGES``-bound
-  and ``BUILD_DATASET``-bound override sets, since both stages read it.
+  ``window`` is ``BUILD_DATASET``'s alone: it's the crop size that stage
+  cuts each cell at.
 """
 
 from typing import Any, Dict, List, Mapping
@@ -39,7 +39,6 @@ CELL_IMAGES_FIELDS = frozenset(
         "grid_size",
         "segmentation_type",
         "use_corrected",
-        "window",
         "sequencing_reads_params",
         "cp_features",
         "cellprofiler_pipeline",
@@ -48,14 +47,17 @@ CELL_IMAGES_FIELDS = frozenset(
 )
 
 #: Keys never passed through to ``BUILD_DATASET``/``BUILD_CP_FEATURES`` as
-#: Hydra overrides: ``batch_stem`` is passed explicitly, ``cp_features`` is
-#: a track selector rather than a stage field, and ``cell_images_hard_copy``
-#: is global-only.
-_NON_STAGE_FIELDS = frozenset({"batch_stem", "cp_features", "cell_images_hard_copy"})
+#: Hydra overrides: ``batch_stem`` is passed explicitly and ``cp_features``
+#: is a track selector rather than a stage field.
+_NON_STAGE_FIELDS = frozenset({"batch_stem", "cp_features"})
+
+#: Keys only ``BUILD_DATASET`` reads -- ``window`` is the crop size it cuts
+#: each cell at, which ``CpFeaturesConfig`` has no field for.
+_DATASET_ONLY_FIELDS = frozenset({"window"})
 
 #: Global ``params.yaml`` defaults an ``experiments:`` entry inherits when it
 #: doesn't set the key itself, per stage. See the module docstring.
-_CELL_IMAGES_FALLBACKS = ("window", "cellprofiler_pipeline", "cellprofiler_cycle")
+_CELL_IMAGES_FALLBACKS = ("cellprofiler_pipeline", "cellprofiler_cycle")
 _DATASET_FALLBACKS = ("window",)
 
 
@@ -243,9 +245,8 @@ def cell_images_overrides(
     """
     The ``BUILD_CELL_IMAGES``-bound Hydra overrides for one experiment.
 
-    :data:`CELL_IMAGES_FIELDS` only, with the ``window``/
-    ``cellprofiler_pipeline``/``cellprofiler_cycle`` global fallbacks
-    applied.
+    :data:`CELL_IMAGES_FIELDS` only, with the ``cellprofiler_pipeline``/
+    ``cellprofiler_cycle`` global fallbacks applied.
     """
     overrides = {k: v for k, v in entry.items() if k in CELL_IMAGES_FIELDS}
     return _with_fallbacks(overrides, config, _CELL_IMAGES_FALLBACKS)
@@ -272,11 +273,11 @@ def cp_features_overrides(
     """
     The ``BUILD_CP_FEATURES``-bound Hydra overrides for one experiment.
 
-    Same exclusion set as :func:`dataset_overrides` but with no ``window``
-    fallback -- ``CpFeaturesConfig`` has no ``window`` field (it reads
+    Same exclusion set as :func:`dataset_overrides` plus ``window`` --
+    ``CpFeaturesConfig`` has no ``window`` field (it reads
     ``cell_table.parquet``'s already-materialized CellProfiler columns).
     """
-    excluded = CELL_IMAGES_FIELDS | _NON_STAGE_FIELDS
+    excluded = CELL_IMAGES_FIELDS | _NON_STAGE_FIELDS | _DATASET_ONLY_FIELDS
     return {k: v for k, v in entry.items() if k not in excluded}
 
 

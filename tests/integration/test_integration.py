@@ -33,12 +33,12 @@ binary against a real starcall-workflow checkout) is exercised here via a
 stub `snakemake` executable prepended onto PATH -- not by bypassing the
 real rule. The synthetic fixture pre-populates a starcall-workflow-shaped
 phenotyping_dir/sequencing_dir tree directly (the way a real `snakemake`
-invocation of `make_cell_images_bbox` would have left it -- the per-tile
-crop-stack pair, not the whole-tile phenotype image/segmentation mask those
-temp() intermediates never survive as), and the stub simply exits 0 without
+invocation would have left it: per-tile cell/reads tables plus the
+whole-tile phenotype image and segmentation mask, which survive because
+they're requested as targets), and the stub simply exits 0 without
 touching the filesystem, standing in for "every requested target is already
-up to date". This exercises build_cell_images' own real tile-enumeration,
-symlink-collection, and cell_table.parquet-building logic end to end
+up to date". This exercises build_cell_images' own real tile-enumeration
+and cell_table.parquet-building logic end to end
 through the real Snakemake/Hydra plumbing -- only the external
 `snakemake`/starcall-workflow dependency itself (unavailable in CI, and the
 root Dockerfile's own `ops` conda env -- which real rule execution would
@@ -49,10 +49,7 @@ precedent EMBED_CELLS' checkpoint fixture already sets.
 The stub works because the NESTED invocation resolves `snakemake` by name
 (params.yaml's `snakemake_bin`, bare `snakemake` by default), while the
 OUTER snakemake is invoked as `sys.executable -m snakemake` and so bypasses
-PATH entirely -- see `_run_snakemake`. `--snakefile` still points for real
-at this repo's own `resources/starcall_overrides/wrapper.smk`, since the
-stub only fakes the `snakemake` binary itself, not the flags it's invoked
-with.
+PATH entirely -- see `_run_snakemake`.
 """
 
 from __future__ import annotations
@@ -202,24 +199,25 @@ def _cluster_config(
     return tuple(tokens)
 
 
-def _make_crop_stack(num_cells: int, channels: int, window: int) -> np.ndarray:
-    """A synthetic (num_cells, channels, window, window) crop stack, shaped
-    like `make_cell_images_bbox`'s own real output -- no whole-tile image
-    or cropping involved any more (see this module's own docstring)."""
+_TILE_SIZE = 128
+
+
+def _make_tile_image(channels: int) -> np.ndarray:
+    """A synthetic whole-tile phenotype image in starcall's own
+    (cycles, channels, H, W) `raw_pt.tif` layout."""
     rng = np.random.default_rng(0)
     return rng.integers(
-        0, 255, size=(num_cells, channels, window, window), dtype=np.uint16
+        0, 255, size=(1, channels, _TILE_SIZE, _TILE_SIZE), dtype=np.uint16
     )
 
 
-def _make_mask_crop_stack(num_cells: int, window: int) -> np.ndarray:
-    """A synthetic (num_cells, window, window) mask-crop stack: cell i's
-    mask is a single foreground pixel, labeled i + 1 (make_cell_images_bbox's
-    own positional-label convention)."""
-    stack = np.zeros((num_cells, window, window), dtype=np.uint8)
-    for i in range(num_cells):
-        stack[i, i % window, i % window] = i + 1
-    return stack
+def _make_tile_mask(centers: Sequence[Tuple[int, int]]) -> np.ndarray:
+    """A synthetic whole-tile label mask: cell i is a 3x3 blob labelled
+    i + 1 around its centre (starcall's row-i-is-label-i+1 convention)."""
+    mask = np.zeros((_TILE_SIZE, _TILE_SIZE), dtype=np.uint16)
+    for i, (cx, cy) in enumerate(centers):
+        mask[cx - 1 : cx + 2, cy - 1 : cy + 2] = i + 1
+    return mask
 
 
 _CELLPROFILER_PIPELINE = "test_pipeline"
@@ -275,21 +273,15 @@ def _write_starcall_tile(
     )
     reads_table.to_csv(seq_tile_dir / "cells_reads.csv")
 
-    # The per-tile crop-stack pair make_cell_images_bbox itself would have
-    # produced (and Snakemake's own temp() bookkeeping would have already
-    # deleted the whole-tile intermediates behind) -- see this module's own
-    # docstring. Content is synthetic/deterministic, not actually cropped
-    # from anything -- BUILD_DATASET only indexes into these now, it
-    # doesn't crop.
-    num_cells = len(cell_ids)
+    # The whole-tile image and mask starcall itself leaves under
+    # phenotyping_dir once they're requested as targets -- BUILD_DATASET
+    # crops each cell out of these.
     tifffile.imwrite(
-        pheno_tile_dir / f"cells_crops_{_WINDOW}.tif",
-        _make_crop_stack(num_cells, _NUM_CHANNELS, _WINDOW),
+        pheno_tile_dir / "raw_pt.tif",
+        _make_tile_image(_NUM_CHANNELS),
+        photometric="minisblack",
     )
-    tifffile.imwrite(
-        pheno_tile_dir / f"cells_mask_crops_{_WINDOW}.tif",
-        _make_mask_crop_stack(num_cells, _WINDOW),
-    )
+    tifffile.imwrite(pheno_tile_dir / "cells_mask.tif", _make_tile_mask(centers))
 
     if write_cellprofiler_csv:
         # Row-position matched to the cell table (cell_ids here are already
@@ -393,7 +385,7 @@ def _write_synthetic_experiment(
         sequencing_dir,
         "well1",
         1,
-        "tile0x0y",
+        "tile00x00y",
         cell_ids,
         centers,
         barcodes,
@@ -526,8 +518,7 @@ def test_pipeline_exits_cleanly(pipeline_outputs):
 
 def test_cell_images_produced(pipeline_outputs):
     """BUILD_CELL_IMAGES' own output -- the one complete, self-sufficient
-    cell table everything downstream reads, plus the collected per-tile
-    crop-stack pair (see build_cell_images.nf's module docstring)."""
+    cell table everything downstream reads, plus the per-tile image table."""
     exp_dir, _ = pipeline_outputs
     cell_images_dir = exp_dir / "cell_images" / "batch1"
     cell_table = pl.read_parquet(cell_images_dir / "cell_table.parquet")
@@ -537,9 +528,15 @@ def test_cell_images_produced(pipeline_outputs):
         cell_table.columns
     )
     assert any(c.startswith("cp_") for c in cell_table.columns)
-    tile_dir = cell_images_dir / "well1_grid1" / "tile0x0y"
-    assert (tile_dir / f"cells_crops_{_WINDOW}.tif").exists()
-    assert (tile_dir / f"cells_mask_crops_{_WINDOW}.tif").exists()
+    # Nothing is copied or linked out of starcall's tree: tiles.parquet
+    # just names the whole-tile image/mask BUILD_DATASET crops from.
+    tiles = pl.read_parquet(cell_images_dir / "tiles.parquet")
+    assert tiles.height == 1
+    tile = tiles.row(0, named=True)
+    assert tile["image_tif"].endswith("well1_grid1/tile00x00y/raw_pt.tif")
+    assert tile["mask_tif"].endswith("well1_grid1/tile00x00y/cells_mask.tif")
+    assert Path(tile["image_tif"]).exists() and Path(tile["mask_tif"]).exists()
+    assert not list(cell_images_dir.glob("*_grid*"))
 
 
 def test_cell_metadata_produced(pipeline_outputs):

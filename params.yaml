@@ -20,7 +20,7 @@ experiments: []
 # - BUILD_CELL_IMAGES (starcall-workflow-facing, always runs):
 #   starcall_workflow_dir, phenotyping_dir, segmentation_dir,
 #   sequencing_dir, wells, grid_size, segmentation_type, use_corrected,
-#   window, sequencing_reads_params. This is the ONLY stage that touches
+#   sequencing_reads_params. This is the ONLY stage that touches
 #   starcall-workflow's tree or invokes Snakemake -- see
 #   docs/architecture.md's Data contracts section. `starcall_workflow_dir`
 #   is per-experiment (not a shared global path) since Snakemake keeps
@@ -43,8 +43,6 @@ experiments: []
 #   `starcall_workflow_dir` at all for your lab (e.g. `sequencing_dir` on
 #   separate storage) -- an explicit value always wins over both. See
 #   docs/architecture.md and the example below.
-#   `cell_images_hard_copy` (below) is this stage's one GLOBAL-only field
-#   -- not settable per experiment; see its own comment for why.
 # - BuildDatasetConfig (BUILD_DATASET): window, shard_maxcount,
 #   barcode_col_name/aa_changes_col_name/edit_distance_col_name.
 #   `cell_images_dir` is injected automatically from BUILD_CELL_IMAGES'
@@ -59,15 +57,15 @@ experiments: []
 # back to the matching global default in "Shared per-experiment defaults"
 # below (`window`, `cellprofiler_pipeline`, `cellprofiler_cycle`), or
 # failing that, the relevant stage's own Hydra default (or raises an error
-# if that field has none, e.g. starcall_workflow_dir). `cell_images_hard_copy`
-# is the one exception -- it's global-only, ignored if set on an individual
-# entry (see its own comment below).
+# if that field has none, e.g. starcall_workflow_dir).
 #
 # `grid_size` is optional -- when omitted, it's auto-detected per well by
 # scanning phenotyping_dir for that well's `{well}_grid<N>` directory
-# (starcall-workflow's own naming convention already encodes it there), so
-# you only need to set it explicitly if a well has more than one such
-# directory and detection can't disambiguate.
+# (starcall-workflow's own naming convention already encodes it there),
+# and only tiles already on disk are requested. Set it explicitly for a
+# run starting from raw input (nothing under phenotyping_dir yet): every
+# tile of the grid is then requested from starcall, whether or not it
+# exists yet.
 #
 # `sequencing_reads_params` (default "") is the `{params}` wildcard
 # component of starcall-workflow's `{segmentation_type}_reads{params}.csv`
@@ -112,9 +110,7 @@ experiments: []
 #     # cp_features omitted -- cellDINO-only for this experiment
 
 # ── Shared per-experiment defaults (window / cellprofiler_pipeline / cellprofiler_cycle) ──
-# `window` (both BUILD_CELL_IMAGES, which now forces its crop-stack output
-# at this size via `make_cell_images_bbox`, and BuildDatasetConfig, which
-# sanity-checks the discovered stacks' shape against it) and
+# `window` (BuildDatasetConfig: the crop size each cell is cut at) and
 # `cellprofiler_pipeline`/`cellprofiler_cycle` (CpFeaturesConfig-facing,
 # consumed by BUILD_CELL_IMAGES) are logically per-experiment fields (see
 # "Per-experiment configs" above), but in practice are almost always the
@@ -128,16 +124,6 @@ window: 224                    # crop size in pixels -- must match cell_dino_cro
 cellprofiler_pipeline: null    # the CellProfiler .cppipe pipeline's basename -- required (here, or per `cp_features: true` entry) once any experiment sets cp_features: true
 cellprofiler_cycle: ""         # "" (no cycle) unless starcall-workflow ran cellprofiler per-cycle
 
-# cell_images_hard_copy is GLOBAL ONLY -- unlike window/cellprofiler_pipeline/
-# cellprofiler_cycle above, an experiments: entry can't override this one.
-# This used to be a hard constraint: it drove Nextflow's publishDir `mode:`,
-# which had to be static at process-definition time. It now just picks
-# `ln -s` vs `cp -L` in build_cell_images' own collection loop, so a
-# per-experiment override would be straightforward -- it simply isn't wired
-# up, since no experiment has ever needed a different value from its
-# neighbours. Left global for parity; promote it to a per-experiment field
-# if that ever changes.
-cell_images_hard_copy: false   # false = symlink BUILD_CELL_IMAGES' collected per-cell crop-stack tif files (make_cell_images_bbox's output -- small, not whole-tile images) from their real starcall-workflow location (default, no duplication); true = real copies (self-contained, no dependency on phenotyping_dir staying mounted)
 
 # ── Snakemake invocation (BUILD_CELL_IMAGES) ─────────────────────────────────
 snakemake_cores: 4             # --cores passed to the NESTED starcall snakemake within one build_cell_images job -- local parallelism inside that one invocation, distinct from the outer snakemake's own --cores budget across rules

@@ -7,23 +7,21 @@ Resolves each well's tile grid size (explicit override or auto-detected)
 and enumerates existing tile directories directly against
 starcall-workflow's own `phenotyping_dir` tree, then writes:
 
-- `targets_out`: one Snakemake target file path per line, forcing the
-  per-tile crop-stack pair (`{segmentation_type}_crops_{window}.tif` /
-  `{segmentation_type}_mask_crops_{window}.tif`, produced by
-  `make_cell_images_bbox` -- see `resources/starcall_overrides/`), the
-  segmentation cell table, and the sequencing reads table to exist for
-  every discovered tile (plus the CellProfiler CSV, if `cp_features` is
-  set) -- consumed by the rule's own nested `snakemake ...
-  $(cat targets.txt)` invocation. Requesting the crop-stack pair (not the
-  whole-tile phenotype image/segmentation mask directly) is what lets
-  Snakemake's ordinary `temp()` bookkeeping delete those whole-tile
-  intermediates right after use -- see `docs/architecture.md` decision 17.
+- `targets_out`: one Snakemake target file path per line -- for every
+  tile, starcall-workflow's own native per-tile outputs: the whole-tile
+  phenotype image (`raw_pt.tif`, or `corrected_pt.tif` when
+  `use_corrected`), its segmentation mask (`{segmentation_type}_mask.tif`),
+  the segmentation cell table and the sequencing reads table (plus the
+  CellProfiler CSV, if `cp_features` is set). Consumed by BUILD_CELL_IMAGES'
+  nested `snakemake ... $(cat targets.txt)` invocation, run against
+  starcall-workflow's own unmodified Snakefile. The image and mask are
+  `temp()` outputs upstream; requesting them as explicit targets is what
+  keeps them on disk (Snakemake never deletes a requested target) for
+  BUILD_DATASET to crop cells out of -- see `docs/architecture.md`
+  decision 17.
 - `manifest_out`: a CSV (`well,tile,segmentation_csv,reads_csv,
-  cellprofiler_csv,crops_tif,mask_crops_tif`) driving phase 3
+  cellprofiler_csv,image_tif,mask_tif`) driving phase 3
   (`build_cell_images_table.py`).
-- `symlinks_out`: a TSV (`relative_path<TAB>absolute_path`) of just the two
-  per-tile crop-stack files, for the rule's own
-  symlink-collection loop (phase 2's tail end).
 
 Until this stage's Docker image merged starcall-workflow's own `ops` conda
 env into this repo's main image (see the root `Dockerfile`), this logic
@@ -105,8 +103,8 @@ _MANIFEST_FIELDNAMES = [
     "segmentation_csv",
     "reads_csv",
     "cellprofiler_csv",
-    "crops_tif",
-    "mask_crops_tif",
+    "image_tif",
+    "mask_tif",
 ]
 
 _RESOLVED_DIR_KEYS = ("phenotyping_dir", "segmentation_dir", "sequencing_dir")
@@ -144,25 +142,10 @@ class BuildCellImagesEnumerateConfig(AppConfig):
     segmentation_type : str
         Defaults to ``"cells"``.
     use_corrected : bool
-        No longer read by this stage's own target/manifest generation
-        (`make_cell_images_bbox`'s crop-stack output filename doesn't
-        distinguish raw vs. corrected -- that choice is
-        `make_cell_images_bbox`'s own `get_phenotyping_pt` input function,
-        driven entirely by the target starcall-workflow project's own
-        `config.yaml`/`default-config.yaml` `phenotyping.use_corrected`
-        key, not by anything this stage passes in). Kept only for
-        config-schema/backward-compat symmetry with the other stages that
-        still reference `use_corrected` in their own docstrings; set the
-        project's own `config.yaml` directly if you need corrected images.
-        Defaults to ``False``.
-    window : int
-        Crop size requested from `make_cell_images_bbox` -- embedded in
-        the requested target filename
-        (`{segmentation_type}_crops_{window}.tif`), so this stage needs it
-        even though it never crops anything itself. Must match
-        `BuildDatasetConfig.window` (the same global `params.window`
-        default routes to both -- see `workflows/the `embeddings` rule's
-        `cell_images_field_includes`).
+        Target the background-corrected whole-tile phenotype image
+        (`corrected_pt.tif`) instead of the raw one (`raw_pt.tif`) --
+        mirrors starcall-workflow's own `get_phenotyping_pt`. Defaults to
+        ``False``.
     sequencing_reads_params : str
         Suffix threaded into the reads CSV filename
         (`{segmentation_type}_reads{sequencing_reads_params}.csv`).
@@ -173,7 +156,7 @@ class BuildCellImagesEnumerateConfig(AppConfig):
     cellprofiler_cycle, cellprofiler_pipeline : str
         Threaded into the CellProfiler CSV filename when `cp_features` is
         set. Default to ``""``.
-    targets_out, manifest_out, symlinks_out : str
+    targets_out, manifest_out : str
         Output filenames, written under `output_dir`.
     resolved_dirs_out : str
         Output filename (under `output_dir`) for the fully-resolved
@@ -192,14 +175,12 @@ class BuildCellImagesEnumerateConfig(AppConfig):
     grid_size: Optional[int] = None
     segmentation_type: str = "cells"
     use_corrected: bool = False
-    window: int = MISSING
     sequencing_reads_params: str = ""
     cp_features: bool = False
     cellprofiler_cycle: str = ""
     cellprofiler_pipeline: str = ""
     targets_out: str = "targets.txt"
     manifest_out: str = "tiles_manifest.csv"
-    symlinks_out: str = "symlinks.txt"
     resolved_dirs_out: str = "resolved_dirs.env"
 
 
@@ -303,16 +284,31 @@ def resolve_data_dir(
     return os.path.join(starcall_workflow_dir, bare_name)
 
 
-def enumerate_tile_names(phenotyping_dir: str, well: str, grid_size: int) -> List[str]:
-    """List tile directory names (e.g. ``tile0x0y``) for one well/grid_size.
+def enumerate_tile_names(
+    phenotyping_dir: str, well: str, grid_size: int, explicit: bool
+) -> List[str]:
+    """List tile directory names (e.g. ``tile00x00y``) for one well/grid_size.
 
-    Globs ``{phenotyping_dir}/{well}_grid{grid_size}/tile*x*y`` and keeps
-    only directory names matching ``TILE_DIR_RE``, sorted lexically
-    (numeric tile ordering is handled by the caller, which iterates
-    wells/tiles in a fixed, deterministic order for target-list/manifest
-    generation -- exact tile order doesn't affect correctness here, only
-    reproducibility of file ordering).
+    With an ``explicit`` grid size, every tile of the ``grid_size`` x
+    ``grid_size`` grid is listed, whether or not starcall-workflow has
+    produced it yet, named the way starcall-workflow itself names them
+    (``tile{x:02}x{y:02}y`` -- `get_segmentation_grid`/
+    `get_grid_filenames_pheno`). This is what lets a from-scratch run work:
+    the nested snakemake invocation is what creates those directories.
+
+    With an auto-detected grid size there is nothing to generate from but
+    what's already on disk, so this globs
+    ``{phenotyping_dir}/{well}_grid{grid_size}/tile*x*y`` instead and keeps
+    only names matching ``TILE_DIR_RE``.
+
+    Either way the result is sorted lexically -- exact tile order doesn't
+    affect correctness here, only reproducibility of file ordering.
     """
+    if explicit:
+        return sorted(
+            f"tile{x:02}x{y:02}y" for x in range(grid_size) for y in range(grid_size)
+        )
+
     tiles = []
     pattern = f"{phenotyping_dir}/{well}_grid{grid_size}/tile*x*y"
     for tile_dir in sorted(glob.glob(pattern)):
@@ -328,7 +324,7 @@ def build_enumeration(
     wells: List[str],
     grid_size: Optional[int],
     segmentation_type: str,
-    window: int,
+    use_corrected: bool,
     sequencing_reads_params: str,
     cp_features: bool,
     cellprofiler_cycle: str,
@@ -339,39 +335,31 @@ def build_enumeration(
     Returns
     -------
     dict
-        ``{"targets": [...], "manifest_rows": [...], "symlinks": [...]}``
-        -- see :func:`main`'s docstring for what each becomes on disk.
-        ``symlinks`` entries are ``(relative_path, absolute_path)`` pairs
-        for just the two per-tile crop-stack files (not the CSVs -- those
-        are read directly by ``build_cell_images_table.py``, never
-        re-exposed as files of their own; see `the `build_cell_images` rule`'s
-        Phase 3 comment).
+        ``{"targets": [...], "manifest_rows": [...]}`` -- see
+        :func:`main`'s docstring for what each becomes on disk.
     """
     targets: List[str] = []
     manifest_rows: List[Dict[str, str]] = []
-    symlinks: List[tuple] = []
+    image_name = "corrected_pt.tif" if use_corrected else "raw_pt.tif"
 
     for well in wells:
         resolved_grid_size = resolve_grid_size(phenotyping_dir, well, grid_size)
-        for tile in enumerate_tile_names(phenotyping_dir, well, resolved_grid_size):
+        tiles = enumerate_tile_names(
+            phenotyping_dir, well, resolved_grid_size, explicit=grid_size is not None
+        )
+        for tile in tiles:
             grid_dir = f"{well}_grid{resolved_grid_size}"
             tile_dir = f"{phenotyping_dir}/{grid_dir}/{tile}"
             seq_tile_dir = f"{sequencing_dir}/{grid_dir}/{tile}"
 
-            crops_filename = f"{segmentation_type}_crops_{window}.tif"
-            mask_crops_filename = f"{segmentation_type}_mask_crops_{window}.tif"
-            crops_path = f"{tile_dir}/{crops_filename}"
-            mask_crops_path = f"{tile_dir}/{mask_crops_filename}"
+            image_path = f"{tile_dir}/{image_name}"
+            mask_path = f"{tile_dir}/{segmentation_type}_mask.tif"
             seg_csv = f"{tile_dir}/{segmentation_type}.csv"
             reads_csv = (
                 f"{seq_tile_dir}/{segmentation_type}_reads{sequencing_reads_params}.csv"
             )
 
-            targets.extend([crops_path, mask_crops_path, seg_csv, reads_csv])
-            symlinks.append((f"{grid_dir}/{tile}/{crops_filename}", crops_path))
-            symlinks.append(
-                (f"{grid_dir}/{tile}/{mask_crops_filename}", mask_crops_path)
-            )
+            targets.extend([image_path, mask_path, seg_csv, reads_csv])
 
             cp_csv = ""
             if cp_features:
@@ -388,12 +376,12 @@ def build_enumeration(
                     "segmentation_csv": seg_csv,
                     "reads_csv": reads_csv,
                     "cellprofiler_csv": cp_csv,
-                    "crops_tif": crops_path,
-                    "mask_crops_tif": mask_crops_path,
+                    "image_tif": image_path,
+                    "mask_tif": mask_path,
                 }
             )
 
-    return {"targets": targets, "manifest_rows": manifest_rows, "symlinks": symlinks}
+    return {"targets": targets, "manifest_rows": manifest_rows}
 
 
 _cs = ConfigStore.instance()
@@ -408,7 +396,7 @@ _cs.store(name="build_cell_images_enumerate_main", node=BuildCellImagesEnumerate
 def main(cfg: DictConfig) -> None:
     """
     Hydra entry point: resolve grid sizes, enumerate tiles, write
-    targets/manifest/symlinks.
+    targets/manifest.
 
     Configuration
     -------------
@@ -445,7 +433,7 @@ def main(cfg: DictConfig) -> None:
         wells=enum_cfg.wells,
         grid_size=enum_cfg.grid_size,
         segmentation_type=enum_cfg.segmentation_type,
-        window=enum_cfg.window,
+        use_corrected=enum_cfg.use_corrected,
         sequencing_reads_params=enum_cfg.sequencing_reads_params,
         cp_features=enum_cfg.cp_features,
         cellprofiler_cycle=enum_cfg.cellprofiler_cycle,
@@ -462,11 +450,6 @@ def main(cfg: DictConfig) -> None:
         writer = csv.DictWriter(f, fieldnames=_MANIFEST_FIELDNAMES)
         writer.writeheader()
         writer.writerows(result["manifest_rows"])
-
-    symlinks_path = output_dir / enum_cfg.symlinks_out
-    with open(symlinks_path, "w") as f:
-        for rel_path, abs_path in result["symlinks"]:
-            f.write(f"{rel_path}\t{abs_path}\n")
 
     logging.info(
         "Enumerated %d tile(s) across %d well(s); wrote %d Snakemake target(s) to %s",

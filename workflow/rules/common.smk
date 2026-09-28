@@ -259,10 +259,10 @@ def starcall_cluster_preamble(batch):
     # experiment has its own starcall_workflow_dir and concurrent invocations
     # against one tree are already forbidden.
     {config["snakemake_bin"]} \\
-        --snakefile "{STARCALL_OVERRIDES_DIR}/wrapper.smk" \\
+        --snakefile "{starcall_dir}/workflow/Snakefile" \\
         --directory "{starcall_dir}" \\
         --unlock \\
-        --config phenotyping_dir="$phenotyping_dir/" segmentation_dir="$segmentation_dir/" sequencing_dir="$sequencing_dir/" starcall_workflow_dir="{starcall_dir}" \\
+        --config phenotyping_dir="$phenotyping_dir/" segmentation_dir="$segmentation_dir/" sequencing_dir="$sequencing_dir/" \\
         || true
     # ---- end cluster submission preamble ---------------------------------
 """
