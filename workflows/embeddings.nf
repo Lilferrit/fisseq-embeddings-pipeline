@@ -69,23 +69,25 @@ workflow EmbeddingsPipeline {
         .flatMap { f -> new groovy.json.JsonSlurperClassic().parseText(f.text) }
 
     cell_images = BUILD_CELL_IMAGES(plans)  // (batch_stem, cell_table, tiles, phenotyping_dir)
-    cell_tables = cell_images.map { stem, cell_table, tiles, pheno_dir -> tuple(stem, cell_table) }
+    cell_tables = cell_images.map { stem, cell_table, _tiles, _pheno_dir -> tuple(stem, cell_table) }
 
     metadata = BUILD_CELL_METADATA(cell_tables)
     qc = QC_FILTER(metadata)
     // Only the join key; the other two QC outputs are report files.
-    qc_passed = qc.map { stem, filtered, barcode_counts, variants -> tuple(stem, filtered) }
+    qc_passed = qc.map { stem, filtered, _barcode_counts, _variants -> tuple(stem, filtered) }
 
     // ── cellDINO track ───────────────────────────────────────────────────
     dataset = BUILD_DATASET(
         plans.map { p -> tuple(p.batch_stem, p.dataset_args) }.join(cell_images)
     )
-    embeddings = EMBED_CELLS(dataset.map { stem, shards, meta -> tuple(stem, shards) })
+    embeddings = EMBED_CELLS(dataset.map { stem, shards, _meta -> tuple(stem, shards) })
 
     // embeddings_only stops the cellDINO track here and skips the CP track:
     // for when all you want is the embeddings (and what the containerized
     // real-starcall integration test uses).
-    if (!params.embeddings_only) {
+    // (.toString().toBoolean(): `--embeddings_only false` can arrive as the
+    // string "false", which Groovy treats as true.)
+    if (!params.embeddings_only.toString().toBoolean()) {
         filtered = FILTER_EMBEDDINGS(embeddings.join(qc_passed))  // (stem, filtered_keys, normalizer)
         // Consumers reconstruct the QC-passed, synonymous-corrected table
         // themselves from these three; none reads a pre-normalized copy.
@@ -105,7 +107,7 @@ workflow EmbeddingsPipeline {
         def bare_columns = (methods == ['median']).toString()
 
         splits = GENERATE_SPLIT(
-            filtered.map { stem, keys, normalizer -> tuple(stem, keys) }.combine(channel.of(1..reps))
+            filtered.map { stem, keys, _normalizer -> tuple(stem, keys) }.combine(channel.of(1..reps))
         )
         halves = splits.flatMap { stem, rep, half1, half2 ->
             [tuple(stem, rep, 1, half1), tuple(stem, rep, 2, half2)]
@@ -131,14 +133,14 @@ workflow EmbeddingsPipeline {
                 embed_and_filtered.combine(channel.fromList(passthrough_methods)),
                 bare_columns,
             ).groupTuple(size: passthrough_methods.size())
-            : aggregates.map { stem, agg -> tuple(stem, []) }
+            : aggregates.map { stem, _agg -> tuple(stem, []) }
         FILTER_AGGREGATE(aggregates.join(blocklists).join(passthrough))
 
         // ── Global stages ───────────────────────────────────────────────
         global_blocklist = GLOBAL_BLOCKLIST(sortedPairs(blocklists))
         GLOBAL_VARIANT_EMBEDDINGS(sortedPairs(aggregates), global_blocklist)
         GLOBAL_VARIANT_DISTINGUISHABILITY(
-            sortedPairs(ovwt.map { stem, results, cell_scores, models -> tuple(stem, results) })
+            sortedPairs(ovwt.map { stem, results, _cell_scores, _models -> tuple(stem, results) })
         )
 
         // ── CellProfiler-feature track (experiments with cp_features: true) ─
@@ -156,7 +158,7 @@ workflow EmbeddingsPipeline {
         cp_ovwt = OVWT_BATCHWISE_CP_FEATURES(cp_and_filtered)
         GLOBAL_VARIANT_CP_FEATURES(sortedPairs(cp_aggregates))
         GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES(
-            sortedPairs(cp_ovwt.map { stem, results, cell_scores, models -> tuple(stem, results) })
+            sortedPairs(cp_ovwt.map { stem, results, _cell_scores, _models -> tuple(stem, results) })
         )
     }
 }

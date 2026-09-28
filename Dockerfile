@@ -48,6 +48,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # version explicitly, which is what actually determines what runs at
 # container run time anyway (see the ENV PATH line below).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# Put that managed interpreter somewhere every user can read. By default uv
+# installs it under /root/.local/share/uv/python/, and .venv/bin/python is
+# only a symlink into there -- so every task failed with "python:
+# Permission denied" whenever the container ran as a non-root user, which
+# Apptainer always does and docker does under nextflow.config's
+# `-u $(id -u):$(id -g)`.
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 
 WORKDIR /opt/fisseq-embeddings-pipeline
 

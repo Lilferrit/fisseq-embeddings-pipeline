@@ -9,10 +9,16 @@ been tested" as a known gap this fixture exists to close).
 
 Usage
 -----
-    uv run python scripts/prepare_real_starcall_test_data.py
+    uv run python scripts/prepare_real_starcall_test_data.py            # lmna_t3
+    uv run python scripts/prepare_real_starcall_test_data.py --minimal  # lmna_t3_mini
 
 Idempotent: skips the download if the tarball is already cached, and skips
 cropping if the output already exists. Pass --force to redo the crop step.
+
+`--minimal` builds `testing_data/lmna_t3_mini/` -- what the `--container`
+integration tests actually run on -- from `lmna_t3/` (building that first
+if needed): see `crop_to_minimal` below. ~40MB instead of ~900MB, so
+starcall's whole chain runs in minutes on a laptop.
 
 What it does
 ------------
@@ -77,6 +83,13 @@ _PHENOTYPE_CYCLE_PREFIX = "cyclePT"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _CACHE_DIR = _REPO_ROOT / "testing_data" / "_download_cache"
 _OUTPUT_DIR = _REPO_ROOT / "testing_data" / "lmna_t3" / "starcall_input"
+_MINIMAL_OUTPUT_DIR = _REPO_ROOT / "testing_data" / "lmna_t3_mini" / "starcall_input"
+
+# Side length, in pixels, of --minimal's crop -- for EVERY cycle, phenotype
+# included (see crop_to_minimal for why the phenotype tile can't be cropped
+# larger). 512 phenotype px is about five 100px-diameter cells across,
+# enough for a non-empty cell table.
+_MINIMAL_PIXELS = 512
 
 
 def _download(force: bool) -> Path:
@@ -177,6 +190,144 @@ def crop_to_center_tiles(well_dir: Path, output_dir: Path, size: int) -> None:
         del images
 
 
+def _read_tiles(path: Path) -> np.ndarray:
+    """A cycle's raw.tif as (tiles, channels, H, W). tifffile squeezes a
+    single-tile stack down to (channels, H, W) on read."""
+    images = tifffile.imread(path)
+    return images[np.newaxis] if images.ndim == 3 else images
+
+
+def _phenotype_tile_offset(
+    seq_tile: np.ndarray, pt_tile: np.ndarray, ratio: int
+) -> tuple[int, int]:
+    """Where `pt_tile`'s top-left corner really sits inside `seq_tile`, in
+    sequencing pixels, by phase correlation of one shared channel (the
+    phenotype tile downscaled by `ratio` first)."""
+    h, w = pt_tile.shape[0] // ratio * ratio, pt_tile.shape[1] // ratio * ratio
+    small = (
+        pt_tile[:h, :w].reshape(h // ratio, ratio, w // ratio, ratio).mean(axis=(1, 3))
+    )
+
+    def _norm(a: np.ndarray) -> np.ndarray:
+        a = a.astype(np.float64) - a.mean()
+        return a / (a.std() + 1e-9)
+
+    padded = np.zeros(seq_tile.shape, dtype=np.float64)
+    padded[: small.shape[0], : small.shape[1]] = _norm(small)
+    cross = np.fft.fft2(_norm(seq_tile)) * np.conj(np.fft.fft2(padded))
+    corr = np.fft.ifft2(cross / (np.abs(cross) + 1e-9)).real
+    dy, dx = np.unravel_index(np.argmax(corr), corr.shape)
+    dy = dy if dy < seq_tile.shape[0] // 2 else dy - seq_tile.shape[0]
+    dx = dx if dx < seq_tile.shape[1] // 2 else dx - seq_tile.shape[1]
+    return int(dy), int(dx)
+
+
+def crop_to_minimal(well_dir: Path, output_dir: Path, pixels: int) -> None:
+    """Shrink an already single-sequencing-tile well (`crop_to_center_tiles`'
+    output) to one `pixels`-square tile per cycle, aligned so starcall's
+    initial stitching layout is already right.
+
+    Why aligning by hand is necessary: starcall's make_initial_composite
+    places each tile at (tile index x tile size in pixels) -- the first two
+    positions.csv columns -- and leaves the rest to cross-cycle
+    registration. For this dataset that index layout doesn't match where the
+    phenotype tiles really are (one stage axis is flipped/transposed
+    relative to the image axes -- the phenotype tile at index (26, 26) sits
+    ~1000 px across the sequencing tile). Full-size tiles overlap enough for
+    registration to recover that; small crops don't, the phenotype cycle
+    never gets aligned, and its stitched tile balloons to tens of thousands
+    of pixels square -- all confirmed against real runs.
+
+    So: pick the phenotype tile whose top-left corner really lies closest
+    to the sequencing tile's top-left (measured by phase correlation), crop
+    that phenotype tile from its own top-left, and crop every sequencing
+    cycle starting at the measured offset. Both crops are `pixels` square,
+    which keeps (index x size) consistent -- phenotype tile indices are
+    twice the sequencing ones and its pixels half the size -- so the
+    phenotype crop starts exactly where starcall's initial layout puts it,
+    covering the top-left quarter of the sequencing crop. Sequencing cycles
+    stay within tens of pixels of each other, which registration handles.
+    All 12 kept: the barcodes are 12 bases long. positions.csv is kept per
+    cycle, the phenotype row relabelled to index (2*i, 2*j) of the
+    sequencing tile's (i, j).
+    """
+    ratio = _PHENOTYPE_SCALE // _BASES_SCALE
+    cycle_dirs = sorted(well_dir.glob("cycle*"))
+    seq_dirs = [d for d in cycle_dirs if not _is_phenotype_cycle(str(d))]
+    (pt_dir,) = [d for d in cycle_dirs if _is_phenotype_cycle(str(d))]
+
+    seq_poses = np.loadtxt(
+        seq_dirs[0] / "positions.csv", delimiter=",", dtype=int, ndmin=2
+    )
+    if len(seq_poses) != 1:
+        raise SystemExit(
+            f"expected one sequencing tile per cycle, got {len(seq_poses)} "
+            "-- run the default (non --minimal) crop first"
+        )
+    # Channel 1 is GFP in both this dataset's sequencing and phenotype
+    # channel lists -- starcall's own stitching channel.
+    reference = _read_tiles(seq_dirs[0] / "raw.tif")[0, 1]
+    pt_images = _read_tiles(pt_dir / "raw.tif")
+    pt_poses = np.loadtxt(pt_dir / "positions.csv", delimiter=",", dtype=int, ndmin=2)
+    offsets = [_phenotype_tile_offset(reference, tile[1], ratio) for tile in pt_images]
+    candidates = [
+        (dy + dx, k)
+        for k, (dy, dx) in enumerate(offsets)
+        if dy >= 0
+        and dx >= 0
+        and dy + pixels <= reference.shape[0]
+        and dx + pixels <= reference.shape[1]
+    ]
+    if not candidates:
+        raise SystemExit(
+            f"no phenotype tile starts inside the sequencing tile: {offsets}"
+        )
+    keep = min(candidates)[1]
+    dy, dx = offsets[keep]
+    print(f"  phenotype tile {keep} starts at sequencing pixel ({dy}, {dx})")
+
+    for cycle_dir in seq_dirs:
+        cropped = _read_tiles(cycle_dir / "raw.tif")[
+            :, :, dy : dy + pixels, dx : dx + pixels
+        ]
+        _write_cycle(output_dir / cycle_dir.name, seq_poses, cropped)
+
+    pt_row = pt_poses[keep : keep + 1].copy()
+    pt_row[0, :2] = seq_poses[0, :2] * ratio
+    _write_cycle(
+        output_dir / pt_dir.name,
+        pt_row,
+        pt_images[keep : keep + 1, :, :pixels, :pixels],
+    )
+
+
+def _write_cycle(out_cycle_dir: Path, poses: np.ndarray, images: np.ndarray) -> None:
+    out_cycle_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  {out_cycle_dir.name}: {images.shape}")
+    np.savetxt(out_cycle_dir / "positions.csv", poses, delimiter=",", fmt="%d")
+    tifffile.imwrite(out_cycle_dir / "raw.tif", images)
+
+
+def _build_minimal(force: bool) -> None:
+    import shutil
+
+    if _MINIMAL_OUTPUT_DIR.exists() and not force:
+        print(
+            f"{_MINIMAL_OUTPUT_DIR} already exists -- skipping (pass --force to redo)."
+        )
+        return
+    if _MINIMAL_OUTPUT_DIR.exists():
+        shutil.rmtree(_MINIMAL_OUTPUT_DIR)
+    print(f"Cropping {_OUTPUT_DIR} -> {_MINIMAL_OUTPUT_DIR} ({_MINIMAL_PIXELS}px)...")
+    crop_to_minimal(
+        _OUTPUT_DIR / _CROPPED_WELL,
+        _MINIMAL_OUTPUT_DIR / _CROPPED_WELL,
+        pixels=_MINIMAL_PIXELS,
+    )
+    shutil.copytree(_OUTPUT_DIR / "auxdata", _MINIMAL_OUTPUT_DIR / "auxdata")
+    print(f"Done. Minimal fixture written to {_MINIMAL_OUTPUT_DIR}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -187,13 +338,27 @@ def main() -> None:
         action="store_true",
         help="Redownload even if a cached copy exists.",
     )
+    parser.add_argument(
+        "--minimal",
+        action="store_true",
+        help="Build testing_data/lmna_t3_mini/ (what --container tests use).",
+    )
     args = parser.parse_args()
 
-    if _OUTPUT_DIR.exists() and not args.force:
+    if args.minimal:
+        if not _OUTPUT_DIR.exists():
+            _build_full(force=False, force_download=args.force_download)
+        _build_minimal(force=args.force)
+        return
+    _build_full(force=args.force, force_download=args.force_download)
+
+
+def _build_full(force: bool, force_download: bool) -> None:
+    if _OUTPUT_DIR.exists() and not force:
         print(f"{_OUTPUT_DIR} already exists -- skipping (pass --force to redo).")
         return
 
-    tarball = _download(force=args.force_download)
+    tarball = _download(force=force_download)
 
     extract_dir = _CACHE_DIR / "extracted"
     source_well_dir = extract_dir / "input" / _SOURCE_WELL

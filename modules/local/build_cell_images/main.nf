@@ -47,7 +47,7 @@ process BUILD_CELL_IMAGES {
     def jobscript_args = !cluster_mode ? '' : [
         "starcall_job_image=${params.starcall_job_image}",
         "starcall_container_bin=${params.starcall_container_bin}",
-        "starcall_job_gpu=${params.starcall_gpu}",
+        "starcall_job_gpu=${params.starcall_gpu.toString().toBoolean()}",
         hydraList('jobscript_binds', [starcall_dir, cache_dir]),
     ].join(' ')
     // In cluster mode --cores is left to the profile: there it is the budget
