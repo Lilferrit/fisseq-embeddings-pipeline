@@ -1,6 +1,6 @@
 # Filter Embeddings (`FILTER_EMBEDDINGS`)
 
-`python -m fisseq_embeddings_pipeline.filter` (Snakemake rule `filter_embeddings`) determines which of `EMBED_CELLS`' cells pass
+`python -m fisseq_embeddings_pipeline.filter` (Nextflow process `FILTER_EMBEDDINGS`) determines which of `EMBED_CELLS`' cells pass
 `QC_FILTER` (inner join on the composite key) and fits the synonymous
 z-score against them -- but **publishes only the join key and the fitted
 statistics, never a second copy of the embedding matrix**. The per-cell

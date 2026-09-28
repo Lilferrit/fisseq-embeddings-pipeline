@@ -3,7 +3,7 @@
 > **This repo is implemented.** `docs/` (built with mkdocs, published to
 > GitHub Pages on every push to `main` — see **CI** below) is the
 > authoritative reference: architecture decisions, data contracts,
-> per-stage config/usage, Snakemake wiring, and output layout. Read it
+> per-stage config/usage, Nextflow wiring, and output layout. Read it
 > before `SPEC.md`/`IMPLEMENTATION_CHECKLIST.md`, which no longer exist —
 > their content was folded into `docs/` once implementation caught up to
 > the design.
@@ -45,15 +45,17 @@ place.
 `origin/devel` branch, not `master` — check
 `/workspaces/starcall-workflow`'s checked-out branch before trusting
 anything you read from it (`git -C /workspaces/starcall-workflow branch
---show-current`); if it's on `master`, the phenotyping rules this pipeline
-depends on (`make_cell_images`, `extract_embeddings` in
-`workflow/rules/phenotyping.smk`) won't be there at all.
+--show-current`); if it's on `master`, the phenotyping layout this pipeline
+depends on (`workflow/rules/phenotyping.smk`'s whole-tile outputs under
+`phenotyping_dir`) won't be there at all. Its own `make_cell_images` is
+broken against its cell table, which is why `BUILD_DATASET` does the
+cropping itself (`docs/architecture.md` decision 17).
 
 ## Repo conventions
 
 - **Python stages**: each `src/fisseq_embeddings_pipeline/<stage>.py` is a
   Hydra entry point invoked as `python -m fisseq_embeddings_pipeline.<stage>`
-  (see any rule in `workflow/rules/` for the exact CLI shape), with a
+  (see any module in `modules/local/` for the exact CLI shape), with a
   `@dataclasses.dataclass class <Stage>Config(AppConfig)` registered via
   `ConfigStore`, matching `fisseq-data-pipeline`'s pattern exactly.
 - **Every config extends `AppConfig`** (`config/app.py`), which carries the
@@ -74,18 +76,25 @@ depends on (`make_cell_images`, `extract_embeddings` in
   write a full copy of another stage's table to disk (rather than a join
   key + something new), stop and check whether that violates the no-copy
   principle — see `docs/architecture.md`'s architecture decisions.
-- **Snakemake rules** (`workflow/rules/*.smk`, grouped by track rather than
-  one file per rule): `container: config["container_image"]`,
-  `threads:`/`resources:`, and a `shell:` body of `THREAD_ENV` plus one
-  `python -m <pkg>.<module>` invocation with `output_dir=$(dirname {output})`
-  and a trailing `random_seed={config[random_seed]}` — see `embed_cells`
-  (`workflow/rules/embeddings.smk`) for the fully-worked example, and
-  `build_cell_images` (`cell_images.smk`) for the one genuine exception.
-  There is no `publishDir`: each rule's `output:` IS its published path,
-  since `workflow/Snakefile` sets `workdir: pipeline_dir`. See
-  [`docs/snakemake.md`](docs/snakemake.md#rules).
+- **Nextflow processes**: one per stage, in
+  `modules/local/<name>/main.nf`, wired together in
+  `workflows/embeddings.nf`. Each carries `errorStrategy 'ignore'`, a
+  `process_*` label, `container "${params.container_image}"` and a
+  `publishDir ..., mode: 'copy'` into `pipeline_dir`, and a `script:` of
+  `${threadEnv(task.cpus)}` (`modules/local/functions.nf`) plus one
+  `python -m <pkg>.<module>` invocation with `output_dir=.` and a trailing
+  `random_seed=${params.random_seed}` — see `EMBED_CELLS` for the
+  fully-worked example, and `BUILD_CELL_IMAGES` for the one genuine
+  exception (a nested starcall `snakemake`). `PLAN_EXPERIMENTS` runs first
+  and owns validation/routing (`config/experiments.py`) — add new
+  per-experiment routing there, in Python, not in Groovy. See
+  [`docs/nextflow.md`](docs/nextflow.md#modules).
+- **No scheduler-specific code.** Cluster settings are the user's: a
+  `-c site.config` for Nextflow and a snakemake 7 `starcall_profile` for
+  the nested starcall run. Only the generic image re-entry jobscript
+  (`render_starcall_jobscript`) lives here.
 - **Config**: defaults belong in `params.yaml` (repo root), never in
-  a profile — see
+  `nextflow.config` or a profile — see
   [`docs/configuration.md`](docs/configuration.md).
 
 ## Git workflow
@@ -122,42 +131,39 @@ see **CI** below for what runs where.
 
 ```bash
 uv run pytest tests/unit                      # fast, no GPU needed
-uv run pytest tests/integration                # drives real `snakemake` runs
-uv run pytest tests/integration --container    # real-starcall instead; needs docker + testing_data/
+uv run pytest tests/integration                # real `nextflow run -profile local`; needs nextflow + java on PATH
+uv run pytest tests/integration --container    # real starcall instead; needs docker + testing_data/lmna_t3_mini
 uv run pre-commit run --all-files
 ```
 
 `tests/unit/` mirrors `fisseq-data-pipeline`'s layout (one test module per
 pipeline stage). `tests/integration/test_integration.py` is modeled
 directly on that repo's own integration suite — a synthetic fixture, a
-`subprocess`-driven end-to-end `snakemake` run, and output-file/column
-assertions.
+`subprocess`-driven end-to-end `nextflow run -profile local`, and
+output-file/column assertions. BUILD_CELL_IMAGES' nested `snakemake` is a
+stub on PATH that records its argv; the fixture pre-writes the
+starcall-shaped outputs it would have produced.
 
 `EMBED_CELLS`' GPU/checkpoint dependency is handled in the integration
 fixture by building a tiny, from-scratch, randomly-initialized
 `vit_small` checkpoint (`_write_tiny_checkpoint`) and running
 `EMBED_CELLS` against it with `device=cpu`, rather than stubbing
-`load_cell_dino` out entirely. This exercises the wrapper's real control
-flow (weight loading, forward pass, shape handling) — not Cell-DINO's
-actual pretrained-checkpoint output quality — at the cost of a few
-seconds of real (CPU) compute per run. No GPU or real checkpoint is
-needed to run `tests/integration` anywhere, including CI.
+`load_cell_dino` out entirely. No GPU or real checkpoint is needed to run
+`tests/integration` anywhere, including CI.
 
-`uv run pytest tests/integration --container` is the one exception to
-all of the above. The integration suite has two mutually exclusive modes
-(see `tests/integration/conftest.py`): bare `pytest tests/integration`
-runs the synthetic uncontainerized tests, and `--container` instead
-runs only `test_real_starcall_pipeline_produces_cell_images`, which
-invokes a **real** nested `snakemake` run against real starcall-workflow
-data (every other test fakes that step with a stub `snakemake` on PATH),
-through a real build of the root Dockerfile, run via Apptainer. Opt-in only — even with
-`--container` it self-skips unless `testing_data/lmna_t3/` has been
-populated (`uv run python scripts/prepare_real_starcall_test_data.py`,
-downloads ~6.3GB) and `docker`/`apptainer` are on PATH; not run in CI.
-Needs a Docker daemon that can bind-mount this repo's own temp
-directories — Docker Desktop's file-sharing allowlist can silently block
-that on some local setups (see that test module's own docstring for the
-exact failure signature and how to tell it apart from a real bug).
+`--container` is mutually exclusive with the synthetic suite (see
+`tests/integration/conftest.py`) and runs only the `container`-marked
+tests: real starcall-workflow inside a real build of the root Dockerfile
+(under Docker), on the tiny `testing_data/lmna_t3_mini/` fixture
+(`uv run python scripts/prepare_real_starcall_test_data.py --minimal`),
+stopping after `EMBED_CELLS`. `test_real_starcall_local` runs the nested
+starcall in local mode; `test_real_starcall_profile_mode` runs it through
+a throwaway `starcall_profile` with a fake cluster and fake container
+runtime — the real `apptainer` re-entry on a compute node is only
+verifiable on a real cluster. Self-skips without the fixture or `docker`;
+`FISSEQ_TEST_IMAGE=<tag>` skips the image build; not run in CI. Docker
+Desktop's file-sharing allowlist can silently block bind-mounting this
+repo's temp directories (see the test module's container-section comment).
 
 ## CI
 
@@ -168,7 +174,7 @@ tagging convention is in
 
 ## Docker / devcontainer
 
-`Dockerfile` (repo root) is the single image every rule runs
+`Dockerfile` (repo root) is the single image every task runs
 in — build it locally with `docker build -t
 fisseq-embeddings-pipeline:latest .` and point `params.yaml`'s
 `container_image` at wherever you publish it (see

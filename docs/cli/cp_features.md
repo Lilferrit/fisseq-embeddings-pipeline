@@ -1,6 +1,6 @@
 # CellProfiler Feature Dataset (`BUILD_CP_FEATURES`)
 
-`python -m fisseq_embeddings_pipeline.cp_features` (Snakemake rule `build_cp_features`) selects `BUILD_CELL_IMAGES`' `cp_*`-prefixed
+`python -m fisseq_embeddings_pipeline.cp_features` (Nextflow process `BUILD_CP_FEATURES`) selects `BUILD_CELL_IMAGES`' `cp_*`-prefixed
 CellProfiler feature columns out of its `cell_table.parquet`, stripping
 the prefix back off, into one per-experiment `cp_features.parquet` -- the
 CellProfiler-feature analog of `EMBED_CELLS`' `embeddings.parquet`.
@@ -11,7 +11,7 @@ that does, and it already joined each tile's CellProfiler CSV into
 `cell_table.parquet` (by row position -- CellProfiler's own `ObjectNumber`
 numbering has no shared index with the segmentation table) before this
 stage ever runs. See
-[Architecture](../architecture.md#cell-images-buildcellimages-output-from-starcall-workflow).
+[Architecture](../architecture.md#cell-images-build_cell_images-output-from-starcall-workflow).
 
 ## Config fields
 
@@ -19,7 +19,7 @@ Extends the [common config fields](#common-config-fields) below.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| `cell_images_dir` | **required** | `BUILD_CELL_IMAGES`' per-experiment output directory (holds `cell_table.parquet`, already carrying this experiment's `cp_*`-prefixed CellProfiler columns). Injected automatically by the rule when run through the pipeline; set explicitly only when invoking this module's CLI directly against a `BUILD_CELL_IMAGES` output you already have. |
+| `cell_images_dir` | **required** | `BUILD_CELL_IMAGES`' per-experiment output directory (holds `cell_table.parquet`, already carrying this experiment's `cp_*`-prefixed CellProfiler columns). Injected automatically when run through the pipeline (the process stages `cell_table.parquet` into its work directory and passes `cell_images_dir=.`); set explicitly only when invoking this module's CLI directly against a `BUILD_CELL_IMAGES` output you already have. |
 | `batch_stem` | **required** | This experiment's identifier, written into every row as `meta_batch`. |
 | `barcode_col_name` | `"upBarcode"` | Column name for cell barcodes in `cell_table.parquet`. |
 | `aa_changes_col_name` | `"aaChanges"` | Column name for amino-acid change labels in `cell_table.parquet`. |

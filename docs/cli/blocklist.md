@@ -1,6 +1,6 @@
 # Reproducibility Blocklist (`BLOCKLIST`)
 
-`python -m fisseq_embeddings_pipeline.blocklist` (Snakemake rule `blocklist`)
+`python -m fisseq_embeddings_pipeline.blocklist` (Nextflow process `BLOCKLIST`)
 turns one aggregation method's per-replicate correlations into a verdict.
 Stage 4 of the reproducibility-filtering chain; cellDINO track only.
 
@@ -31,9 +31,9 @@ Extends the [common config fields](#common-config-fields) below.
 | ----- | ------- | ----------- |
 | `correlation_files` | **required** | Glob matching every replicate's `CORRELATE_FEATURES` output for ONE method. |
 | `minimum_correlation` | `0.5` | Minimum median *r* across replicates for a dimension to pass. Wired to `params.reproducibility_min_correlation`. |
-| `output_name` | `"blocklist"` | Basename of the output file; the rule sets it to the method. |
+| `output_name` | `"blocklist"` | Basename of the output file; the process sets it to the method. |
 
-An empty glob raises: the correlation files are a declared rule input, so an
+An empty glob raises: the correlation files are a declared process input, so an
 empty match is always a wiring bug. Contrast
 [FILTER_AGGREGATE](filter_aggregate.md)'s passthrough glob, where empty is the
 default.

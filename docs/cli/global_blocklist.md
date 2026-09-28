@@ -1,7 +1,7 @@
 # Global Blocklist (`GLOBAL_BLOCKLIST`)
 
-`python -m fisseq_embeddings_pipeline.global_blocklist` (Snakemake rule
-`global_blocklist`) is the cross-experiment reproducibility vote. Runs once,
+`python -m fisseq_embeddings_pipeline.global_blocklist` (Nextflow process
+`GLOBAL_BLOCKLIST`) is the cross-experiment reproducibility vote. Runs once,
 over every experiment; cellDINO track only.
 
 Each experiment decides independently, from its own cells, which embedding

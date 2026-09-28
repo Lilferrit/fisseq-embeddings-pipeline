@@ -1,7 +1,7 @@
 # Half Correlation (`CORRELATE_FEATURES`)
 
-`python -m fisseq_embeddings_pipeline.correlatefeatures` (Snakemake rule
-`correlate_features`) computes, for one bootstrap replicate and one
+`python -m fisseq_embeddings_pipeline.correlatefeatures` (Nextflow process
+`CORRELATE_FEATURES`) computes, for one bootstrap replicate and one
 aggregation method, the per-dimension Pearson correlation between the two
 [AGGREGATE_HALF](aggregate_half.md) outputs. Stage 3 of the
 reproducibility-filtering chain; cellDINO track only.
@@ -39,7 +39,7 @@ Extends the [common config fields](#common-config-fields) below.
 | `half1_file` | **required** | First half's `AGGREGATE_HALF` output. |
 | `half2_file` | **required** | Second half's output, same method. |
 | `label_column` | `"meta_aa_changes"` | Column the two halves are aligned on. |
-| `output_name` | `"correlations"` | Basename of the output file; the rule sets it to the method. |
+| `output_name` | `"correlations"` | Basename of the output file; the process sets it to the method. |
 
 ## Output file
 

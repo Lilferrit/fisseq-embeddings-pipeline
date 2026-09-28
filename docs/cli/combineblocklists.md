@@ -1,7 +1,7 @@
 # Combine Blocklists (`COMBINE_BLOCKLISTS`)
 
-`python -m fisseq_embeddings_pipeline.combineblocklists` (Snakemake rule
-`combine_blocklists`) concatenates one experiment's per-method
+`python -m fisseq_embeddings_pipeline.combineblocklists` (Nextflow process
+`COMBINE_BLOCKLISTS`) concatenates one experiment's per-method
 [BLOCKLIST](blocklist.md) outputs into a single verdict table. Stage 5 of the
 reproducibility-filtering chain; cellDINO track only.
 

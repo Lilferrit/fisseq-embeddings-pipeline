@@ -1,7 +1,7 @@
 # Filtered Aggregates (`FILTER_AGGREGATE`)
 
-`python -m fisseq_embeddings_pipeline.filter_aggregate` (Snakemake rule
-`filter_aggregate`) is the step the whole reproducibility chain exists to
+`python -m fisseq_embeddings_pipeline.filter_aggregate` (Nextflow process
+`FILTER_AGGREGATE`) is the step the whole reproducibility chain exists to
 feed: it turns [AGGREGATE_EMBEDDINGS](aggregate.md)' `aggregate.parquet` into
 the filtered aggregate that per-experiment consumers read. Stage 6 of the
 chain; cellDINO track only.

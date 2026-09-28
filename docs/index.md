@@ -1,6 +1,6 @@
 # fisseq-embeddings-pipeline
 
-A Snakemake + Python pipeline that scores genetic variants against learned
+A Nextflow + Python pipeline that scores genetic variants against learned
 **Cell-DINO** embeddings from FISSEQ (Fluorescence In-Situ Sequencing)
 experiments -- the embedding-space sibling of
 [`fisseq-data-pipeline`](https://github.com/Lilferrit/fisseq-data-pipeline),
@@ -24,9 +24,10 @@ starcall-workflow's raw tree -> Cell Images (BUILD_CELL_IMAGES)
 ```
 
 `BUILD_CELL_IMAGES` is the only stage that reads `starcall-workflow`'s
-tree or invokes Snakemake -- it forces each tile's phenotype image, mask,
+tree or runs its snakemake -- it forces each tile's phenotype image, mask,
 and genotype columns to exist and joins them into one self-sufficient
-`cell_table.parquet` per experiment (see [Architecture](architecture.md)).
+`cell_table.parquet` per experiment; `BUILD_DATASET` then crops each cell
+straight out of those whole-tile images (see [Architecture](architecture.md)).
 
 A variant's identity is preserved throughout by its label column
 (`meta_aa_changes`); "synonymous" variants (same amino acid before/after)
@@ -42,7 +43,7 @@ them into `cell_table.parquet`, `BUILD_CP_FEATURES` selects them back out,
 and the same downstream shape -- filter, aggregate, OVWT, global pooling
 -- runs again, reusing `QC_FILTER`'s existing output rather than
 QC-filtering twice. See [Architecture](architecture.md) and
-[Snakemake Workflow](snakemake.md#cellprofiler-feature-track).
+[Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
 
 ## Where to go next
 
@@ -50,10 +51,9 @@ QC-filtering twice. See [Architecture](architecture.md) and
 - **[Quickstart](quickstart.md)** -- run the pipeline end to end.
 - **[Architecture](architecture.md)** -- design decisions, repository
   layout, data contracts, and the Cell-DINO inference internals.
-- **[Snakemake Workflow](snakemake.md)** -- how the fifteen pipeline stages
-  (`BUILD_CELL_IMAGES` shared by both tracks, eight more cellDINO-track,
-  six optional CellProfiler-track) are orchestrated, and the output
-  directory layout.
+- **[Nextflow Workflow](nextflow.md)** -- how the pipeline's stages
+  are orchestrated, running on a cluster with your own profiles, and the
+  output directory layout.
 - **[Configuration](configuration.md)** -- `params.yaml` reference, Docker
   image versioning, and WebDataset shard sizing.
 - **Stage Reference** (sidebar) -- usage, config fields, and outputs for
@@ -68,5 +68,5 @@ QC-filtering twice. See [Architecture](architecture.md) and
   [Architecture](architecture.md)).
 - `starcall-workflow` -- the Snakemake pipeline whose `origin/devel` branch
   produces this pipeline's raw input tree; `BUILD_CELL_IMAGES` is the only
-  stage that reads it or invokes Snakemake -- see
+  stage that reads it or runs it -- see
   [Architecture](architecture.md#data-contracts).

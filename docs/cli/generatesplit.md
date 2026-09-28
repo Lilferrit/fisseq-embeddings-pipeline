@@ -1,7 +1,7 @@
 # Pseudo-Replicate Split (`GENERATE_SPLIT`)
 
-`python -m fisseq_embeddings_pipeline.generatesplit` (Snakemake rule
-`generate_split`) draws one bootstrap replicate's stratified 50/50 split of an
+`python -m fisseq_embeddings_pipeline.generatesplit` (Nextflow process
+`GENERATE_SPLIT`) draws one bootstrap replicate's stratified 50/50 split of an
 experiment's QC-passed cells. Stage 1 of the reproducibility-filtering chain
 (see [Architecture](../architecture.md)); cellDINO track only.
 
@@ -28,7 +28,7 @@ cell key is order-independent by construction.
 `bootstrap_idx` offsets the one pipeline-wide `random_seed` -- the split is
 drawn at `random_seed + bootstrap_idx`. There is no stage-local seed field
 (see [Architecture](../architecture.md) decision 11), so a single
-`--config random_seed=N` override reproduces every replicate of every
+`--random_seed N` override reproduces every replicate of every
 experiment at once.
 
 ## Config fields

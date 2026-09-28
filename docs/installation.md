@@ -26,22 +26,31 @@ inference is vendored directly under
 [Architecture](architecture.md#vendored-code)), so no separate `dinov2`
 install step is needed.
 
-## Snakemake
+## Nextflow
 
-The pipeline is orchestrated by
-[Snakemake](https://snakemake.readthedocs.io/) (&ge; 8). It is an ordinary
-dependency, so `uv sync` above already installed it -- there is no separate
-install step and no Java runtime to provision.
+The pipeline is orchestrated by [Nextflow](https://www.nextflow.io/)
+(DSL2, tested on 26.04), which needs a Java runtime (17 or newer):
+
+```bash
+curl -s https://get.nextflow.io | bash
+sudo mv nextflow /usr/local/bin/
+```
+
+Nextflow is not a Python dependency and `uv sync` doesn't install it.
+Neither is snakemake any more: the only snakemake this pipeline uses is
+the nested starcall-workflow run inside `BUILD_CELL_IMAGES`, which is
+pinned to 7.32.4 in the image's own `ops` env.
 
 ## Containers
 
-Running containerized is optional: a bare `snakemake` runs every rule
-against the `uv`-managed venv from above. To run them inside the image
-instead you need [Apptainer](https://apptainer.org/) (or Singularity) on
-`PATH` -- Snakemake has no Docker backend, though it runs the `docker://`
-image below unchanged.
+Every task runs inside the pipeline image by default -- Docker unless you
+pass `-profile apptainer`, which runs the same `docker://` image through
+[Apptainer](https://apptainer.org/). `-profile local` opts out entirely and
+runs every task against the `uv`-managed venv from above (what the test
+suite and CI do; there is no `ops` env there, so `BUILD_CELL_IMAGES`' nested
+starcall run needs a `snakemake` of your own on `PATH`).
 
-Every rule, including `build_cell_images`, uses the same single image,
+Every process, including `BUILD_CELL_IMAGES`, uses the same single image,
 built from the repo-root `Dockerfile`:
 
 ```bash
@@ -51,24 +60,20 @@ docker build -t fisseq-embeddings-pipeline:latest .
 Point `params.yaml`'s `container_image` (or a `--container_image`
 override) at wherever you publish it -- see
 [Configuration](configuration.md#docker-image-versioning-publishing) for
-the registry/tagging convention this repo's CI uses. A plain `snakemake`
-run (see [Snakemake Workflow](snakemake.md#containers)) needs no image at
-all -- every rule runs directly against your own `uv`-managed venv.
+the registry/tagging convention this repo's CI uses. See
+[Nextflow Workflow](nextflow.md#profiles-and-containers) for the profiles.
 
-`build_cell_images` invokes `starcall-workflow`'s own Snakemake pipeline
-as a nested run,
-whose dependency stack (tensorflow/stardist/cellpose) is kept isolated
-from this repo's own torch/Cell-DINO/polars stack via a second, dedicated
-conda env (`ops`) baked into this same image, rather than a separate
-container -- see the `Dockerfile`'s own comments for how. That env has
-been built and its dependencies confirmed importable at the pinned
-versions (see the `Dockerfile`'s own comments for exactly what that
-build-verified) -- but **no real `snakemake` rule execution against real
-starcall-workflow data has been tested**; smoke-test that specifically
-before relying on it in production.
+`BUILD_CELL_IMAGES` invokes `starcall-workflow`'s own Snakemake pipeline
+as a nested run, whose dependency stack (tensorflow/stardist/cellpose) is
+kept isolated from this repo's own torch/Cell-DINO/polars stack via a
+second, dedicated conda env (`ops`) baked into this same image, rather
+than a separate container -- see the `Dockerfile`'s own comments for how.
+Real starcall execution inside that env is covered by the opt-in
+`pytest tests/integration --container` tests, on a tiny real-data
+fixture (see `testing_data/README.md`).
 
 ## Development environment
 
 `.devcontainer/` provides a containerized dev environment (VS Code /
-Claude Code) with `snakemake` and Docker-outside-of-Docker access
+Claude Code) with Nextflow and Docker-outside-of-Docker access
 already configured, mirroring `fisseq-data-pipeline`'s own `.devcontainer/`.

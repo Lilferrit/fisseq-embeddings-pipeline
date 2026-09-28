@@ -1,6 +1,6 @@
 # FISSEQ Embeddings Pipeline
 
-A Snakemake + Python workflow for scoring genetic variants against learned
+A Nextflow + Python workflow for scoring genetic variants against learned
 **Cell-DINO** embeddings from FISSEQ (Fluorescence In-Situ Sequencing)
 experiments -- the embedding-space sibling of
 [`fisseq-data-pipeline`](https://github.com/Lilferrit/fisseq-data-pipeline),
@@ -25,7 +25,7 @@ Cell Info Table + Cell Images (starcall-workflow)
 
 See **[the documentation site](https://lilferrit.github.io/fisseq-embeddings-pipeline/)**
 for the full design (architecture decisions, data contracts, per-stage
-usage, Snakemake orchestration, output layout).
+usage, Nextflow orchestration, running on a cluster, output layout).
 
 ## Quick start
 
@@ -38,17 +38,21 @@ uv sync --group dev
 ```
 
 Run the full pipeline end to end with
-[Snakemake](https://snakemake.readthedocs.io/) (≥ 8, installed by `uv sync`):
+[Nextflow](https://www.nextflow.io/) (needs Java 17+; not installed by
+`uv sync`):
 
 ```bash
-snakemake --configfile params.yaml \
-    --config pipeline_dir=/path/to/experiment \
-             cell_dino_checkpoint=/path/to/checkpoint.pth \
-    --cores 8
+nextflow run . -params-file params.yaml \
+    --pipeline_dir /path/to/experiment \
+    --cell_dino_checkpoint /path/to/checkpoint.pth
 ```
 
-That runs against this repo's own venv. To run every rule in the published
-container image instead, add `--profile profiles/apptainer`.
+That runs every task in the published container image under Docker; add
+`-profile apptainer` for Apptainer, or `-profile local` to run against
+this repo's own venv. On a cluster, pass your own executor settings with
+`-c site.config`, and optionally a snakemake profile for the nested
+starcall-workflow run with `--starcall_profile` -- nothing
+scheduler-specific ships in this repo.
 
 See [Installation](https://lilferrit.github.io/fisseq-embeddings-pipeline/installation/)
 and [Quickstart](https://lilferrit.github.io/fisseq-embeddings-pipeline/quickstart/)

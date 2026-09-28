@@ -1,6 +1,6 @@
 # OVWT Distinguish-ability Scores, CellProfiler Track (`OVWT_BATCHWISE_CP_FEATURES`)
 
-`python -m fisseq_embeddings_pipeline.ovwt_cp_features` (Snakemake rule `ovwt_batchwise_cp_features`) is the CellProfiler-feature analog of
+`python -m fisseq_embeddings_pipeline.ovwt_cp_features` (Nextflow process `OVWT_BATCHWISE_CP_FEATURES`) is the CellProfiler-feature analog of
 `OVWT_BATCHWISE`: the same *k*-fold, stratified, per-variant one-vs-
 wildtype XGBoost scoring described on the [OVWT](ovwt.md) page, called
 with `feature_selector=FEATURE_SELECTOR` instead of `OVWT_BATCHWISE`'s

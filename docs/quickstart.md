@@ -13,7 +13,7 @@ window: 224   # must match your Cell-DINO checkpoint's crop size -- global
 
 experiments:
   - batch_stem: experiment1
-    starcall_workflow_dir: /data/experiment1   # a checkout Snakemake can run against --
+    starcall_workflow_dir: /data/experiment1   # a starcall-workflow checkout to run against --
                                                 # IS this experiment's root, no separate
                                                 # folder needed (nothing requires it to be
                                                 # named "starcall-workflow")
@@ -26,13 +26,15 @@ experiments:
     # starcall_workflow_dir at all.
     wells: [well1, well2]
     # grid_size omitted -- auto-detected per well from phenotyping_dir's
-    # own {well}_grid<N> directory naming; set it explicitly to override.
+    # own {well}_grid<N> directory naming. Set it explicitly (e.g.
+    # grid_size: 12) when starting from raw input, with nothing under
+    # phenotyping_dir yet: every tile of the grid is then requested.
     # window omitted -- falls back to the global `window` default above.
 ```
 
 These starcall-workflow-facing fields all belong to `BUILD_CELL_IMAGES`,
 the one stage that touches `starcall-workflow`'s tree -- see
-[`BUILD_CELL_IMAGES`' section of the Architecture doc](architecture.md#cell-images-buildcellimages-output-from-starcall-workflow)
+[`BUILD_CELL_IMAGES`' section of the Architecture doc](architecture.md#cell-images-build_cell_images-output-from-starcall-workflow)
 for every field it accepts, and
 [`BUILD_DATASET`'s stage reference](cli/dataset.md) for `BuildDatasetConfig`'s
 own remaining fields (`window`, `shard_maxcount`, ...).
@@ -47,36 +49,26 @@ for what checkpoint shapes are supported.
 ## 3. Run the pipeline
 
 ```bash
-snakemake --configfile params.yaml \
-    --config pipeline_dir=/path/to/experiment1 \
-             cell_dino_checkpoint=/path/to/checkpoint.pth \
-    --cores 8
+nextflow run . -params-file params.yaml \
+    --pipeline_dir /path/to/experiment1 \
+    --cell_dino_checkpoint /path/to/checkpoint.pth
 ```
 
-`--configfile params.yaml` is mandatory -- there is no embedded fallback
+`-params-file params.yaml` is mandatory -- there is no embedded fallback
 for pipeline defaults (see [Configuration](configuration.md)). Any field in
-`params.yaml` can be overridden by adding it to that same `--config`, e.g.
-`ovwt_min_cells=500`.
+`params.yaml` can be overridden on the command line as `--key value`, e.g.
+`--ovwt_min_cells 500`.
 
-`--cores` is how much of *this* machine the outer workflow may use across
-rules; it is unrelated to `snakemake_cores`, which bounds the nested
-starcall invocation inside a single `build_cell_images` job.
+That runs every task inside the image named by `container_image`, under
+Docker. Add `-profile apptainer` to use Apptainer instead (the usual choice
+on a cluster), and `-c site.config` for your cluster's executor settings --
+see [Nextflow Workflow](nextflow.md#running-on-a-cluster-bring-your-own-profiles).
+On a GPU-less Docker host, also pass `--starcall_gpu false --cell_dino_device cpu`
+(Docker's `--gpus` fails outright without a GPU).
 
-That runs every rule against whatever Python environment invoked snakemake
-(this repo's own venv). To run them inside the image named by
-`container_image` instead, add `--profile profiles/apptainer`:
-
-```bash
-snakemake --configfile params.yaml \
-    --config pipeline_dir=/path/to/experiment1 \
-             cell_dino_checkpoint=/path/to/checkpoint.pth \
-    --cores 8 \
-    --profile profiles/apptainer
-```
-
-Rerunning the same command picks up where it left off -- Snakemake skips
-any rule whose outputs are newer than its inputs, so there is no `-resume`
-flag to remember.
+Add `-resume` to a rerun to reuse every task whose inputs haven't changed.
+`BUILD_CELL_IMAGES`' own nested starcall run is mtime-based on its own, so
+already-computed starcall outputs are reused either way.
 
 ## 4. Read the outputs
 
@@ -84,7 +76,7 @@ Every stage's output lands under `<pipeline_dir>/`, one subdirectory per
 stage (`cell_images/`, `dataset/`, `qc_filter/`, `embeddings/`,
 `filter_embeddings/`, `feature_select_batchwise/`, `ovwt_batchwise/`,
 `global/`). See
-[Snakemake Workflow](snakemake.md#output-directory-layout) for the full tree
+[Nextflow Workflow](nextflow.md#output-directory-layout) for the full tree
 and [Architecture](architecture.md#data-contracts) for what each Parquet
 file's columns mean.
 

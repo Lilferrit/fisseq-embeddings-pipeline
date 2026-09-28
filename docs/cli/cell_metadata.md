@@ -1,6 +1,6 @@
 # Cell Metadata (`BUILD_CELL_METADATA`)
 
-`python -m fisseq_embeddings_pipeline.cell_metadata` (Snakemake rule `build_cell_metadata`) projects `BUILD_CELL_IMAGES`' `cell_table.parquet`
+`python -m fisseq_embeddings_pipeline.cell_metadata` (Nextflow process `BUILD_CELL_METADATA`) projects `BUILD_CELL_IMAGES`' `cell_table.parquet`
 down to the seven `meta_*` columns `QC_FILTER` reads, as one
 per-experiment `metadata.parquet`. No images, no feature columns, no
 `starcall-workflow` tree access.
@@ -11,7 +11,7 @@ input was `BUILD_DATASET`'s own `metadata.parquet`, written inside that
 stage's WebDataset shard-writing loop -- which made the expensive,
 image-reading dataset build a hard dependency of the CellProfiler track
 too, since `FILTER_CP_FEATURES` consumes the same QC output. See
-[Snakemake Workflow: Track independence](../snakemake.md#track-independence).
+[Nextflow Workflow: Track independence](../nextflow.md#track-independence).
 
 `QC_FILTER` can't simply read `cell_table.parquet` itself: its
 `filter_columns` does rename the barcode/edit-distance/amino-acid-changes
@@ -32,7 +32,7 @@ Extends the [common config fields](#common-config-fields) below.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| `cell_table` | **required** | Path to `BUILD_CELL_IMAGES`' `cell_table.parquet`. The file itself, not its directory -- the rule derives it from `build_cell_images`' own directory output (see [Snakemake Workflow](../snakemake.md#bind-mounts)). |
+| `cell_table` | **required** | Path to `BUILD_CELL_IMAGES`' `cell_table.parquet`. The file itself, not its directory -- the process takes `BUILD_CELL_IMAGES`' `cell_table.parquet` output as a staged `path` input, so no host path needs binding. |
 | `batch_stem` | **required** | This experiment's identifier, written into every row as `meta_batch`. |
 | `barcode_col_name` | `"upBarcode"` | Column name for cell barcodes in `cell_table.parquet`. |
 | `aa_changes_col_name` | `"aaChanges"` | Column name for amino-acid change labels in `cell_table.parquet`. |

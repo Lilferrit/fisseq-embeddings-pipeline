@@ -1,6 +1,6 @@
 # Aggregation (`AGGREGATE_EMBEDDINGS`)
 
-`python -m fisseq_embeddings_pipeline.aggregate` (Snakemake rule `aggregate_embeddings`) reconstructs the QC-passed, synonymous-corrected
+`python -m fisseq_embeddings_pipeline.aggregate` (Nextflow process `AGGREGATE_EMBEDDINGS`) reconstructs the QC-passed, synonymous-corrected
 embedding table (via `load_filtered_embeddings()`) and computes per-variant
 pooling of the cell-level embeddings via one or more of:
 

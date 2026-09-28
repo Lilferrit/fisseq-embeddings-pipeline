@@ -1,6 +1,6 @@
 # Aggregation, CellProfiler Track (`AGGREGATE_CP_FEATURES`)
 
-`python -m fisseq_embeddings_pipeline.aggregate_cp_features` (Snakemake rule `aggregate_cp_features`) is the CellProfiler-feature analog of
+`python -m fisseq_embeddings_pipeline.aggregate_cp_features` (Nextflow process `AGGREGATE_CP_FEATURES`) is the CellProfiler-feature analog of
 `AGGREGATE_EMBEDDINGS`: it reconstructs the QC-passed, synonymous-corrected
 CellProfiler feature table and computes per-variant pooling via one or
 more of `mean`/`median`/`KS`/`AUROC`/`KSnegLogP`/`AUROCnegLogP` -- the

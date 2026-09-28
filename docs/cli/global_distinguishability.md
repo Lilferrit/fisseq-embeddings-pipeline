@@ -1,6 +1,6 @@
 # Global Variant Distinguish-ability Scores (`GLOBAL_VARIANT_DISTINGUISHABILITY`)
 
-`python -m fisseq_embeddings_pipeline.global_distinguishability` (Snakemake rule `global_variant_distinguishability`) is two steps, not one:
+`python -m fisseq_embeddings_pipeline.global_distinguishability` (Nextflow process `GLOBAL_VARIANT_DISTINGUISHABILITY`) is two steps, not one:
 per-experiment, z-score both of that experiment's per-variant
 distinguish-ability scores (`auroc_pooled`, `auroc_median_barcode`)
 against its own synonymous variants, *then* take the cross-experiment

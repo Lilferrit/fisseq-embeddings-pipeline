@@ -1,7 +1,7 @@
 # Cell Embeddings (`EMBED_CELLS`)
 
-`python -m fisseq_embeddings_pipeline.embed` (Snakemake rule
-`embed_cells`, the pipeline's only GPU-bound stage) streams every cell in
+`python -m fisseq_embeddings_pipeline.embed` (Nextflow process
+`EMBED_CELLS`, the pipeline's only GPU-bound stage) streams every cell in
 a `BUILD_DATASET` WebDataset through a pretrained Cell-DINO checkpoint
 (Meta's `dinov2`) and writes one row per cell to `embeddings.parquet`. Not
 gated by `QC_FILTER` -- this GPU pass runs once per experiment regardless

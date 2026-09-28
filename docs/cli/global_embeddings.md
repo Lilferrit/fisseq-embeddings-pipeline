@@ -1,6 +1,6 @@
 # Global Variant Embeddings (`GLOBAL_VARIANT_EMBEDDINGS`)
 
-`python -m fisseq_embeddings_pipeline.global_embeddings` (Snakemake rule `global_variant_embeddings`) cross-experiment median-pools every
+`python -m fisseq_embeddings_pipeline.global_embeddings` (Nextflow process `GLOBAL_VARIANT_EMBEDDINGS`) cross-experiment median-pools every
 experiment's `aggregate.parquet`, then runs PCA at the full retained rank
 -- `min(n_variants, n_retained_feature_dims)`, so every component the data
 can actually support is written, not a fixed subset chosen ahead of time.
@@ -34,7 +34,7 @@ always computed and written to `pca_scores.parquet`/`pca_components.parquet`/
 
 ## Reproducibility filtering
 
-The rule passes `blocklist_file`, so every dimension
+The pipeline passes `blocklist_file`, so every dimension
 [GLOBAL_BLOCKLIST](global_blocklist.md) marks not-reproducible is dropped from
 each experiment's aggregate **before** median-pooling -- neither the median
 nor the PCA ever sees one.

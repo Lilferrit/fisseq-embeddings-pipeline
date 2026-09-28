@@ -1,14 +1,14 @@
 # Half / Passthrough Aggregation (`AGGREGATE_HALF`)
 
-`python -m fisseq_embeddings_pipeline.aggregate_half` backs **two** Snakemake
-rules, mirroring how `fisseq-data-pipeline` includes one Nextflow process
-under two aliases:
+`python -m fisseq_embeddings_pipeline.aggregate_half` backs **two** Nextflow
+processes, mirroring how `fisseq-data-pipeline` includes one process under
+two aliases:
 
-- **`aggregate_half`** (`split_file` set) -- stage 2 of the
+- **`AGGREGATE_HALF`** (`split_file` set) -- stage 2 of the
   reproducibility-filtering chain. Aggregates one
   [GENERATE_SPLIT](generatesplit.md) half with one aggregator, so
   [CORRELATE_FEATURES](correlatefeatures.md) can compare the two halves.
-- **`aggregate_passthrough`** (`split_file` unset) -- aggregates *every*
+- **`AGGREGATE_PASSTHROUGH`** (`split_file` unset) -- aggregates *every*
   QC-passed cell with one aggregator, for a method listed in
   `params.aggregate_methods_passthrough`. Nothing downstream of it but
   [FILTER_AGGREGATE](filter_aggregate.md)'s final join: a passthrough method
@@ -20,17 +20,17 @@ is computed: those happen once, upstream in
 [AGGREGATE_EMBEDDINGS](aggregate.md), and a half's `meta_num_cells` would be
 actively misleading.
 
-One aggregator per job rather than all of them at once. That is the fan-out
+One aggregator per task rather than all of them at once. That is the fan-out
 `fisseq-data-pipeline` uses, and it matters most for the reference-based
 aggregators (`KS`/`AUROC` and the two `*negLogP` variants), whose peak memory
 is also why `feature_chunk_size` exists.
 
 ## Column naming
 
-`bare_columns` decides whether an `aggregator=median` job writes bare
-`emb_0000` or suffixed `emb_0000_median` columns. The rule sets it from the
-run's **full** `aggregate_methods` (bare only when that list is exactly
-`["median"]`), not from this job's single aggregator: the blocklist keys
+`bare_columns` decides whether an `aggregator=median` task writes bare
+`emb_0000` or suffixed `emb_0000_median` columns. The workflow sets it from
+the run's **full** `aggregate_methods` (bare only when that list is exactly
+`["median"]`), not from this task's single aggregator: the blocklist keys
 features by column name, so a half's column names must match
 `aggregate.parquet`'s exactly or `FILTER_AGGREGATE` would find nothing to
 drop.
@@ -49,7 +49,7 @@ Extends the [common config fields](#common-config-fields) below.
 | `label_column` | `"meta_aa_changes"` | Variant label column. |
 | `feature_chunk_size` | `32` | Dimensions per Polars query -- a memory dial only. See [Aggregation](aggregate.md). |
 | `bare_columns` | `false` | Whether an `aggregator=median` job strips the `_median` suffix. See above. |
-| `output_name` | `"aggregate"` | Basename of the single output file; the rule sets it to the method. |
+| `output_name` | `"aggregate"` | Basename of the single output file; the process sets it to the method. |
 
 ## Output file
 

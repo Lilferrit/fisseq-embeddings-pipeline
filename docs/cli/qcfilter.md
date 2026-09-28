@@ -1,6 +1,6 @@
 # QC Filtering (`QC_FILTER`)
 
-`python -m fisseq_embeddings_pipeline.qcfilter` (Snakemake rule `qc_filter`) reads `BUILD_DATASET`'s `metadata.parquet` and applies three
+`python -m fisseq_embeddings_pipeline.qcfilter` (Nextflow process `QC_FILTER`) reads `BUILD_CELL_METADATA`'s `metadata.parquet` and applies three
 sequential filters:
 
 1. **Edit distance** -- drops cells with edit distance greater than
