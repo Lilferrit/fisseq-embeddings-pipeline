@@ -1,9 +1,12 @@
-// GLOBAL_VARIANT_DISTINGUISHABILITY. Per-experiment synonymous z-score,
-// then cross-experiment median -- not a direct median of raw AUROC.
+// GLOBAL_VARIANT_DISTINGUISHABILITY. Per-experiment OVWT results pooled
+// across experiments.
 //
-// `stageAs: "res_input_*.parquet"` avoids every experiment's identically-
-// named results.parquet colliding when collected into this one task, same
-// pattern/caveat as global_variant_embeddings/main.nf.
+// Every experiment's file has the same basename, so they're staged under
+// numbered names and passed as an explicit input_files list, paired
+// positionally with batch_stems -- the workflow hands both over as one
+// sorted tuple so the pairing can't drift.
+
+include { threadEnv; hydraList } from '../functions'
 
 process GLOBAL_VARIANT_DISTINGUISHABILITY {
     errorStrategy 'ignore'
@@ -12,20 +15,18 @@ process GLOBAL_VARIANT_DISTINGUISHABILITY {
     publishDir { "${params.pipeline_dir}/global/distinguishability" }, mode: 'copy'
 
     input:
-    path(results_parquets, stageAs: "res_input_*.parquet")
-    val(batch_stems)
+    tuple val(batch_stems), path(results_parquets, stageAs: "res_input_*.parquet")
 
     output:
     path("global_scores.parquet"), emit: global_scores
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.global_distinguishability \\
         output_dir=. \\
-        'batch_stems=[${batch_stems.join(",")}]' \\
+        ${hydraList('input_files', results_parquets)} \\
+        ${hydraList('batch_stems', batch_stems)} \\
         label_column=${params.filter_label_column} \\
         random_seed=${params.random_seed}
     """

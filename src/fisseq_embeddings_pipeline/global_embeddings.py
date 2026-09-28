@@ -56,7 +56,7 @@ cosine-distance impact score against the control median"):
 import dataclasses
 import logging
 import pathlib
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import hydra
 import polars as pl
@@ -75,7 +75,6 @@ from .utils.constants import (
 from .utils.dimreduction import compute_pca
 from .utils.globalfeatureselect import median_across_batches
 from .utils.log import setup_logging
-from .utils.nextflow_staging import reconstruct_staged_paths
 from .utils.vectors import compute_impact_score
 
 
@@ -176,6 +175,7 @@ def global_variant_embeddings(
     label_column: str,
     random_seed: int,
     cumulative_variance_explained: float = 0.9,
+    blocklist_df: Optional[pl.DataFrame] = None,
 ) -> Tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """
     Median-pool each experiment's per-variant aggregate embedding, then PCA
@@ -198,6 +198,14 @@ def global_variant_embeddings(
         Threshold in ``(0, 1]`` used to select the leading components kept
         in ``reduced_df`` (see :func:`_n_components_for_variance`). Defaults
         to ``0.9``.
+    blocklist_df : pl.DataFrame or None
+        GLOBAL_BLOCKLIST's cross-experiment reproducibility verdict
+        (``feature``/``feature_ok``). When given, every column it marks
+        not-ok is dropped from each experiment's aggregate *before*
+        median-pooling, so neither the median nor the PCA ever sees a
+        non-reproducible dimension. ``None`` (the default) applies no
+        filtering, which is what the CellProfiler track passes -- the
+        reproducibility chain is cellDINO-only.
 
     Returns
     -------
@@ -232,6 +240,21 @@ def global_variant_embeddings(
             "cumulative_variance_explained must be in (0, 1], got "
             f"{cumulative_variance_explained}"
         )
+
+    if blocklist_df is not None:
+        blocked = set(
+            blocklist_df.filter(~pl.col("feature_ok").fill_null(False))[
+                "feature"
+            ].to_list()
+        )
+        logging.info(
+            "Applying the global blocklist: %d non-reproducible dimension(s)",
+            len(blocked),
+        )
+        batch_aggregate_lfs = [
+            lf.drop([c for c in lf.collect_schema().names() if c in blocked])
+            for lf in batch_aggregate_lfs
+        ]
 
     median_df = median_across_batches(batch_aggregate_lfs, label_column, batch_labels)
 
@@ -271,19 +294,26 @@ class GlobalVariantEmbeddingsConfig(AppConfig):
 
     Attributes
     ----------
+    input_files : List[str]
+        Paths to the per-experiment ``aggregate.parquet`` files to pool, one
+        per AGGREGATE_EMBEDDINGS output. Required, non-empty, and positionally
+        paired with ``batch_stems``.
     batch_stems : List[str]
         This run's experiment identifiers, one per contributing
-        AGGREGATE_EMBEDDINGS output. Required, non-empty. Same order and
-        length as the staged aggregate files (see :func:`main` --
-        reconstructed from Nextflow's ``stageAs`` numbering rather than
-        passed as an explicit path list, avoiding the identically-named
-        ``aggregate.parquet``-per-experiment collision).
+        AGGREGATE_EMBEDDINGS output. Required, non-empty. Same order
+        and length as ``input_files``.
     label_column : str
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     cumulative_variance_explained : float
         Threshold in ``(0, 1]`` selecting the leading components kept in
         ``pca_reduced.parquet`` (see this module's docstring). Defaults to
         ``0.9``.
+    blocklist_file : str or None
+        Path to GLOBAL_BLOCKLIST's cross-experiment ``blocklist.parquet``.
+        When set, non-reproducible dimensions are dropped from every
+        experiment's aggregate before pooling. ``None`` (the default) is
+        what GLOBAL_VARIANT_CP_FEATURES passes -- reproducibility
+        filtering is cellDINO-only.
 
     No ``n_components`` field -- see this module's docstring: every
     retained principal component is always computed and written (to
@@ -293,9 +323,11 @@ class GlobalVariantEmbeddingsConfig(AppConfig):
     additional ``pca_reduced.parquet``.
     """
 
+    input_files: List[str] = MISSING
     batch_stems: List[str] = MISSING
     label_column: str = "meta_aa_changes"
     cumulative_variance_explained: float = 0.9
+    blocklist_file: Optional[str] = None
 
 
 _cs = ConfigStore.instance()
@@ -307,10 +339,9 @@ def main(cfg: DictConfig) -> None:
     """
     Hydra entry point: cross-experiment median pooling then full-rank PCA.
 
-    Reads one ``aggregate.parquet`` per entry in ``batch_stems``, staged by
-    the calling Nextflow process as ``agg_input_1.parquet``,
-    ``agg_input_2.parquet``, ... in the same order (see
-    ``modules/local/global_variant_embeddings.nf``), calls
+    Reads the ``aggregate.parquet`` files named by ``input_files``,
+    positionally paired with ``batch_stems`` (the Snakemake rule
+    ``global_variant_embeddings`` passes both in the same order), calls
     :func:`global_variant_embeddings`, and writes five output files to
     ``output_dir``.
 
@@ -331,6 +362,7 @@ def main(cfg: DictConfig) -> None:
 
         python -m fisseq_embeddings_pipeline.global_embeddings \\
             output_dir=./out \\
+            'input_files=[expt1/aggregate.parquet,expt2/aggregate.parquet]' \\
             'batch_stems=[expt1,expt2]' \\
             random_seed=0
     """
@@ -343,16 +375,28 @@ def main(cfg: DictConfig) -> None:
 
     if not ge_cfg.batch_stems:
         raise ValueError("batch_stems must be a non-empty list")
+    if not ge_cfg.input_files:
+        raise ValueError("input_files must be a non-empty list")
 
     prefix = f"{ge_cfg.output_root}." if ge_cfg.output_root is not None else ""
 
-    agg_paths = reconstruct_staged_paths(len(ge_cfg.batch_stems), "agg_input")
+    agg_paths = list(ge_cfg.input_files)
+    if len(agg_paths) != len(ge_cfg.batch_stems):
+        raise ValueError(
+            "input_files and batch_stems must be the same length "
+            f"(got {len(agg_paths)} and {len(ge_cfg.batch_stems)})"
+        )
     logging.info(
         "Reading %d per-experiment aggregate file(s): %s",
         len(agg_paths),
         list(zip(ge_cfg.batch_stems, agg_paths)),
     )
     batch_aggregate_lfs = [pl.scan_parquet(p) for p in agg_paths]
+
+    blocklist_df = None
+    if ge_cfg.blocklist_file:
+        logging.info("Reading global blocklist from %s", ge_cfg.blocklist_file)
+        blocklist_df = pl.read_parquet(ge_cfg.blocklist_file)
 
     median_df, scores_df, components_df, variance_df, reduced_df = (
         global_variant_embeddings(
@@ -361,6 +405,7 @@ def main(cfg: DictConfig) -> None:
             ge_cfg.label_column,
             ge_cfg.random_seed,
             ge_cfg.cumulative_variance_explained,
+            blocklist_df=blocklist_df,
         )
     )
 

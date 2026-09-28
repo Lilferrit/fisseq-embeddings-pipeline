@@ -5,6 +5,8 @@
 // stages) keys off, so overriding it changes every stage's label column
 // together; `wt_label` gets its own `ovwt_wt_label` (default "WT").
 
+include { threadEnv } from '../functions'
+
 process OVWT_BATCHWISE {
     errorStrategy 'ignore'
     label 'process_high'
@@ -17,11 +19,9 @@ process OVWT_BATCHWISE {
     output:
     tuple val(batch_stem), path("results.parquet"), path("cell_scores.parquet"), path("models.pkl"), emit: ovwt
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.ovwt \\
         output_dir=. \\
         embeddings_file=${embeddings_parquet} \\

@@ -11,8 +11,8 @@ k-fold/XGBoost scoring logic.
 OVWT hyperparameters (``wt_label``, ``n_folds``, ``calibrate``,
 ``min_cells``, ``downsample_wt``, ``xgboost``) are about scoring
 methodology, not feature type -- this stage's config mirrors
-``OvwtEmbeddingConfig`` field-for-field (see ``modules/local/
-ovwt_batchwise_cp_features.nf``, which reuses the same ``params.yaml``
+``OvwtEmbeddingConfig`` field-for-field (see the
+``ovwt_batchwise_cp_features`` rule, which reuses the same ``params.yaml``
 OVWT values as OVWT_BATCHWISE rather than duplicating a parallel set).
 """
 

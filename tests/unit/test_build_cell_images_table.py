@@ -209,3 +209,38 @@ def test_build_cell_table_concatenates_across_tiles_with_differing_schemas(
 def test_build_cell_table_empty_when_no_tiles():
     table = mod.build_cell_table([])
     assert table.height == 0
+
+
+# ---------------------------------------------------------------------------
+# build_tiles_table -- the per-tile image/mask sidecar
+# ---------------------------------------------------------------------------
+
+
+def test_build_tiles_table_keeps_one_row_per_tile_with_image_paths():
+    tiles = [
+        {
+            "well": "well1",
+            "tile": "tile00x00y",
+            "segmentation_csv": "/p/cells.csv",
+            "reads_csv": "/s/cells_reads.csv",
+            "cellprofiler_csv": "",
+            "image_tif": "/p/raw_pt.tif",
+            "mask_tif": "/p/cells_mask.tif",
+        }
+    ]
+
+    table = mod.build_tiles_table(tiles)
+
+    assert table.columns == ["well", "tile", "image_tif", "mask_tif"]
+    assert table.row(0, named=True) == {
+        "well": "well1",
+        "tile": "tile00x00y",
+        "image_tif": "/p/raw_pt.tif",
+        "mask_tif": "/p/cells_mask.tif",
+    }
+
+
+def test_build_tiles_table_empty_when_no_tiles():
+    table = mod.build_tiles_table([])
+    assert table.height == 0
+    assert table.columns == ["well", "tile", "image_tif", "mask_tif"]

@@ -1,7 +1,7 @@
 """EMBED_CELLS.
 
 Hydra entry point (`python -m fisseq_embeddings_pipeline.embed`), backing
-the Nextflow process EMBED_CELLS (modules/local/embed_cells.nf, the
+the Snakemake rule embed_cells (workflow/rules/embeddings.smk, the
 pipeline's only GPU-bound stage). Streams every cell in a BUILD_DATASET
 WebDataset through a pretrained Cell-DINO checkpoint (Meta's dinov2) and
 writes one row per cell to embeddings.parquet. Not gated by QC_FILTER: this
@@ -137,10 +137,9 @@ class EmbedCellsConfig(AppConfig):
         single flag rather than one per channel because there is only ever
         one mask to apply: every cell in this pipeline's data model has
         exactly one shared segmentation mask (BUILD_DATASET writes a
-        single ``mask.npy`` per cell, not one per channel, and the crop
-        stack's mask sibling carries no channel axis at all -- see
-        resources/starcall_overrides/fixed_cell_images.smk). Defaults to
-        ``True``.
+        single ``mask.npy`` per cell, not one per channel, cut from
+        starcall's single-plane segmentation mask -- see
+        ``dataset.crop_cell``). Defaults to ``True``.
     channel_pool : str
         How per-channel CLS embeddings are pooled into one per-cell
         embedding: ``"mean"`` or ``"max"``. Only consulted when the loaded

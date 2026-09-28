@@ -28,7 +28,6 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 from .config import AppConfig
 from .global_embeddings import global_variant_embeddings
 from .utils.log import setup_logging
-from .utils.nextflow_staging import reconstruct_staged_paths
 
 
 @dataclasses.dataclass
@@ -41,6 +40,10 @@ class GlobalVariantCpFeaturesConfig(AppConfig):
 
     Attributes
     ----------
+    input_files : List[str]
+        Paths to the per-experiment ``aggregate.parquet`` files to pool, one
+        per AGGREGATE_CP_FEATURES output. Required, non-empty, and positionally
+        paired with ``batch_stems``.
     batch_stems : List[str]
         This run's experiment identifiers, one per contributing
         AGGREGATE_CP_FEATURES output. Required, non-empty. Same order and
@@ -52,6 +55,7 @@ class GlobalVariantCpFeaturesConfig(AppConfig):
         ``pca_reduced.parquet``. Defaults to ``0.9``.
     """
 
+    input_files: List[str] = MISSING
     batch_stems: List[str] = MISSING
     label_column: str = "meta_aa_changes"
     cumulative_variance_explained: float = 0.9
@@ -69,10 +73,9 @@ def main(cfg: DictConfig) -> None:
     Hydra entry point: cross-experiment median pooling then full-rank PCA,
     for the CellProfiler-feature track.
 
-    Reads one ``aggregate.parquet`` per entry in ``batch_stems``, staged by
-    the calling Nextflow process as ``agg_input_1.parquet``,
-    ``agg_input_2.parquet``, ... in the same order (see
-    ``modules/local/global_variant_cp_features.nf``), calls
+    Reads the ``aggregate.parquet`` files named by ``input_files``,
+    positionally paired with ``batch_stems`` (the Snakemake rule
+    ``global_variant_cp_features`` passes both in the same order), calls
     :func:`fisseq_embeddings_pipeline.global_embeddings.global_variant_embeddings`,
     and writes five output files to ``output_dir``.
 
@@ -93,6 +96,7 @@ def main(cfg: DictConfig) -> None:
 
         python -m fisseq_embeddings_pipeline.global_variant_cp_features \\
             output_dir=./out \\
+            'input_files=[expt1/aggregate.parquet,expt2/aggregate.parquet]' \\
             'batch_stems=[expt1,expt2]' \\
             random_seed=0
     """
@@ -105,10 +109,17 @@ def main(cfg: DictConfig) -> None:
 
     if not ge_cfg.batch_stems:
         raise ValueError("batch_stems must be a non-empty list")
+    if not ge_cfg.input_files:
+        raise ValueError("input_files must be a non-empty list")
 
     prefix = f"{ge_cfg.output_root}." if ge_cfg.output_root is not None else ""
 
-    agg_paths = reconstruct_staged_paths(len(ge_cfg.batch_stems), "agg_input")
+    agg_paths = list(ge_cfg.input_files)
+    if len(agg_paths) != len(ge_cfg.batch_stems):
+        raise ValueError(
+            "input_files and batch_stems must be the same length "
+            f"(got {len(agg_paths)} and {len(ge_cfg.batch_stems)})"
+        )
     logging.info(
         "Reading %d per-experiment aggregate file(s): %s",
         len(agg_paths),

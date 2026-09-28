@@ -19,6 +19,8 @@
 // cap (off by default, `n_variants=null`) is also deliberately left
 // unwired -- see params.yaml's QC_FILTER comment for why.
 
+include { threadEnv } from '../functions'
+
 process QC_FILTER {
     errorStrategy 'ignore'
     label 'process_low'
@@ -31,11 +33,9 @@ process QC_FILTER {
     output:
     tuple val(batch_stem), path("filtered_cells.parquet"), path("barcode_counts.parquet"), path("variants_per_barcode.parquet"), emit: qc
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.qcfilter \\
         output_dir=. \\
         cell_files=${metadata_parquet} \\

@@ -1,14 +1,24 @@
+# Keep the build context small: testing_data/ alone is many GB (the
+# real-starcall fixture's download cache), and none of this belongs in the
+# image.
 .git
 .github
 .devcontainer
+.devcontainer-tmp
 .venv
 __pycache__
 *.pyc
 .ruff_cache
 .pytest_cache
+.nextflow
+.nextflow.log*
 work/
-.nextflow/
+.snakemake/
 site/
 docs/
 tests/
+testing_data/
+scratch/
+outputs/
+weights/
 *.pth

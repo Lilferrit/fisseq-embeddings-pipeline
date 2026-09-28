@@ -1,7 +1,6 @@
 # OVWT Distinguish-ability Scores (`OVWT_BATCHWISE`)
 
-`python -m fisseq_embeddings_pipeline.ovwt` (Nextflow process
-`OVWT_BATCHWISE`) reconstructs the QC-passed, synonymous-corrected
+`python -m fisseq_embeddings_pipeline.ovwt` (Nextflow process `OVWT_BATCHWISE`) reconstructs the QC-passed, synonymous-corrected
 embedding table and, per experiment, for every non-wildtype variant,
 *k*-fold cross-validates a binary XGBoost classifier against wildtype
 cells on the synonymous-corrected embedding dimensions -- producing an

@@ -13,16 +13,8 @@
 // just read cell_table.parquet directly (qcfilter.py's filter_columns
 // drops the unprefixed well/tile/tile_cell_index columns that become
 // filter.py's JOIN_KEYS).
-//
-// Unlike BUILD_DATASET/BUILD_CP_FEATURES -- which take cell_images_dir as
-// a plain Hydra-override string and therefore need nextflow.config's
-// containerOptions bind mounts to see it at all -- this process takes
-// cell_table.parquet as a real Nextflow `path` input, so Nextflow stages
-// it into the task's own workDir like any other channel file and there is
-// no arbitrary host path to bind. That works here and not there because
-// this stage only ever reads the parquet itself; it never dereferences
-// the per-tile crop-stack symlinks that live alongside it (see
-// nextflow.config's BUILD_DATASET|BUILD_CP_FEATURES comment).
+
+include { threadEnv } from '../functions'
 
 process BUILD_CELL_METADATA {
     errorStrategy 'ignore'
@@ -36,11 +28,9 @@ process BUILD_CELL_METADATA {
     output:
     tuple val(batch_stem), path("metadata.parquet"), emit: metadata
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.cell_metadata \\
         output_dir=. \\
         cell_table=${cell_table} \\

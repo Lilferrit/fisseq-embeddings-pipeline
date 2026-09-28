@@ -41,7 +41,7 @@ markers = [
     # tests/integration/conftest.py's mode switch: marked tests run only
     # under `pytest tests/integration --container`, unmarked ones only
     # without it. See that file for why the two are mutually exclusive.
-    "container: containerized real-starcall integration test (opt-in, needs docker + testing_data/)",
+    "container: containerized real-starcall integration test (opt-in, needs docker + testing_data/lmna_t3_mini)",
 ]
 
 [tool.ruff]

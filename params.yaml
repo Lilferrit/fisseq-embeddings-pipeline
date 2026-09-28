@@ -1,12 +1,13 @@
 # params.yaml -- every default pipeline parameter, nothing else. Load
 # explicitly:
 #
-#   nextflow run . --pipeline_dir /path/to/experiment -params-file params.yaml
+#   nextflow run . -params-file params.yaml --pipeline_dir /path/to/run \
+#       --cell_dino_checkpoint /path/to/checkpoint.pth
 #
-# Per-run overrides: a bare CLI flag (--ovwt_min_cells 500) wins over this
-# file; a second -params-file layers a whole alternate parameter set.
-# nextflow.config carries executor/profile/container settings only -- never
-# default parameter values.
+# Per-run overrides: `--key value` on the command line wins over this file.
+# Executor/container settings live in nextflow.config and your own site
+# config (`-c site.config`; see docs/nextflow.md) -- never default parameter
+# values.
 
 # ── Required, no default (fail fast if unset) ──────────────────────────────
 pipeline_dir: null
@@ -21,7 +22,7 @@ experiments: []
 # - BUILD_CELL_IMAGES (starcall-workflow-facing, always runs):
 #   starcall_workflow_dir, phenotyping_dir, segmentation_dir,
 #   sequencing_dir, wells, grid_size, segmentation_type, use_corrected,
-#   window, sequencing_reads_params. This is the ONLY stage that touches
+#   sequencing_reads_params. This is the ONLY stage that touches
 #   starcall-workflow's tree or invokes Snakemake -- see
 #   docs/architecture.md's Data contracts section. `starcall_workflow_dir`
 #   is per-experiment (not a shared global path) since Snakemake keeps
@@ -44,8 +45,6 @@ experiments: []
 #   `starcall_workflow_dir` at all for your lab (e.g. `sequencing_dir` on
 #   separate storage) -- an explicit value always wins over both. See
 #   docs/architecture.md and the example below.
-#   `cell_images_hard_copy` (below) is this stage's one GLOBAL-only field
-#   -- not settable per experiment; see its own comment for why.
 # - BuildDatasetConfig (BUILD_DATASET): window, shard_maxcount,
 #   barcode_col_name/aa_changes_col_name/edit_distance_col_name.
 #   `cell_images_dir` is injected automatically from BUILD_CELL_IMAGES'
@@ -60,15 +59,15 @@ experiments: []
 # back to the matching global default in "Shared per-experiment defaults"
 # below (`window`, `cellprofiler_pipeline`, `cellprofiler_cycle`), or
 # failing that, the relevant stage's own Hydra default (or raises an error
-# if that field has none, e.g. starcall_workflow_dir). `cell_images_hard_copy`
-# is the one exception -- it's global-only, ignored if set on an individual
-# entry (see its own comment below).
+# if that field has none, e.g. starcall_workflow_dir).
 #
 # `grid_size` is optional -- when omitted, it's auto-detected per well by
 # scanning phenotyping_dir for that well's `{well}_grid<N>` directory
-# (starcall-workflow's own naming convention already encodes it there), so
-# you only need to set it explicitly if a well has more than one such
-# directory and detection can't disambiguate.
+# (starcall-workflow's own naming convention already encodes it there),
+# and only tiles already on disk are requested. Set it explicitly for a
+# run starting from raw input (nothing under phenotyping_dir yet): every
+# tile of the grid is then requested from starcall, whether or not it
+# exists yet.
 #
 # `sequencing_reads_params` (default "") is the `{params}` wildcard
 # component of starcall-workflow's `{segmentation_type}_reads{params}.csv`
@@ -87,9 +86,9 @@ experiments: []
 # existing runs work unchanged.
 #
 # The empty list below is deliberate -- every real run supplies its own
-# `experiments:` list by editing this file (or a full copy of it; Nextflow
-# only accepts one -params-file at a time, so there's no "just point at a
-# directory of per-experiment files" shortcut any more).
+# `experiments:` list by editing this file (or a full copy of it, passed as
+# a different --configfile; there's no "just point at a directory of
+# per-experiment files" shortcut).
 #
 # experiments:
 #   - batch_stem: experiment1
@@ -113,15 +112,13 @@ experiments: []
 #     # cp_features omitted -- cellDINO-only for this experiment
 
 # ── Shared per-experiment defaults (window / cellprofiler_pipeline / cellprofiler_cycle) ──
-# `window` (both BUILD_CELL_IMAGES, which now forces its crop-stack output
-# at this size via `make_cell_images_bbox`, and BuildDatasetConfig, which
-# sanity-checks the discovered stacks' shape against it) and
+# `window` (BuildDatasetConfig: the crop size each cell is cut at) and
 # `cellprofiler_pipeline`/`cellprofiler_cycle` (CpFeaturesConfig-facing,
 # consumed by BUILD_CELL_IMAGES) are logically per-experiment fields (see
 # "Per-experiment configs" above), but in practice are almost always the
 # same value across every experiment in a run -- one crop size per
 # Cell-DINO checkpoint, one CellProfiler pipeline per run. Set the shared
-# value once here; `workflows/embeddings.nf` fills it in (via two
+# value once here; `config/experiments.py` fills it in (via two
 # independent fallback blocks, one per stage) for any `experiments:` entry
 # that doesn't set its own value for that key, and an entry that *does* set
 # its own value always wins over the global default here.
@@ -129,85 +126,44 @@ window: 224                    # crop size in pixels -- must match cell_dino_cro
 cellprofiler_pipeline: null    # the CellProfiler .cppipe pipeline's basename -- required (here, or per `cp_features: true` entry) once any experiment sets cp_features: true
 cellprofiler_cycle: ""         # "" (no cycle) unless starcall-workflow ran cellprofiler per-cycle
 
-# cell_images_hard_copy is GLOBAL ONLY -- unlike window/cellprofiler_pipeline/
-# cellprofiler_cycle above, an experiments: entry can't override this one.
-# Nextflow's publishDir `mode:` (which this drives, in
-# modules/local/build_cell_images.nf) must be a static value at process-
-# definition time -- it doesn't accept a per-task closure the way `path:`
-# does (confirmed against a real Nextflow 26.04.6 run). A genuine per-
-# experiment override would need two separate processes with experiments
-# routed between them; not implemented.
-cell_images_hard_copy: false   # false = symlink BUILD_CELL_IMAGES' collected per-cell crop-stack tif files (make_cell_images_bbox's output -- small, not whole-tile images) from their real starcall-workflow location (default, no duplication); true = real copies (self-contained, no dependency on phenotyping_dir staying mounted)
 
-# ── Snakemake invocation (BUILD_CELL_IMAGES) ─────────────────────────────────
-snakemake_cores: 4             # --cores passed to snakemake within one BUILD_CELL_IMAGES task -- local parallelism inside that one invocation, distinct from Nextflow's own executor parallelism across experiments
-# LOCAL MODE ONLY. When an executor profile opts into cluster submission
-# (process.ext.snakemake_cluster_args, nextflow.config), snakemake instead
-# submits each starcall rule as its own scheduler job and --cores becomes the
-# global budget ACROSS those jobs -- supplied by ext.snakemake_cluster_cores,
-# not by this value, because a 4 here would silently cap every rule's own
-# `threads:` declaration. See docs/nextflow.md.
+# ── Nested starcall run (BUILD_CELL_IMAGES) ──────────────────────────────────
+# BUILD_CELL_IMAGES runs starcall-workflow's own Snakefile as a nested
+# snakemake (7.32, in the image's ops env). By default every starcall rule
+# runs inside that one task:
+snakemake_cores: 4             # the nested run's --cores in local mode (no starcall_profile)
 #
-# Where the per-rule cluster jobs re-enter this pipeline's image. Each one
-# runs on a bare exec node outside Nextflow's own container handling, so it
-# needs a real .sif FILE -- container_image is a `docker://` URI on the
-# cluster (scratch/run.sh), and having hundreds of concurrently-starting jobs
-# each re-resolve that URI against one shared Singularity cache, with registry
-# credentials in every job's environment, is exactly what this avoids.
+# To fan starcall's rules out across your cluster instead, point
+# starcall_profile at a snakemake 7 profile directory saying how to submit
+# jobs (`cluster:`, `cluster-cancel:`, `jobs:`, resources...). It lives
+# outside this repo -- nothing scheduler-specific does. Each submitted job
+# lands on a bare node but has to run inside the pipeline image (starcall's
+# rule bodies execute in the ops env's interpreter), so BUILD_CELL_IMAGES
+# also passes a --jobscript that re-enters starcall_job_image there. See
+# docs/nextflow.md.
+starcall_profile: null         # path to a snakemake 7 profile dir; null = local mode
+starcall_job_image: null       # a .sif of container_image on storage every node can read -- required with starcall_profile
+starcall_container_bin: apptainer  # what a child job re-enters the image with; some nodes only ship `singularity`
 #
-# OPTIONAL. Left null, BUILD_CELL_IMAGES reconstructs the path of the image
-# Nextflow has already pulled and converted for that very task, so the usual
-# case needs nothing here. Set it explicitly to point the child jobs at a
-# different (or independently built) image, or to avoid depending on
-# Nextflow's cache naming -- an explicit value always wins. Either way the
-# stage fails fast if the file isn't there. Build
-# it once with `apptainer pull` before `nextflow run` (scratch/run.sh does)
-# and pin it to the same commit as container_image. null is fine unless an
-# executor profile sets ext.snakemake_cluster_args, in which case
-# BUILD_CELL_IMAGES fails fast with a message naming this key. Deliberately
-# NOT derived from Nextflow's own singularity.cacheDir: that filename mangling
-# is a Nextflow implementation detail, not an interface.
-starcall_child_image: null
-# Where BUILD_CELL_IMAGES points $XDG_CACHE_HOME (and $HOME) for its one
-# snakemake invocation. Snakemake's SourceCache mkdir's
-# $XDG_CACHE_HOME/snakemake (falling back to $HOME/.cache) while
-# CONSTRUCTING the Workflow object -- before any rule runs, and with no
-# CLI flag to relocate it -- and under Singularity/Apptainer autoMounts
-# the container's $HOME is the submitting user's real cluster home, which
-# is frequently read-only on compute nodes ("OSError: [Errno 30]
-# Read-only file system"). null resolves to <pipeline_dir>/.snakemake_cache,
-# which is writable and persists across tasks and runs (so the source
-# cache, and conda's own ~/.conda bookkeeping under --use-conda, are
-# built once rather than per task). Set this explicitly to put the cache
-# on shared scratch instead. Whatever it resolves to is bind-mounted into
-# the container by nextflow.config's BUILD_CELL_IMAGES containerOptions.
+# Where BUILD_CELL_IMAGES points $XDG_CACHE_HOME (and $HOME) for the nested
+# run. Snakemake mkdir's $XDG_CACHE_HOME/snakemake while constructing its
+# Workflow object -- before any rule runs, with no flag to move it -- and
+# under Apptainer $HOME is often a read-only cluster home ("OSError: [Errno
+# 30] Read-only file system"). null resolves to
+# <pipeline_dir>/.snakemake_cache, which is writable and persists across
+# runs. It's bind-mounted into BUILD_CELL_IMAGES' container automatically.
 snakemake_cache_dir: null
-# Request a GPU for BUILD_CELL_IMAGES' snakemake invocation -- starcall-
-# workflow's segmentation rules run stardist/cellpose/tensorflow out of
-# the image's `ops` conda env, and the image is CUDA-based
-# (nvidia/cuda:12.4.1-runtime-ubuntu22.04). Adds the running engine's own
-# GPU flag (--gpus all under Docker, --nv under Singularity/Apptainer) to
-# that process' containerOptions, exactly as cell_dino_device gates
-# EMBED_CELLS'. Set false on a GPU-less host: `docker run --gpus all`
-# fails outright there, before the container's entrypoint runs, whatever
-# the workload would actually have used. Note BUILD_CELL_IMAGES also
-# carries `label 'process_gpu'`, so an executor profile that sizes that
-# label (e.g. scratch/nextflow.config's sge `-l cuda=1`) applies to it
-# too -- see docs/nextflow.md.
-# Under an executor profile that opts into cluster submission
-# (ext.snakemake_cluster_args), this governs only the submitter task's own
-# container -- which by then is just waiting on the scheduler and needs no
-# GPU. The GPU request that matters there is the per-rule one in that
-# profile's own --set-resources/submit template; see docs/nextflow.md.
+# Request a GPU for the nested starcall run -- its segmentation rules run
+# stardist/cellpose/tensorflow out of the ops env. Adds --nv/--gpus to
+# BUILD_CELL_IMAGES' container, and --nv to every child job in cluster
+# mode. Apptainer only warns on a GPU-less node; Docker's --gpus fails
+# outright there, so set this false on a GPU-less Docker host.
 starcall_gpu: true
-# The ops conda env's snakemake binary is NOT a params.yaml value -- it's
-# process.ext.snakemake_bin (nextflow.config), a process-config directive
-# rather than a pipeline param, specifically so -profile local can
-# actually override it back to bare `snakemake`. (-params-file params.yaml
-# -- this file -- outranks a profile's own `params.*` assignments in
-# Nextflow's config precedence, the same reason docker.enabled/
-# process.container, not params.*, are what -profile local flips below.)
-# See nextflow.config's process{} block and build_cell_images.nf.
+
+# ── Stopping early ───────────────────────────────────────────────────────────
+# true = stop after EMBED_CELLS: no QC-dependent cellDINO stages, no
+# reproducibility filtering, no CellProfiler track, no global stages.
+embeddings_only: false
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
 random_seed: 0
@@ -275,6 +231,84 @@ filter_label_column: "meta_aa_changes"
 # p-values over every embedding dimension. Add them explicitly when you
 # want evidence strength alongside effect size.
 aggregate_methods: ["median", "KS", "AUROC"]
+
+# Embedding dimensions each aggregator evaluates per Polars query. Aggregating
+# every dimension in one query is what OOM-kills a full-size AGGREGATE_EMBEDDINGS
+# or AGGREGATE_HALF task: peak memory scales with chunk_size x n_variant_labels,
+# and for the reference-based aggregators (KS/AUROC and the two *negLogP
+# variants) with the cross-joined control pool on top of that.
+#
+# THIS VALUE IS SIZED TO THE MEMORY ONE TASK IS GRANTED, not to the embedding
+# dimensionality. fisseq-data-pipeline measured the reference-based aggregators
+# at roughly 3 GB (AUROC) to 4.5 GB (KS, the worst) per feature in the chunk at
+# production shape, giving:
+#
+#     chunk_size ~= (memory_per_task_GB - 1) / 4.5
+#
+#   16 GB/task -> 4      64 GB/task -> 14
+#   32 GB/task -> 8     128 GB/task -> 32   <- the default below
+#
+# mean/median are not the constraint at any chunk size in this range. Runtime is
+# dominated by the NUMBER of chunks rather than their width, so raising this only
+# helps until memory runs out; if KS/AUROC tasks come back killed (exit 137),
+# halve it first. A run using only mean/median can raise it freely.
+#
+# It is a pure memory dial: the output is identical at every value, which
+# tests/unit/test_aggregate.py asserts directly. null disables chunking entirely
+# (every dimension in one query) -- an escape hatch for small inputs, not a
+# setting for a full-size batch. Shared by both tracks (AGGREGATE_EMBEDDINGS,
+# AGGREGATE_CP_FEATURES, AGGREGATE_HALF, AGGREGATE_PASSTHROUGH) for the same
+# reason: it is about the task's memory, not the feature space.
+aggregate_feature_chunk_size: 32
+
+# ── Passthrough aggregates (AGGREGATE_PASSTHROUGH, cellDINO track only) ──────
+# Methods that are computed and reported per variant but kept out of
+# reproducibility filtering entirely: no bootstrap halves, no correlation, no
+# blocklist -- and, critically, out of the cross-experiment median and the PCA.
+#
+# Intended for the p-value statistics (KSnegLogP, AUROCnegLogP), which are wanted
+# in the output but are not reproducibility statistics: a median-correlation
+# threshold is not a meaningful test for a p-value, and blocking a dimension's
+# p-value while keeping its statistic would make the output incoherent.
+#
+# Must not overlap aggregate_methods (validate_config rejects that up front);
+# [] = none, the default.
+#
+# Passthrough columns land ONLY in
+# feature_select_batchwise/<batch>/aggregate_with_passthrough.parquet, never in
+# filtered_aggregate.parquet. That file split is what keeps them out of PCA --
+# GLOBAL_VARIANT_EMBEDDINGS re-reads its input from disk and picks feature
+# columns with FEATURE_SELECTOR (exclude meta_*), which would happily match a
+# stat-suffixed emb_0000_KSnegLogP. aggregate_with_passthrough.parquet is
+# terminal: nothing in-pipeline reads it, and any future stage that does must not
+# assume FEATURE_SELECTOR over IT yields reproducibility-filtered features.
+aggregate_methods_passthrough: []
+
+# ── Reproducibility filtering (cellDINO track only) ──────────────────────────
+# GENERATE_SPLIT -> AGGREGATE_HALF -> CORRELATE_FEATURES -> BLOCKLIST ->
+# COMBINE_BLOCKLISTS -> FILTER_AGGREGATE, sitting between AGGREGATE_EMBEDDINGS'
+# aggregate.parquet and GLOBAL_VARIANT_EMBEDDINGS. A dimension is reproducible
+# if the variant-to-variant pattern it reports from one random half of an
+# experiment's cells is the pattern it reports from the other half.
+#
+# Deliberately NOT applied to the CellProfiler track: its columns are
+# hand-engineered and already curated, and the two tracks' aggregates are meant
+# to stay directly comparable to the published CellProfiler analysis.
+#
+# Number of pseudo-replicate splits per experiment. Each one is a fresh
+# stratified 50/50 split at random_seed + rep, and BLOCKLIST takes the MEDIAN
+# correlation across them, so one pathological split cannot condemn or rescue a
+# dimension. Must be >= 2. The cost is linear: reps x 2 x len(aggregate_methods)
+# AGGREGATE_HALF jobs per experiment.
+reproducibility_bootstrap_reps: 10
+# Minimum median Pearson r (across replicates) for a dimension to be kept.
+reproducibility_min_correlation: 0.5
+# GLOBAL_BLOCKLIST's cross-experiment vote: the minimum number of experiments
+# that must mark a dimension reproducible in their own blocklist for it to be
+# globally reproducible. null = it must be ok in every experiment that reported
+# on it. Lower it to tolerate one bad experiment without losing a dimension
+# everywhere.
+reproducibility_global_min_batches_ok: null
 
 # ── Aggregation (AGGREGATE_CP_FEATURES) ──────────────────────────────────────
 # Same choices as aggregate_methods above, applied to the CellProfiler-

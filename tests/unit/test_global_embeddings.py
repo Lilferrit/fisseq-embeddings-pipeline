@@ -2,8 +2,8 @@
 
 Covers global_variant_embeddings() -- median pooling then full-rank PCA, no
 n_components knob -- plus the Hydra `main()` CLI end-to-end, including the
-`stageAs`-numbered staged-file reconstruction (``agg_input_1.parquet``, ...)
-global_embeddings.nf relies on.
+explicit ``input_files``/``batch_stems`` pairing the Snakemake rule
+``global_variant_embeddings`` relies on.
 """
 
 from __future__ import annotations
@@ -336,19 +336,20 @@ def test_global_variant_embeddings_raises_on_invalid_cumulative_variance_explain
 
 def _write_staged_aggregate_files(
     tmp_path: Path, batches: list[pl.DataFrame]
-) -> list[str]:
-    """Write batches[i] to agg_input_{i+1}.parquet, mimicking Nextflow's
-    `stageAs: "agg_input_*.parquet"` numbering -- 1-indexed for 2+ files,
-    but a single file is staged bare (`agg_input_.parquet`, no digit --
-    confirmed against a real `nextflow run`, see
-    utils/nextflow_staging.py's docstring)."""
-    stems = [f"expt{i}" for i in range(1, len(batches) + 1)]
-    if len(batches) == 1:
-        batches[0].write_parquet(tmp_path / "agg_input_.parquet")
-    else:
-        for i, batch_df in enumerate(batches, start=1):
-            batch_df.write_parquet(tmp_path / f"agg_input_{i}.parquet")
-    return stems
+) -> tuple[list[str], list[str]]:
+    """Write batches[i] to ``expt{i+1}/aggregate.parquet`` -- the per-experiment
+    layout the Snakemake rule passes via ``input_files`` -- and return the
+    parallel (batch_stems, input_files) lists."""
+    stems, files = [], []
+    for i, batch_df in enumerate(batches, start=1):
+        stem = f"expt{i}"
+        batch_dir = tmp_path / stem
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        path = batch_dir / "aggregate.parquet"
+        batch_df.write_parquet(path)
+        stems.append(stem)
+        files.append(str(path))
+    return stems, files
 
 
 def _run_global_embeddings(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
@@ -375,12 +376,13 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path) -> None:
             "emb_0001": [1.5, 0.0],
         }
     )
-    batch_stems = _write_staged_aggregate_files(tmp_path, [batch1, batch2])
+    batch_stems, input_files = _write_staged_aggregate_files(tmp_path, [batch1, batch2])
     output_dir = tmp_path / "out"
 
     result = _run_global_embeddings(
         tmp_path,
         f"output_dir={output_dir}",
+        f"input_files=[{','.join(input_files)}]",
         f"batch_stems=[{','.join(batch_stems)}]",
     )
     assert result.returncode == 0, result.stderr
@@ -413,12 +415,13 @@ def test_main_cumulative_variance_explained_is_configurable(tmp_path: Path) -> N
             "emb_0002": [0.5, 2.0, 1.0],
         }
     )
-    batch_stems = _write_staged_aggregate_files(tmp_path, [batch1])
+    batch_stems, input_files = _write_staged_aggregate_files(tmp_path, [batch1])
     output_dir = tmp_path / "out"
 
     result = _run_global_embeddings(
         tmp_path,
         f"output_dir={output_dir}",
+        f"input_files=[{','.join(input_files)}]",
         f"batch_stems=[{','.join(batch_stems)}]",
         "cumulative_variance_explained=1.0",
     )
@@ -435,17 +438,69 @@ def test_main_cumulative_variance_explained_is_configurable(tmp_path: Path) -> N
 
 def test_main_raises_on_invalid_cumulative_variance_explained(tmp_path: Path) -> None:
     batch1 = pl.DataFrame({LABEL_COLUMN: ["A1A", "M2K"], "emb_0000": [0.0, 1.0]})
-    batch_stems = _write_staged_aggregate_files(tmp_path, [batch1])
+    batch_stems, input_files = _write_staged_aggregate_files(tmp_path, [batch1])
     output_dir = tmp_path / "out"
 
     result = _run_global_embeddings(
         tmp_path,
         f"output_dir={output_dir}",
+        f"input_files=[{','.join(input_files)}]",
         f"batch_stems=[{','.join(batch_stems)}]",
         "cumulative_variance_explained=0",
     )
     assert result.returncode != 0
     assert "cumulative_variance_explained" in result.stderr
+
+
+def test_main_raises_when_input_files_and_batch_stems_disagree(
+    tmp_path: Path,
+) -> None:
+    """The length check that replaced Nextflow's ``stageAs`` numbering.
+
+    The old staging scheme made the two lists structurally the same length;
+    now the rule passes them independently, so a mismatch is a real (and
+    silent, if unchecked -- ``zip`` would just truncate) failure mode."""
+    batch1 = pl.DataFrame({"meta_aa_changes": ["WT"], "emb_0000": [1.0]})
+    _, input_files = _write_staged_aggregate_files(tmp_path, [batch1])
+
+    result = _run_global_embeddings(
+        tmp_path,
+        f"output_dir={tmp_path / 'out'}",
+        f"input_files=[{','.join(input_files)}]",
+        "batch_stems=[expt1,expt2]",
+    )
+    assert result.returncode != 0
+    assert "must be the same length" in result.stderr
+
+
+def test_main_reads_input_files_in_given_order_not_sorted_order(
+    tmp_path: Path,
+) -> None:
+    """Files are paired with batch_stems positionally, in the order given --
+    not in whatever order a glob or a sort would produce. The two batches
+    below are deliberately named so that filename order is the reverse of
+    the order they're passed in."""
+    wt_low = pl.DataFrame({"meta_aa_changes": ["WT", "A1B"], "emb_0000": [0.0, 1.0]})
+    wt_high = pl.DataFrame({"meta_aa_changes": ["WT", "A1B"], "emb_0000": [10.0, 11.0]})
+    (tmp_path / "zzz").mkdir()
+    (tmp_path / "aaa").mkdir()
+    wt_low.write_parquet(tmp_path / "zzz" / "aggregate.parquet")
+    wt_high.write_parquet(tmp_path / "aaa" / "aggregate.parquet")
+
+    output_dir = tmp_path / "out"
+    result = _run_global_embeddings(
+        tmp_path,
+        f"output_dir={output_dir}",
+        f"input_files=[{tmp_path / 'zzz' / 'aggregate.parquet'},"
+        f"{tmp_path / 'aaa' / 'aggregate.parquet'}]",
+        "batch_stems=[first,second]",
+    )
+    assert result.returncode == 0, result.stderr
+    # Median across both batches is the same either way, but the run must
+    # succeed with stems paired to the files as given; a glob-ordered read
+    # would pair 'first' with aaa/ instead.
+    median_df = pl.read_parquet(output_dir / "median_aggregate.parquet")
+    assert median_df.height == 2
 
 
 def test_main_raises_on_empty_batch_stems(tmp_path: Path) -> None:
@@ -454,6 +509,7 @@ def test_main_raises_on_empty_batch_stems(tmp_path: Path) -> None:
         tmp_path,
         f"output_dir={output_dir}",
         "batch_stems=[]",
+        "input_files=[]",
     )
     assert result.returncode != 0
     assert "batch_stems must be a non-empty list" in result.stderr
@@ -467,3 +523,71 @@ def test_global_variant_embeddings_config_has_no_n_components_field() -> None:
     """Revision, per request: no n_components config knob."""
     field_names = {f.name for f in dataclasses.fields(GlobalVariantEmbeddingsConfig)}
     assert "n_components" not in field_names
+
+
+# ---------------------------------------------------------------------------
+# blocklist_file -- the global reproducibility verdict, applied before pooling
+# ---------------------------------------------------------------------------
+
+
+def _blocklist(ok: dict[str, bool]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "feature": list(ok),
+            "n_batches": [2] * len(ok),
+            "n_ok": [2 if v else 0 for v in ok.values()],
+            "feature_ok": list(ok.values()),
+        }
+    )
+
+
+def _two_batches() -> list[pl.LazyFrame]:
+    labels = ["A1B", "C2D", "E3F", "WT"]
+    rng = np.random.default_rng(0)
+    return [
+        _batch_aggregate(labels, rng.normal(size=(4, 3)).tolist()) for _ in range(2)
+    ]
+
+
+def test_blocklist_drops_non_reproducible_dimensions_before_pooling() -> None:
+    median_df, *_ = global_variant_embeddings(
+        _two_batches(),
+        ["e1", "e2"],
+        LABEL_COLUMN,
+        random_seed=0,
+        blocklist_df=_blocklist(
+            {"emb_0000": True, "emb_0001": False, "emb_0002": True}
+        ),
+    )
+    assert "emb_0001" not in median_df.columns
+    assert "emb_0000" in median_df.columns
+
+
+def test_blocked_dimensions_do_not_reach_the_pca() -> None:
+    """The point of applying the blocklist here rather than leaving it to
+    the per-experiment filtered aggregates: a non-reproducible dimension
+    must not contribute a loading to any principal component."""
+    _, _, components_df, _, _ = global_variant_embeddings(
+        _two_batches(),
+        ["e1", "e2"],
+        LABEL_COLUMN,
+        random_seed=0,
+        blocklist_df=_blocklist(
+            {"emb_0000": True, "emb_0001": False, "emb_0002": True}
+        ),
+    )
+    assert "emb_0001" not in components_df.columns
+
+
+def test_no_blocklist_keeps_every_dimension() -> None:
+    """None is what GLOBAL_VARIANT_CP_FEATURES passes -- the CellProfiler
+    track gets no reproducibility filtering."""
+    median_df, *_ = global_variant_embeddings(
+        _two_batches(), ["e1", "e2"], LABEL_COLUMN, random_seed=0
+    )
+    assert {"emb_0000", "emb_0001", "emb_0002"} <= set(median_df.columns)
+
+
+def test_blocklist_file_defaults_to_none() -> None:
+    cfg = GlobalVariantEmbeddingsConfig(input_files=["x"], batch_stems=["e1"])
+    assert cfg.blocklist_file is None

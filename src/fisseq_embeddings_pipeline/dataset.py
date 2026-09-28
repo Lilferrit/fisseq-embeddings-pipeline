@@ -1,43 +1,35 @@
 """BUILD_DATASET.
 
 Hydra entry point (`python -m fisseq_embeddings_pipeline.dataset`), backing
-the Nextflow process BUILD_DATASET (modules/local/build_dataset.nf).
-Gathers one experiment's cells into a sharded WebDataset (dataset-*.tar)
-plus a companion metadata.parquet, with no hand-authored tile manifest --
-the tile layout is discovered directly (see `discover_tiles`).
+the BUILD_DATASET step. Gathers one experiment's cells into a sharded
+WebDataset (dataset-*.tar) plus a companion metadata.parquet.
 
-Reads from BUILD_CELL_IMAGES' output directory (modules/local/
-build_cell_images.nf), not starcall-workflow's tree directly -- that stage
-is now the ONLY place in the pipeline that touches phenotyping_dir/
-segmentation_dir/sequencing_dir or invokes Snakemake. Concretely, this
-module reads:
+Reads BUILD_CELL_IMAGES' output directory:
 
-- each tile's already-cropped per-cell image and mask stacks
-  (`*_crops_*.tif`/`*_mask_crops_*.tif`, symlinked or copied into
-  cell_images_dir by BUILD_CELL_IMAGES from `make_cell_images_bbox`'s real
-  starcall-workflow output -- see `resources/starcall_overrides/`), and
-- `cell_images_dir/cell_table.parquet`, BUILD_CELL_IMAGES' own
-  self-sufficient per-experiment cell table (already joining segmentation
-  and sequencing genotype columns -- see that module's docstring).
+- `cell_images_dir/cell_table.parquet`, the self-sufficient per-experiment
+  cell table (segmentation bbox + sequencing genotype columns, and each
+  cell's `crop_index` within its tile -- see `build_cell_images_table.py`);
+- `cell_images_dir/tiles.parquet`, one row per tile naming the whole-tile
+  phenotype image (`raw_pt.tif`/`corrected_pt.tif`) and segmentation mask
+  (`{segmentation_type}_mask.tif`) starcall-workflow left under
+  phenotyping_dir.
 
-No longer does its own per-cell cropping: that used to be necessary
-because starcall-workflow's own `rule make_cell_images` (phenotyping.smk)
-reads `xpos`/`ypos` columns that don't exist in the real cell table schema
-(only `bbox_x1/y1/x2/y2`) -- confirmed against a real starcall-workflow
-`origin/devel` checkout. BUILD_CELL_IMAGES now forces a patched copy of
-that rule (`make_cell_images_bbox`, injected via `ruleorder:` + `include:`
-composition) with the centroid computation fixed to use the bbox midpoint
-instead, so this module only needs to index directly into the resulting
-crop stacks at each cell's `crop_index` -- see `docs/architecture.md`
-decision 17.
+and crops every cell out of those itself (:func:`crop_cell`). This module
+owns cropping because starcall-workflow's own `rule make_cell_images`
+(phenotyping.smk) is broken against its own cell table: it centres crops on
+`xpos`/`ypos` columns the real schema doesn't have (only
+`bbox_x1/y1/x2/y2`) -- confirmed against a real starcall-workflow
+`origin/devel` checkout. Doing it here, straight into the shards, needs no
+patched starcall rule and no intermediate crop-stack files -- see
+`docs/architecture.md` decision 17.
 """
 
 import dataclasses
-import glob
 import logging
 import pathlib
 
 import hydra
+import numpy as np
 import polars as pl
 import tifffile
 import webdataset as wds
@@ -53,13 +45,7 @@ from .utils.cell_table import (
 from .utils.constants import TILE_DIR_RE
 from .utils.log import setup_logging
 
-# TILE_DIR_RE (utils/constants.py) matches a tile directory's own name
-# (e.g. "tile2x0y") -- used only to recover (tile_x, tile_y) as integers
-# for deterministic numeric sorting in discover_tiles (lexical sorting
-# would misorder e.g. "tile10x0y" before "tile2x0y"). Grid-size ambiguity
-# itself is resolved upstream, by BUILD_CELL_IMAGES -- this stage's
-# cell_images_dir only ever contains the one grid size that stage chose,
-# so there's no grid regex here any more.
+_BBOX_COLS = ("bbox_x1", "bbox_y1", "bbox_x2", "bbox_y2")
 
 
 @dataclasses.dataclass
@@ -74,19 +60,13 @@ class BuildDatasetConfig(AppConfig):
     Attributes
     ----------
     cell_images_dir : str
-        BUILD_CELL_IMAGES' per-experiment output directory (modules/local/
-        build_cell_images.nf) -- holds `{well}_grid<N>/tile<x>x<y>y/`
-        subdirectories (each with one `*_crops_*.tif` and one
-        `*_mask_crops_*.tif` pre-cropped stack) plus `cell_table.parquet`.
-        Replaces the old `phenotyping_dir`/`wells`/`grid_size`/
-        `segmentation_type`/`use_corrected` fields -- all now
-        starcall-workflow-discovery concerns BUILD_CELL_IMAGES owns.
+        BUILD_CELL_IMAGES' per-experiment output directory -- holds
+        `cell_table.parquet` and `tiles.parquet` (see the module
+        docstring).
     window : int
-        Crop size BUILD_CELL_IMAGES' own `make_cell_images_bbox` already
-        produced each cell's crop at (embedded in the crop-stack filename
-        this stage globs for -- see `discover_tiles`); used here only to
-        sanity-check the discovered stacks' actual shape matches, and to
-        match the loaded Cell-DINO checkpoint's expected input.
+        Side length, in pixels, of the square crop cut around each cell's
+        bbox midpoint. Must match the loaded Cell-DINO checkpoint's
+        expected input (`cell_dino_crop_size`).
     shard_maxcount : int
         Max samples per WebDataset shard, passed to webdataset.ShardWriter.
         Defaults to 2000 -- see docs/configuration.md's sizing note.
@@ -115,106 +95,112 @@ class BuildDatasetConfig(AppConfig):
 
 
 def discover_tiles(cfg: BuildDatasetConfig) -> pl.DataFrame:
-    """Glob BUILD_CELL_IMAGES' output directory for this experiment's tiles.
-
-    No manifest file -- derives (well, tile, crops_tif, mask_crops_tif)
-    directly from the `{well}_grid<N>/tile<x>x<y>y/` convention
-    BUILD_CELL_IMAGES' own output preserves (mirroring starcall-workflow's
-    own naming). Each tile directory holds exactly one
-    `{segmentation_type}_crops_{window}.tif` (the per-cell image stack) and
-    one `{segmentation_type}_mask_crops_{window}.tif` (the matching mask
-    stack) -- glob generically for both rather than needing to know which
-    `segmentation_type` BUILD_CELL_IMAGES chose (that's now
-    BUILD_CELL_IMAGES-only config, not BuildDatasetConfig's).
-
-    Glob-disambiguation: a naive ``*_crops_*.tif`` glob also matches the
-    mask-crops file itself (``cells_mask_crops_224.tif`` ends in
-    ``_crops_224.tif`` too). Glob ``*_mask_crops_*.tif`` first, then glob
-    ``*_crops_*.tif`` and drop any path already claimed as a mask-crops
-    match, rather than relying on glob ordering/exclusion patterns.
-
-    Parameters
-    ----------
-    cfg : BuildDatasetConfig
-        Supplies ``cell_images_dir``.
+    """Read BUILD_CELL_IMAGES' ``tiles.parquet`` for this experiment.
 
     Returns
     -------
     pl.DataFrame
-        Columns ``well``, ``tile``, ``crops_tif``, ``mask_crops_tif``, one
-        row per discovered tile, sorted deterministically by ``(well,
-        tile_x, tile_y)`` as integers (not lexically -- lexical order
-        would misorder double-digit tile indices, e.g. ``tile10x0y``
-        sorting before ``tile2x0y``).
+        Columns ``well``, ``tile``, ``image_tif``, ``mask_tif``, one row per
+        tile, sorted deterministically by ``(well, tile_x, tile_y)`` as
+        integers (not lexically -- lexical order would misorder
+        double-digit tile indices, e.g. ``tile10x0y`` sorting before
+        ``tile2x0y``).
     """
-    rows = []
-    for tile_dir in glob.glob(f"{cfg.cell_images_dir}/*_grid*/tile*x*y"):
-        tile_path = pathlib.Path(tile_dir)
-        tile_name = tile_path.name
-        well_grid = tile_path.parent.name
-        well = well_grid.rsplit("_grid", 1)[0]
-
-        mask_crops_matches = glob.glob(f"{tile_dir}/*_mask_crops_*.tif")
-        crops_matches = [
-            p
-            for p in glob.glob(f"{tile_dir}/*_crops_*.tif")
-            if p not in mask_crops_matches
-        ]
-        if not crops_matches or not mask_crops_matches:
-            continue
-
-        m = TILE_DIR_RE.match(tile_name)
-        if m is None:
-            continue
-        rows.append(
-            {
-                "well": well,
-                "tile": tile_name,
-                "tile_x": int(m.group(1)),
-                "tile_y": int(m.group(2)),
-                "crops_tif": crops_matches[0],
-                "mask_crops_tif": mask_crops_matches[0],
-            }
-        )
-
-    manifest = pl.DataFrame(
-        rows,
-        schema={
-            "well": pl.String,
-            "tile": pl.String,
-            "tile_x": pl.Int64,
-            "tile_y": pl.Int64,
-            "crops_tif": pl.String,
-            "mask_crops_tif": pl.String,
-        },
+    tiles = pl.read_parquet(f"{cfg.cell_images_dir}/tiles.parquet").select(
+        "well", "tile", "image_tif", "mask_tif"
     )
-    manifest = manifest.sort(["well", "tile_x", "tile_y"])
-    return manifest.drop(["tile_x", "tile_y"])
+    coords = [TILE_DIR_RE.match(t) for t in tiles["tile"]]
+    bad = [t for t, m in zip(tiles["tile"], coords) if m is None]
+    if bad:
+        raise ValueError(f"tiles.parquet has unrecognised tile name(s): {bad}")
+    tiles = tiles.with_columns(
+        pl.Series("tile_x", [int(m.group(1)) for m in coords], dtype=pl.Int64),
+        pl.Series("tile_y", [int(m.group(2)) for m in coords], dtype=pl.Int64),
+    )
+    return tiles.sort(["well", "tile_x", "tile_y"]).drop(["tile_x", "tile_y"])
+
+
+def crop_cell(
+    image: np.ndarray,
+    mask: np.ndarray,
+    bbox: tuple[int, int, int, int],
+    label: int,
+    window: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cut one cell's ``window`` x ``window`` crop out of a whole tile.
+
+    The crop is centred on the bbox midpoint and zero-padded wherever it
+    runs off the tile edge. The mask crop is ``mask == label`` as uint8
+    (bool arrays aren't memory-mappable), so neighbouring cells that fall
+    inside the window are masked out.
+
+    This is the same arithmetic as the patched ``make_cell_images_bbox``
+    rule this replaces, including its axis convention: ``bbox_x*`` index
+    image axis 0 (rows) and ``bbox_y*`` axis 1 (columns), matching
+    starcall-workflow's own cell table.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        ``(C, H, W)`` whole-tile image.
+    mask : np.ndarray
+        ``(H, W)`` integer label mask for the same tile.
+    bbox : tuple of int
+        ``(bbox_x1, bbox_y1, bbox_x2, bbox_y2)``.
+    label : int
+        This cell's label in ``mask`` -- ``crop_index + 1``, starcall's
+        own convention (row i of the tile's cell table is label i+1).
+    window : int
+        Crop side length.
+
+    Returns
+    -------
+    (np.ndarray, np.ndarray)
+        ``(C, window, window)`` crop in ``image``'s dtype, and the
+        ``(window, window)`` uint8 mask crop.
+    """
+    x1_bbox, y1_bbox, x2_bbox, y2_bbox = bbox
+    cx, cy = (x1_bbox + x2_bbox) // 2, (y1_bbox + y2_bbox) // 2
+    low = window // 2
+    high = window - low
+
+    # Requested window in tile coordinates, then clamped to the tile.
+    x1, x2, y1, y2 = cx - low, cx + high, cy - low, cy + high
+    tx1, tx2 = max(0, x1), min(mask.shape[0], x2)
+    ty1, ty2 = max(0, y1), min(mask.shape[1], y2)
+
+    crop = np.zeros((image.shape[0], window, window), dtype=image.dtype)
+    crop_mask = np.zeros((window, window), dtype=np.uint8)
+    if tx2 <= tx1 or ty2 <= ty1:
+        return crop, crop_mask
+
+    # Where the clamped region lands inside the (padded) output window.
+    ox1, oy1 = tx1 - x1, ty1 - y1
+    ox2, oy2 = ox1 + (tx2 - tx1), oy1 + (ty2 - ty1)
+    crop[:, ox1:ox2, oy1:oy2] = image[:, tx1:tx2, ty1:ty2]
+    crop_mask[ox1:ox2, oy1:oy2] = mask[tx1:tx2, ty1:ty2] == label
+    return crop, crop_mask
+
+
+def _read_tile_image(path: str) -> np.ndarray:
+    """A whole-tile phenotype image as ``(C, H, W)``. starcall writes
+    ``raw_pt.tif`` as ``(cycles, channels, H, W)``; its own
+    ``make_cell_images`` flattens the leading axes the same way."""
+    image = tifffile.imread(path)
+    return image.reshape(-1, *image.shape[-2:])
 
 
 def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> None:
-    """Index every tile's pre-cropped stacks into per-cell WebDataset samples.
+    """Crop every cell into per-cell WebDataset samples.
 
     Writes ``{output_dir}/dataset-%06d.tar`` shards (via
     ``webdataset.ShardWriter(maxcount=cfg.shard_maxcount)``) and a
     companion ``{output_dir}/metadata.parquet`` holding the same per-cell
-    ``meta_*`` fields with no image data, so ``QC_FILTER`` and the join key
-    ``FILTER_EMBEDDINGS`` uses never need to decode the shards just for
-    metadata.
+    ``meta_*`` fields with no image data.
 
-    Tiles come from :func:`discover_tiles`, not a hand-authored manifest.
-    Per-cell metadata comes from BUILD_CELL_IMAGES' ``cell_table.parquet``,
-    read once (not re-read per tile). Per tile, this reads the two
-    already-cropped stacks BUILD_CELL_IMAGES' own `make_cell_images_bbox`
-    produced (``crops_tif``: ``(num_cells, C, window, window)``;
-    ``mask_crops_tif``: ``(num_cells, window, window)``) and indexes
-    directly into them at each cell's ``crop_index`` -- no cropping happens
-    in this module any more (see the module docstring).
-
-    A tile whose cell table has zero rows is skipped without erroring,
-    *before* either stack is read -- `make_cell_images_bbox` itself
-    ``touch``es a zero-byte file for a zero-row tile (matching the real
-    upstream rule's own convention), which `tifffile.imread` can't parse.
+    Each tile's image and mask are read once and every one of its cells
+    cropped out with :func:`crop_cell`. A tile with no cells in
+    ``cell_table.parquet`` is skipped before either file is read.
 
     Parameters
     ----------
@@ -222,10 +208,8 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
         Directory to write ``dataset-*.tar`` shards and ``metadata.parquet``
         into. Must already exist.
     cfg : BuildDatasetConfig
-        Supplies the tile manifest (via :func:`discover_tiles`), the
-        expected crop ``window`` (sanity-checked against the discovered
-        stacks' actual shape), column-name overrides, ``batch_stem``, and
-        ``shard_maxcount``.
+        Supplies ``cell_images_dir``, ``window``, column-name overrides,
+        ``batch_stem`` and ``shard_maxcount``.
     """
     tile_manifest = discover_tiles(cfg)
     cell_table = pl.read_parquet(f"{cfg.cell_images_dir}/cell_table.parquet")
@@ -239,14 +223,8 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
             # (cell_metadata.py) and BUILD_CP_FEATURES apply, via the one
             # shared helper -- so a cell's meta_* values are identical in
             # this shard's meta.json, in metadata.parquet, and in QC's own
-            # input, rather than three hand-rolled copies that can drift.
-            # crop_index rides along on top of the projection: it indexes
-            # into the crop stacks below and isn't metadata itself. (This
-            # used to be a .to_pandas() + .iloc[] loop whose
-            # str(tile_row[...]) turned a missing barcode into the literal
-            # string "nan"; the projection leaves it null, which is what
-            # cp_features.py already produced -- see docs/architecture.md
-            # decision 19.)
+            # input. crop_index and the bbox ride along on top: they locate
+            # the cell in its tile and aren't metadata themselves.
             tile_table = (
                 cell_table.filter(
                     (pl.col("well") == row["well"]) & (pl.col("tile") == row["tile"])
@@ -260,27 +238,27 @@ def write_dataset_shards(output_dir: pathlib.Path, cfg: BuildDatasetConfig) -> N
                         cfg.edit_distance_col_name,
                     ),
                     pl.col("crop_index"),
+                    *(pl.col(c) for c in _BBOX_COLS),
                 )
             )
             if tile_table.height == 0:
                 logging.info("Skipping empty tile %s/%s", row["well"], row["tile"])
                 continue
 
-            crops = tifffile.imread(row["crops_tif"])  # (num_cells, C, window, window)
-            mask_crops = tifffile.imread(
-                row["mask_crops_tif"]
-            )  # (num_cells, window, window)
-            assert crops.shape[-1] == cfg.window, (
-                f"crops_tif {row['crops_tif']!r} has window "
-                f"{crops.shape[-1]}, expected cfg.window={cfg.window} -- "
-                "this usually means a partial re-run pointed BUILD_DATASET "
-                "at crop stacks built with a different `window` than "
-                "requested here."
-            )
+            image = _read_tile_image(row["image_tif"])
+            mask = tifffile.imread(row["mask_tif"])
+            if mask.shape != image.shape[-2:]:
+                raise ValueError(
+                    f"{row['well']}/{row['tile']}: mask {row['mask_tif']!r} has "
+                    f"shape {mask.shape} but image {row['image_tif']!r} is "
+                    f"{image.shape[-2:]} -- they must cover the same tile."
+                )
 
             for tile_row in tile_table.iter_rows(named=True):
-                crop_index = int(tile_row["crop_index"])
-                crop, crop_mask = crops[crop_index], mask_crops[crop_index]
+                bbox = tuple(int(tile_row[c]) for c in _BBOX_COLS)
+                crop, crop_mask = crop_cell(
+                    image, mask, bbox, int(tile_row["crop_index"]) + 1, cfg.window
+                )
                 meta = {key: tile_row[key] for key in CELL_METADATA_SCHEMA}
                 cell_index = meta[META_CELL_INDEX_COL]
                 sink.write(

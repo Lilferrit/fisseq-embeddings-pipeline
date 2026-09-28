@@ -5,7 +5,7 @@ A thin wrapper around global_embeddings.py's global_variant_embeddings()
 test_global_embeddings.py, against emb_* columns, and requires no code
 changes to run against CellProfiler-shaped columns -- it already keys off
 FEATURE_SELECTOR) -- these tests confirm the wrapper's own config defaults
-and that its CLI, including the `stageAs`-numbered staged-file
+and that its CLI, including the explicit ``input_files`` staged-file
 reconstruction, works end-to-end against CellProfiler-shaped columns,
 including that the raw (pre-PCA) median_aggregate.parquet output exists
 alongside the PCA outputs.
@@ -54,14 +54,20 @@ def test_config_default_label_column():
 
 def _write_staged_aggregate_files(
     tmp_path: Path, batches: list[pl.DataFrame]
-) -> list[str]:
-    stems = [f"expt{i}" for i in range(1, len(batches) + 1)]
-    if len(batches) == 1:
-        batches[0].write_parquet(tmp_path / "agg_input_.parquet")
-    else:
-        for i, batch_df in enumerate(batches, start=1):
-            batch_df.write_parquet(tmp_path / f"agg_input_{i}.parquet")
-    return stems
+) -> tuple[list[str], list[str]]:
+    """Write batches[i] to ``expt{i+1}/aggregate.parquet`` -- the per-experiment
+    layout the Snakemake rule passes via ``input_files`` -- and return the
+    parallel (batch_stems, input_files) lists."""
+    stems, files = [], []
+    for i, batch_df in enumerate(batches, start=1):
+        stem = f"expt{i}"
+        batch_dir = tmp_path / stem
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        path = batch_dir / "aggregate.parquet"
+        batch_df.write_parquet(path)
+        stems.append(stem)
+        files.append(str(path))
+    return stems, files
 
 
 def _run_global_variant_cp_features(
@@ -95,12 +101,13 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path) -> None:
             "Cells_Intensity_MeanIntensity_DNA": [1.5, 1.0, 0.0],
         }
     )
-    batch_stems = _write_staged_aggregate_files(tmp_path, [batch1, batch2])
+    batch_stems, input_files = _write_staged_aggregate_files(tmp_path, [batch1, batch2])
     output_dir = tmp_path / "out"
 
     result = _run_global_variant_cp_features(
         tmp_path,
         f"output_dir={output_dir}",
+        f"input_files=[{','.join(input_files)}]",
         f"batch_stems=[{','.join(batch_stems)}]",
     )
     assert result.returncode == 0, result.stderr
@@ -136,6 +143,7 @@ def test_main_raises_on_empty_batch_stems(tmp_path: Path) -> None:
         tmp_path,
         f"output_dir={output_dir}",
         "batch_stems=[]",
+        "input_files=[]",
     )
     assert result.returncode != 0
     assert "batch_stems must be a non-empty list" in result.stderr

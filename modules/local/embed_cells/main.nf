@@ -6,6 +6,8 @@
 // `apply_mask` is a plain scalar (one shared mask per cell, so one flag
 // covering every selected channel -- see EmbedCellsConfig).
 
+include { threadEnv } from '../functions'
+
 process EMBED_CELLS {
     errorStrategy 'ignore'
     label 'process_gpu'
@@ -19,11 +21,9 @@ process EMBED_CELLS {
     output:
     tuple val(batch_stem), path("embeddings.parquet"), emit: embeddings
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.embed \\
         output_dir=. \\
         'shard_pattern=./*.tar' \\

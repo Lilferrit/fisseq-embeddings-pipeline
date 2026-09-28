@@ -1,22 +1,43 @@
-// EmbeddingsPipeline. Wires BUILD_DATASET -> {QC_FILTER, EMBED_CELLS} ->
-// FILTER_EMBEDDINGS -> {AGGREGATE_EMBEDDINGS, OVWT_BATCHWISE} ->
-// {GLOBAL_VARIANT_EMBEDDINGS, GLOBAL_VARIANT_DISTINGUISHABILITY}.
+// EmbeddingsPipeline -- the whole DAG. See docs/architecture.md for the
+// picture.
 //
-// A second, parallel CellProfiler-feature track shares QC_FILTER's output
-// (the same cells, just a different feature space) rather than running a
-// second QC pass: BUILD_CP_FEATURES -> FILTER_CP_FEATURES ->
-// {AGGREGATE_CP_FEATURES, OVWT_BATCHWISE_CP_FEATURES} ->
-// {GLOBAL_VARIANT_CP_FEATURES, GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES}.
-nextflow.enable.dsl = 2
+//   PLAN_EXPERIMENTS -> BUILD_CELL_IMAGES -> BUILD_CELL_METADATA -> QC_FILTER
+//
+// QC_FILTER is where the two tracks fan out. It hangs off
+// BUILD_CELL_METADATA (a flat projection of cell_table.parquet) rather than
+// off the expensive, image-reading dataset build, so a BUILD_DATASET failure
+// can't take the CellProfiler track down with it.
+//
+//   cellDINO:  BUILD_DATASET -> EMBED_CELLS -> FILTER_EMBEDDINGS ->
+//              {AGGREGATE_EMBEDDINGS, OVWT_BATCHWISE, reproducibility chain}
+//              -> {GLOBAL_BLOCKLIST -> GLOBAL_VARIANT_EMBEDDINGS,
+//                  GLOBAL_VARIANT_DISTINGUISHABILITY}
+//   CP track:  BUILD_CP_FEATURES -> FILTER_CP_FEATURES ->
+//              {AGGREGATE_CP_FEATURES, OVWT_BATCHWISE_CP_FEATURES} ->
+//              {GLOBAL_VARIANT_CP_FEATURES,
+//               GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES}
+//
+// Every per-experiment task carries errorStrategy 'ignore', so independent
+// branches keep running when one fails. The global stages then pool over
+// whichever experiments survived -- check the run report for failures.
 
+include { PLAN_EXPERIMENTS } from '../modules/local/plan_experiments/main.nf'
 include { BUILD_CELL_IMAGES } from '../modules/local/build_cell_images/main.nf'
 include { BUILD_CELL_METADATA } from '../modules/local/build_cell_metadata/main.nf'
-include { BUILD_DATASET } from '../modules/local/build_dataset/main.nf'
 include { QC_FILTER } from '../modules/local/qc_filter/main.nf'
+include { BUILD_DATASET } from '../modules/local/build_dataset/main.nf'
 include { EMBED_CELLS } from '../modules/local/embed_cells/main.nf'
 include { FILTER_EMBEDDINGS } from '../modules/local/filter_embeddings/main.nf'
 include { AGGREGATE_EMBEDDINGS } from '../modules/local/aggregate_embeddings/main.nf'
 include { OVWT_BATCHWISE } from '../modules/local/ovwt_batchwise/main.nf'
+include { GENERATE_SPLIT } from '../modules/local/generate_split/main.nf'
+include { AGGREGATE_HALF } from '../modules/local/aggregate_half/main.nf'
+include { AGGREGATE_PASSTHROUGH } from '../modules/local/aggregate_passthrough/main.nf'
+include { CORRELATE_FEATURES } from '../modules/local/correlate_features/main.nf'
+include { BLOCKLIST } from '../modules/local/blocklist/main.nf'
+include { COMBINE_BLOCKLISTS } from '../modules/local/combine_blocklists/main.nf'
+include { FILTER_AGGREGATE } from '../modules/local/filter_aggregate/main.nf'
+include { GLOBAL_BLOCKLIST } from '../modules/local/global_blocklist/main.nf'
 include { GLOBAL_VARIANT_EMBEDDINGS } from '../modules/local/global_variant_embeddings/main.nf'
 include { GLOBAL_VARIANT_DISTINGUISHABILITY } from '../modules/local/global_variant_distinguishability/main.nf'
 include { BUILD_CP_FEATURES } from '../modules/local/build_cp_features/main.nf'
@@ -26,221 +47,118 @@ include { OVWT_BATCHWISE_CP_FEATURES } from '../modules/local/ovwt_batchwise_cp_
 include { GLOBAL_VARIANT_CP_FEATURES } from '../modules/local/global_variant_cp_features/main.nf'
 include { GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES } from '../modules/local/global_variant_distinguishability_cp_features/main.nf'
 
+// (batch_stem, file) pairs from every experiment -> one
+// ([batch_stems], [files]) tuple, sorted by batch_stem so a global stage's
+// input order doesn't depend on which experiment finished first. Emits
+// nothing if no experiment produced the file.
+def sortedPairs(ch) {
+    return ch
+        .toSortedList { a, b -> a[0] <=> b[0] }
+        .filter { pairs -> !pairs.isEmpty() }
+        .map { pairs -> tuple(pairs.collect { p -> p[0] }, pairs.collect { p -> p[1] }) }
+}
+
 workflow EmbeddingsPipeline {
-    // -params-file params.yaml is mandatory (there's no
-    // nextflow.config-embedded fallback), so fail fast here with a
-    // specific message for every required-with-no-default param --
-    // params.yaml's own "Required, no default" section -- rather than
-    // letting Nextflow's generic "no such property" surface first.
-    if (params.pipeline_dir == null) {
-        error "ERROR: --pipeline_dir is required."
-    }
-    if (params.cell_dino_checkpoint == null) {
-        error "ERROR: --cell_dino_checkpoint is required (path to a Cell-DINO .pth checkpoint)."
-    }
-    // Every entry in params.experiments (a YAML list of maps, declared
-    // directly in params.yaml under the `experiments:` key -- see that
-    // file's own comment) supplies BUILD_CELL_IMAGES' starcall-workflow-
-    // facing fields (phenotyping_dir, wells, grid_size, ...) and/or
-    // BuildDatasetConfig's own remaining fields (window, ...) directly.
-    // batch_stem is a required key *inside* each map now (there's no
-    // filename to derive it from any more, unlike the old
-    // configs/<batch_stem>.yaml-per-experiment mechanism this replaces).
-    // Nextflow's own -params-file YAML loader already parses this into a
-    // real List<Map> -- no manual SnakeYAML parsing needed, unlike the
-    // old config_ch, since there's no file to read here any more.
-    if (!(params.experiments instanceof List) || params.experiments.isEmpty()) {
-        error "ERROR: params.experiments must be a non-empty list of experiment maps (see params.yaml)."
-    }
-    params.experiments.eachWithIndex { entry, i ->
-        if (!(entry instanceof Map)) {
-            error "ERROR: params.experiments[${i}] must be a map, got ${entry?.getClass()?.simpleName}."
-        }
-        if (!(entry.batch_stem instanceof String) || entry.batch_stem.trim().isEmpty()) {
-            error "ERROR: params.experiments[${i}] is missing a required, non-empty 'batch_stem' field."
-        }
-        if (entry.containsKey('cp_features') && !(entry.cp_features instanceof Boolean)) {
-            error "ERROR: params.experiments[${i}].cp_features must be a boolean (true/false), got ${entry.cp_features?.getClass()?.simpleName}."
-        }
-    }
-    def batch_stems = params.experiments.collect { experiment -> experiment.batch_stem }
-    def duplicate_stems = batch_stems.findAll { s -> batch_stems.count(s) > 1 }.unique()
-    if (duplicate_stems) {
-        error "ERROR: params.experiments has duplicate batch_stem value(s): ${duplicate_stems.join(', ')}. Every experiment's batch_stem must be unique."
-    }
+    main:
+    // Validation and per-stage routing happen in Python
+    // (fisseq_embeddings_pipeline.config.experiments), over the run's params
+    // serialized to JSON.
+    def params_json = file("${workflow.workDir}/fisseq_params.json")
+    params_json.text = groovy.json.JsonOutput.toJson(params)
+    plans = PLAN_EXPERIMENTS(params_json).plans
+        .flatMap { f -> new groovy.json.JsonSlurperClassic().parseText(f.text) }
 
-    // BUILD_CELL_IMAGES is the ONLY thing that touches starcall-workflow's
-    // tree (phenotyping_dir/segmentation_dir/sequencing_dir) or invokes
-    // Snakemake -- every starcall-workflow-facing key in an experiment's
-    // map (starcall_workflow_dir, phenotyping_dir, segmentation_dir,
-    // sequencing_dir, wells, grid_size, segmentation_type, use_corrected,
-    // window, sequencing_reads_params, cp_features, cellprofiler_pipeline,
-    // cellprofiler_cycle) routes to it, not to BUILD_DATASET/
-    // BUILD_CP_FEATURES. Runs unconditionally for every experiment (not
-    // gated on cp_features) -- both tracks below depend on its
-    // cell_images_dir output. `window` is new here (BUILD_CELL_IMAGES now
-    // forces `make_cell_images_bbox`'s crop-stack output, which embeds
-    // `window` in its own target filename -- see docs/architecture.md
-    // decision 17); it and `cellprofiler_pipeline`/`cellprofiler_cycle`
-    // fall back to their global params.yaml defaults the same way `window`
-    // *also* does for config_ch below (two independent fallback
-    // mechanisms, one per stage -- an entry's own value always wins in
-    // both).
-    // (cell_images_hard_copy is NOT per-experiment: it's read directly off
-    // params by build_cell_images/main.nf's own publishDir directive, since
-    // Nextflow's publishDir `mode:` must be a static value at process-
-    // definition time, unlike `path:` -- confirmed against a real
-    // Nextflow 26.04.6 run. See that module's own comment.)
-    def cell_images_field_includes = [
-        'starcall_workflow_dir', 'phenotyping_dir', 'segmentation_dir', 'sequencing_dir',
-        'wells', 'grid_size', 'segmentation_type', 'use_corrected', 'window', 'sequencing_reads_params',
-        'cp_features', 'cellprofiler_pipeline', 'cellprofiler_cycle',
-    ] as Set
-    cell_images_config_ch = channel.fromList(params.experiments).map { entry ->
-        def overrides = entry.findAll { k, v -> k in cell_images_field_includes }
-        if (!overrides.containsKey('window') && params.window != null) {
-            overrides = overrides + [window: params.window]
-        }
-        if (!overrides.containsKey('cellprofiler_pipeline') && params.cellprofiler_pipeline != null) {
-            overrides = overrides + [cellprofiler_pipeline: params.cellprofiler_pipeline]
-        }
-        if (!overrides.containsKey('cellprofiler_cycle') && params.cellprofiler_cycle != null) {
-            overrides = overrides + [cellprofiler_cycle: params.cellprofiler_cycle]
-        }
-        tuple(entry.batch_stem, overrides)
-    }
-    cell_images_ch = BUILD_CELL_IMAGES(cell_images_config_ch) // (batch_stem, cell_table.parquet, cell_images_dir)
+    cell_images = BUILD_CELL_IMAGES(plans)  // (batch_stem, cell_table, tiles, phenotyping_dir)
+    cell_tables = cell_images.map { stem, cell_table, _tiles, _pheno_dir -> tuple(stem, cell_table) }
 
-    // QC's own input, straight off BUILD_CELL_IMAGES' cell table -- NOT
-    // BUILD_DATASET's metadata.parquet, which is what it used to be. That
-    // old edge made the whole CellProfiler track (whose FILTER_CP_FEATURES
-    // consumes this same qc_ch below) a downstream dependent of the
-    // expensive, image-reading WebDataset build, so a BUILD_DATASET failure
-    // took both tracks down at once. QC_FILTER is now the shared fan-out
-    // point instead -- the same shape fisseq-data-pipeline's own
-    // INPUT -> QC_FILTER -> {NORMALIZE, batch-correction} wiring has -- and
-    // the two tracks below depend on it independently of each other.
-    // cell_table.parquet is passed as a real staged `path` (the tuple's
-    // second element), not as a cell_images_dir string, so this stage needs
-    // no containerOptions bind of its own; see the module's own comment.
-    meta_ch = BUILD_CELL_METADATA(cell_images_ch.map { stem, parquet, dir -> tuple(stem, parquet) }) // (batch_stem, metadata.parquet)
-    qc_ch   = QC_FILTER(meta_ch) // (batch_stem, filtered_cells, barcode_counts, variants_per_barcode)
+    metadata = BUILD_CELL_METADATA(cell_tables)
+    qc = QC_FILTER(metadata)
+    // Only the join key; the other two QC outputs are report files.
+    qc_passed = qc.map { stem, filtered, _barcode_counts, _variants -> tuple(stem, filtered) }
 
-    // `cp_features` opts an experiment into the CellProfiler-feature track
-    // below and isn't a BuildDatasetConfig field itself, so BUILD_DATASET
-    // never sees it; every starcall-workflow-facing key above is now
-    // BUILD_CELL_IMAGES-only, so BUILD_DATASET never sees those either --
-    // it only needs cell_images_dir (injected below) plus whatever
-    // BuildDatasetConfig fields remain (window, shard_maxcount,
-    // barcode_col_name/aa_changes_col_name/edit_distance_col_name).
-    //
-    // Parsed here (not passed through as a raw file) so BUILD_DATASET's
-    // -resume cache key is the actual scalar values -- matching this
-    // repo's prior configs/*.yaml-parsing precedent for the same reason.
-    // `window` falls back to the global params.window default (see
-    // params.yaml's "Shared per-experiment defaults" section) whenever an
-    // entry doesn't set its own -- an entry's own value always wins.
-    def dataset_field_excludes = (['batch_stem', 'cp_features', 'cell_images_hard_copy'] + cell_images_field_includes) as Set
-    config_ch = channel.fromList(params.experiments)
-        .map { entry ->
-            def overrides = entry.findAll { k, v -> !(k in dataset_field_excludes) }
-            if (!overrides.containsKey('window') && params.window != null) {
-                overrides = overrides + [window: params.window]
-            }
-            tuple(entry.batch_stem, overrides)
-        }
-        // parquet.getParent(), not the tuple's own third (*_grid* glob)
-        // element -- path("*_grid*", type: 'dir') resolves to each matched
-        // grid subdirectory itself (e.g. well1_grid1/), not its containing
-        // directory; cell_table.parquet's parent is the one unambiguous
-        // reference to BUILD_CELL_IMAGES' actual per-experiment output
-        // directory, regardless of how many *_grid* subdirectories exist
-        // (confirmed against a real Nextflow 26.04.6 run -- see
-        // modules/local/build_cell_images/main.nf).
-        .join(cell_images_ch.map { stem, parquet, dir -> tuple(stem, parquet.getParent()) })
-        .map { stem, overrides, cell_images_dir -> tuple(stem, overrides + [cell_images_dir: cell_images_dir.toString()]) }
-
-    // Per-batch (per-experiment) chain -- identical shape to
-    // fisseq-data-pipeline's per-batch resolution pattern (BatchParams.resolve).
-    // dataset_ch's metadata.parquet is still declared/published (it's the
-    // record of which cells actually made it into the shards, which can be
-    // a subset of the cell table -- dataset.py skips empty/unreadable
-    // tiles), but nothing consumes it now that QC_FILTER runs off
-    // BUILD_CELL_METADATA above.
-    dataset_ch = BUILD_DATASET(config_ch)                 // (batch_stem, [dataset-*.tar shards], metadata.parquet)
-    embed_ch   = EMBED_CELLS(dataset_ch.map { s, shards, meta -> tuple(s, shards) }) // (batch_stem, embeddings.parquet) -- streams the shards; no QC dependency, matches diagram
-    // FILTER_EMBEDDINGS only wants the join key (filtered_cells.parquet),
-    // not qc_ch's other two (informational, QC-report-only) outputs.
-    filtered_ch = FILTER_EMBEDDINGS(
-        embed_ch.join(qc_ch.map { s, filtered_cells, barcode_counts, variants_per_barcode -> tuple(s, filtered_cells) })
-    ) // (batch_stem, filtered_keys.parquet, normalizer.parquet) -- no emb_* columns, §3 decision 10
-
-    // Both downstream consumers need the raw embeddings.parquet *and*
-    // filtered_ch's join key + normalizer -- neither reads a pre-normalized
-    // file, each reconstructs it itself via load_filtered_embeddings() (§6.4).
-    embed_and_filtered_ch = embed_ch.join(filtered_ch)     // (batch_stem, embeddings.parquet, filtered_keys.parquet, normalizer.parquet)
-    agg_ch  = AGGREGATE_EMBEDDINGS(embed_and_filtered_ch)  // (batch_stem, aggregate.parquet)  -> "Experiment N Aggregates"
-    ovwt_ch = OVWT_BATCHWISE(embed_and_filtered_ch)        // (batch_stem, results.parquet, cell_scores.parquet, models.pkl) -> "Experiment N Distinguish-ability Scores"
-
-    // Global stages -- real path channels via .collect(), not a directory
-    // glob (see fisseq-data-pipeline's stage_channel.nf / AGENTS.md gotcha:
-    // a val glob string only hashes the glob text, not the resolved file
-    // set, and silently breaks -resume cache invalidation).
-    GLOBAL_VARIANT_EMBEDDINGS(
-        agg_ch.map { stem, path -> path }.collect(),
-        agg_ch.map { stem, path -> stem }.collect(),
+    // ── cellDINO track ───────────────────────────────────────────────────
+    dataset = BUILD_DATASET(
+        plans.map { p -> tuple(p.batch_stem, p.dataset_args) }.join(cell_images)
     )
-    GLOBAL_VARIANT_DISTINGUISHABILITY(
-        ovwt_ch.map { stem, results, cell_scores, models -> results }.collect(),
-        ovwt_ch.map { stem, results, cell_scores, models -> stem }.collect(),
-    )
+    embeddings = EMBED_CELLS(dataset.map { stem, shards, _meta -> tuple(stem, shards) })
 
-    // ── CellProfiler-feature track (optional second track) ──────────────
-    // An `experiments:` entry opts itself into this track by setting
-    // `cp_features: true` -- there's no separate list to keep in sync with
-    // `experiments:` any more, so batch_stem existence/uniqueness are
-    // already guaranteed by the validation above. No entries opting in
-    // (the default) skips BUILD_CP_FEATURES onward entirely, so existing
-    // cellDINO-only runs work unchanged.
-    def cp_experiments = params.experiments.findAll { experiment -> experiment.cp_features == true }
-    if (cp_experiments) {
-        // CpFeaturesConfig no longer needs any starcall-workflow-facing
-        // field at all -- BUILD_CELL_IMAGES already folded this
-        // experiment's CellProfiler columns into cell_table.parquet (see
-        // cell_images_config_ch/cell_images_ch above), so this stage just
-        // needs cell_images_dir (injected below) plus barcode_col_name/
-        // aa_changes_col_name/edit_distance_col_name/batch_stem.
-        def cp_field_excludes = (['batch_stem', 'cp_features', 'cell_images_hard_copy'] + cell_images_field_includes) as Set
-        cp_config_ch = channel.fromList(cp_experiments)
-            .map { entry -> tuple(entry.batch_stem, entry.findAll { k, v -> !(k in cp_field_excludes) }) }
-            // parquet.getParent(), not the tuple's own third (*_grid* glob)
-            // element -- path("*_grid*", type: 'dir') resolves to each
-            // matched grid subdirectory itself (e.g. well1_grid1/), not
-            // its containing directory; cell_table.parquet's parent is the
-            // one unambiguous reference to BUILD_CELL_IMAGES' actual
-            // per-experiment output directory, regardless of how many
-            // *_grid* subdirectories exist (confirmed against a real
-            // Nextflow 26.04.6 run -- see modules/local/build_cell_images/main.nf).
-            .join(cell_images_ch.map { stem, parquet, dir -> tuple(stem, parquet.getParent()) })
-            .map { stem, overrides, cell_images_dir -> tuple(stem, overrides + [cell_images_dir: cell_images_dir.toString()]) }
+    // embeddings_only stops the cellDINO track here and skips the CP track:
+    // for when all you want is the embeddings (and what the containerized
+    // real-starcall integration test uses).
+    // (.toString().toBoolean(): `--embeddings_only false` can arrive as the
+    // string "false", which Groovy treats as true.)
+    if (!params.embeddings_only.toString().toBoolean()) {
+        filtered = FILTER_EMBEDDINGS(embeddings.join(qc_passed))  // (stem, filtered_keys, normalizer)
+        // Consumers reconstruct the QC-passed, synonymous-corrected table
+        // themselves from these three; none reads a pre-normalized copy.
+        embed_and_filtered = embeddings.join(filtered)            // (stem, embeddings, filtered_keys, normalizer)
+        aggregates = AGGREGATE_EMBEDDINGS(embed_and_filtered)
+        ovwt = OVWT_BATCHWISE(embed_and_filtered)
 
-        cp_ch = BUILD_CP_FEATURES(cp_config_ch)   // (batch_stem, cp_features.parquet)
-        // Reuses the SAME qc_ch computed above for the cellDINO track --
-        // no second QC_FILTER run.
-        cp_qc_join_ch = qc_ch.map { s, filtered_cells, barcode_counts, variants_per_barcode -> tuple(s, filtered_cells) }
-        cp_filtered_ch = FILTER_CP_FEATURES(cp_ch.join(cp_qc_join_ch)) // (batch_stem, filtered_keys.parquet, normalizer.parquet)
+        // ── Reproducibility filtering ───────────────────────────────────
+        // One split per bootstrap replicate, two halves per split, one
+        // AGGREGATE_HALF task per (replicate, half, method). Bare emb_*
+        // column names only when aggregate_methods is exactly ["median"],
+        // mirroring AGGREGATE_EMBEDDINGS -- decided here, from the whole
+        // list, since each AGGREGATE_HALF task sees only its own method.
+        def reps = params.reproducibility_bootstrap_reps as int
+        def methods = params.aggregate_methods as List
+        def passthrough_methods = (params.aggregate_methods_passthrough ?: []) as List
+        def bare_columns = (methods == ['median']).toString()
 
-        cp_and_filtered_ch = cp_ch.join(cp_filtered_ch) // (batch_stem, cp_features.parquet, filtered_keys.parquet, normalizer.parquet)
-        cp_agg_ch  = AGGREGATE_CP_FEATURES(cp_and_filtered_ch)
-        cp_ovwt_ch = OVWT_BATCHWISE_CP_FEATURES(cp_and_filtered_ch)
-
-        GLOBAL_VARIANT_CP_FEATURES(
-            cp_agg_ch.map { stem, path -> path }.collect(),
-            cp_agg_ch.map { stem, path -> stem }.collect(),
+        splits = GENERATE_SPLIT(
+            filtered.map { stem, keys, _normalizer -> tuple(stem, keys) }.combine(channel.of(1..reps))
         )
+        halves = splits.flatMap { stem, rep, half1, half2 ->
+            [tuple(stem, rep, 1, half1), tuple(stem, rep, 2, half2)]
+        }
+        half_aggregates = AGGREGATE_HALF(
+            embed_and_filtered.combine(halves, by: 0).combine(channel.fromList(methods)),
+            bare_columns,
+        )
+        // size: stops a group from waiting on a half whose task failed; that
+        // replicate (and so that method's blocklist) is then simply missing.
+        half_pairs = half_aggregates
+            .groupTuple(by: [0, 1, 2], size: 2)
+            .map { stem, rep, method, half_ids, files ->
+                def by_half = [half_ids, files].transpose().sort { h -> h[0] }
+                tuple(stem, rep, method, by_half[0][1], by_half[1][1])
+            }
+        correlations = CORRELATE_FEATURES(half_pairs)
+        method_blocklists = BLOCKLIST(correlations.groupTuple(by: [0, 1], size: reps))
+        blocklists = COMBINE_BLOCKLISTS(method_blocklists.groupTuple(size: methods.size()))
+
+        passthrough = passthrough_methods
+            ? AGGREGATE_PASSTHROUGH(
+                embed_and_filtered.combine(channel.fromList(passthrough_methods)),
+                bare_columns,
+            ).groupTuple(size: passthrough_methods.size())
+            : aggregates.map { stem, _agg -> tuple(stem, []) }
+        FILTER_AGGREGATE(aggregates.join(blocklists).join(passthrough))
+
+        // ── Global stages ───────────────────────────────────────────────
+        global_blocklist = GLOBAL_BLOCKLIST(sortedPairs(blocklists))
+        GLOBAL_VARIANT_EMBEDDINGS(sortedPairs(aggregates), global_blocklist)
+        GLOBAL_VARIANT_DISTINGUISHABILITY(
+            sortedPairs(ovwt.map { stem, results, _cell_scores, _models -> tuple(stem, results) })
+        )
+
+        // ── CellProfiler-feature track (experiments with cp_features: true) ─
+        // Reuses the SAME QC_FILTER output -- no second QC pass -- and gets
+        // no reproducibility filtering: its columns are hand-engineered and
+        // meant to stay comparable to the published CellProfiler analysis.
+        cp_features = BUILD_CP_FEATURES(
+            plans.filter { p -> p.cp_features }
+                .map { p -> tuple(p.batch_stem, p.cp_features_args) }
+                .join(cell_tables)
+        )
+        cp_filtered = FILTER_CP_FEATURES(cp_features.join(qc_passed))
+        cp_and_filtered = cp_features.join(cp_filtered)
+        cp_aggregates = AGGREGATE_CP_FEATURES(cp_and_filtered)
+        cp_ovwt = OVWT_BATCHWISE_CP_FEATURES(cp_and_filtered)
+        GLOBAL_VARIANT_CP_FEATURES(sortedPairs(cp_aggregates))
         GLOBAL_VARIANT_DISTINGUISHABILITY_CP_FEATURES(
-            cp_ovwt_ch.map { stem, results, cell_scores, models -> results }.collect(),
-            cp_ovwt_ch.map { stem, results, cell_scores, models -> stem }.collect(),
+            sortedPairs(cp_ovwt.map { stem, results, _cell_scores, _models -> tuple(stem, results) })
         )
     }
 }

@@ -3,6 +3,8 @@
 // is QC_FILTER's existing output (the same one FILTER_EMBEDDINGS
 // consumes), not a second QC run -- see workflows/embeddings.nf.
 
+include { threadEnv } from '../functions'
+
 process FILTER_CP_FEATURES {
     errorStrategy 'ignore'
     label 'process_low'
@@ -15,11 +17,9 @@ process FILTER_CP_FEATURES {
     output:
     tuple val(batch_stem), path("filtered_keys.parquet"), path("normalizer.parquet"), emit: filtered
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.filter_cp_features \\
         output_dir=. \\
         cp_features_file=${cp_features_parquet} \\

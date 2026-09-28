@@ -1,7 +1,6 @@
 # Cell Metadata (`BUILD_CELL_METADATA`)
 
-`python -m fisseq_embeddings_pipeline.cell_metadata` (Nextflow process
-`BUILD_CELL_METADATA`) projects `BUILD_CELL_IMAGES`' `cell_table.parquet`
+`python -m fisseq_embeddings_pipeline.cell_metadata` (Nextflow process `BUILD_CELL_METADATA`) projects `BUILD_CELL_IMAGES`' `cell_table.parquet`
 down to the seven `meta_*` columns `QC_FILTER` reads, as one
 per-experiment `metadata.parquet`. No images, no feature columns, no
 `starcall-workflow` tree access.
@@ -33,7 +32,7 @@ Extends the [common config fields](#common-config-fields) below.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| `cell_table` | **required** | Path to `BUILD_CELL_IMAGES`' `cell_table.parquet`. The file itself, not its directory -- the Nextflow module stages it as a real `path` input, which is what keeps this stage out of the container-visibility problem `BUILD_DATASET`/`BUILD_CP_FEATURES` need bind mounts for (see [Nextflow Workflow](../nextflow.md#docker-and-singularityapptainer-arbitrary-host-paths)). |
+| `cell_table` | **required** | Path to `BUILD_CELL_IMAGES`' `cell_table.parquet`. The file itself, not its directory -- the process takes `BUILD_CELL_IMAGES`' `cell_table.parquet` output as a staged `path` input, so no host path needs binding. |
 | `batch_stem` | **required** | This experiment's identifier, written into every row as `meta_batch`. |
 | `barcode_col_name` | `"upBarcode"` | Column name for cell barcodes in `cell_table.parquet`. |
 | `aa_changes_col_name` | `"aaChanges"` | Column name for amino-acid change labels in `cell_table.parquet`. |

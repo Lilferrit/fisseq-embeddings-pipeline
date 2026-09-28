@@ -1,7 +1,6 @@
 # Aggregation, CellProfiler Track (`AGGREGATE_CP_FEATURES`)
 
-`python -m fisseq_embeddings_pipeline.aggregate_cp_features` (Nextflow
-process `AGGREGATE_CP_FEATURES`) is the CellProfiler-feature analog of
+`python -m fisseq_embeddings_pipeline.aggregate_cp_features` (Nextflow process `AGGREGATE_CP_FEATURES`) is the CellProfiler-feature analog of
 `AGGREGATE_EMBEDDINGS`: it reconstructs the QC-passed, synonymous-corrected
 CellProfiler feature table and computes per-variant pooling via one or
 more of `mean`/`median`/`KS`/`AUROC`/`KSnegLogP`/`AUROCnegLogP` -- the
@@ -28,6 +27,7 @@ Extends the [common config fields](#common-config-fields) below.
 | `normalizer_file` | **required** | Path to `FILTER_CP_FEATURES`' `normalizer.parquet`. |
 | `label_column` | `"meta_aa_changes"` | Name of the variant label column. |
 | `aggregators` | `["median"]` | One or more of `"mean"`, `"median"`, `"KS"`, `"AUROC"`, `"KSnegLogP"`, `"AUROCnegLogP"`. |
+| `feature_chunk_size` | `32` | Feature columns evaluated per Polars query. A memory dial only -- see [Aggregation](aggregate.md#column-batching-feature_chunk_size). Shared with the cellDINO track: it is sized to the task's memory, not to the feature space. |
 
 ## Output file
 
@@ -59,3 +59,13 @@ Every CLI tool's config extends `AppConfig`, which supplies:
 | `random_seed` | `0` | Shared seed for every stochastic pipeline stage (unused by this stage -- every aggregator is deterministic). |
 
 See [API Reference: aggregate_cp_features](../api/aggregate_cp_features.md) for full function documentation.
+
+## Not reproducibility-filtered
+
+The reproducibility-filtering chain (`GENERATE_SPLIT` through
+`FILTER_AGGREGATE`) and the passthrough aggregate list are **cellDINO-track
+only**. This stage's `aggregate.parquet` is consumed directly by
+[GLOBAL_VARIANT_CP_FEATURES](global_variant_cp_features.md), with no blocklist
+in between. CellProfiler columns are hand-engineered and already curated, and
+the two tracks' aggregates are meant to stay directly comparable to the
+published CellProfiler analysis. See [Architecture](../architecture.md).

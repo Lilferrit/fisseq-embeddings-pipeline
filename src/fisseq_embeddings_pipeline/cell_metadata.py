@@ -17,7 +17,7 @@ cell table. It also means QC thresholds can be retuned (and the whole QC
 report regenerated) without touching the shard build at all.
 
 Structurally the analogue of ``fisseq-data-pipeline``'s own ``INPUT``
-stage (``src/fisseq_data_pipeline/input.py``, ``modules/local/input.nf``):
+stage (``src/fisseq_data_pipeline/input.py``, ``the `input` rule``):
 the cheap read-and-normalize step that turns whatever the upstream
 produced into the one per-batch parquet QC_FILTER consumes.
 
@@ -68,10 +68,9 @@ class CellMetadataConfig(AppConfig):
     cell_table : str
         Path to BUILD_CELL_IMAGES' ``cell_table.parquet``. Unlike
         ``CpFeaturesConfig.cell_images_dir``, this is the file itself,
-        not the directory holding it: the Nextflow module stages it as a
-        real ``path`` input (modules/local/build_cell_metadata/main.nf),
-        which is what keeps this stage out of the container-visibility
-        problem the other cell_images_dir consumers need bind mounts for.
+        not the directory holding it: the ``build_cell_metadata`` rule
+        derives it from ``build_cell_images``' own directory output
+        (workflow/rules/cell_images.smk).
     batch_stem : str
         This experiment's identifier, written into every row as
         ``meta_batch`` -- one run covers exactly one experiment, matching

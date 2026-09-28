@@ -31,6 +31,8 @@ nf-report*.html
 nf-timeline*.html
 nf-trace*.txt
 nf-dag*.html
+# The nested starcall snakemake's own state, if run from a checkout here
+.snakemake/
 
 # Model checkpoints / large artifacts (kept out of git; documented in README)
 *.pth
@@ -48,3 +50,8 @@ scratch/*
 # somewhere to put it.
 testing_data/*
 !testing_data/README.md
+
+# Hydra CLI runs default to ./outputs/<date>/<time>/ when a stage is invoked
+# by hand without output_dir pointing elsewhere. Never a pipeline result --
+# every task passes an explicit output_dir under pipeline_dir.
+outputs/

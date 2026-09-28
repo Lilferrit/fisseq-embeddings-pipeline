@@ -21,7 +21,7 @@
     "TMPDIR": "${localWorkspaceFolder}/.devcontainer-tmp"
   },
   "containerUser": "vscode",
-  "postCreateCommand": "mkdir -p \"${localWorkspaceFolder}/.devcontainer-tmp\" && sudo chown -R vscode:vscode /home/vscode/.claude && uv sync && (cd /tmp && curl -s https://get.nextflow.io | bash) && sudo mv /tmp/nextflow /usr/local/bin/nextflow && sudo chmod +x /usr/local/bin/nextflow",
+  "postCreateCommand": "mkdir -p \"${localWorkspaceFolder}/.devcontainer-tmp\" && sudo chown -R vscode:vscode /home/vscode/.claude && sudo chown -R vscode:nvm /usr/local/share/nvm/versions/node/*/lib/node_modules/@anthropic-ai && uv sync && (cd /tmp && curl -s https://get.nextflow.io | bash) && sudo mv /tmp/nextflow /usr/local/bin/nextflow && sudo chmod +x /usr/local/bin/nextflow",
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "ms-python.python", "charliermarsh.ruff"]

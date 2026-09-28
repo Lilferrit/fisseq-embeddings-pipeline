@@ -1,7 +1,6 @@
 # Global Variant Embeddings (`GLOBAL_VARIANT_EMBEDDINGS`)
 
-`python -m fisseq_embeddings_pipeline.global_embeddings` (Nextflow process
-`GLOBAL_VARIANT_EMBEDDINGS`) cross-experiment median-pools every
+`python -m fisseq_embeddings_pipeline.global_embeddings` (Nextflow process `GLOBAL_VARIANT_EMBEDDINGS`) cross-experiment median-pools every
 experiment's `aggregate.parquet`, then runs PCA at the full retained rank
 -- `min(n_variants, n_retained_feature_dims)`, so every component the data
 can actually support is written, not a fixed subset chosen ahead of time.
@@ -26,11 +25,30 @@ Extends the [common config fields](#common-config-fields) below.
 | `batch_stems` | **required** | This run's experiment identifiers, one per contributing `AGGREGATE_EMBEDDINGS` output. |
 | `label_column` | `"meta_aa_changes"` | Name of the variant label column. |
 | `cumulative_variance_explained` | `0.9` | Threshold in `(0, 1]` selecting the leading components kept in `pca_reduced.parquet`. |
+| `blocklist_file` | `null` | Path to [GLOBAL_BLOCKLIST](global_blocklist.md)'s `blocklist.parquet`. When set, non-reproducible dimensions are dropped from every experiment's aggregate before pooling. |
 
 There is no `n_components` field -- every retained principal component is
 always computed and written to `pca_scores.parquet`/`pca_components.parquet`/
 `pca_variance_explained.parquet`, regardless of
 `cumulative_variance_explained`.
+
+## Reproducibility filtering
+
+The pipeline passes `blocklist_file`, so every dimension
+[GLOBAL_BLOCKLIST](global_blocklist.md) marks not-reproducible is dropped from
+each experiment's aggregate **before** median-pooling -- neither the median
+nor the PCA ever sees one.
+
+Note this stage reads each experiment's *unfiltered* `aggregate.parquet`, not
+its `filtered_aggregate.parquet`, and applies the global verdict itself. That
+is deliberate: `median_across_batches` intersects feature columns across
+experiments, so consuming the filtered files would silently reduce every
+setting to "reproducible in every experiment" and make
+`reproducibility_global_min_batches_ok` inert. See
+[GLOBAL_BLOCKLIST](global_blocklist.md).
+
+`GLOBAL_VARIANT_CP_FEATURES` passes no blocklist -- the CellProfiler track is
+not reproducibility-filtered.
 
 ## Output files
 

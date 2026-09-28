@@ -14,6 +14,8 @@ Shared helpers used across pipeline stages -- most are vendored from
 
 ::: fisseq_embeddings_pipeline.utils.cell_table
 
+::: fisseq_embeddings_pipeline.utils.splits
+
 ::: fisseq_embeddings_pipeline.utils.batches
 
 ::: fisseq_embeddings_pipeline.utils.xgbparams
@@ -23,7 +25,5 @@ Shared helpers used across pipeline stages -- most are vendored from
 ::: fisseq_embeddings_pipeline.utils.globalfeatureselect
 
 ::: fisseq_embeddings_pipeline.utils.vectors
-
-::: fisseq_embeddings_pipeline.utils.nextflow_staging
 
 ::: fisseq_embeddings_pipeline.utils.log

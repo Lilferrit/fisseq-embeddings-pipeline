@@ -1,20 +1,20 @@
-// GLOBAL_VARIANT_EMBEDDINGS. Runs once, unconditionally, over every
-// experiment's aggregate.parquet.
+// GLOBAL_VARIANT_EMBEDDINGS. Cross-experiment median pooling, then PCA at
+// the full retained rank; cumulative_variance_explained controls only the
+// extra pca_reduced.parquet.
 //
-// `stageAs: "agg_input_*.parquet"` avoids every experiment's identically-
-// named aggregate.parquet colliding when collected into this one task --
-// Nextflow numbers staged files 1-indexed in the same order as the list it
-// received, which global_embeddings.py's main() reverses positionally
-// against the paired batch_stems list (utils/nextflow_staging.py) rather
-// than reading a directory glob (fisseq-data-pipeline's own
-// globalfeatureselect.py precedent for this exact collision).
+// Reads each experiment's UNFILTERED aggregate.parquet and applies the
+// global blocklist itself, rather than reading the per-experiment
+// filtered_aggregate.parquet: median_across_batches intersects feature
+// columns across experiments, so consuming the filtered files would
+// silently reduce every setting to "reproducible in every experiment" and
+// make reproducibility_global_min_batches_ok inert.
 //
-// No n_components param -- global_embeddings.py always computes the full
-// retained PCA rank itself.
-//
-// cumulative_variance_explained (default 0.9) controls only the extra
-// pca_reduced.parquet output -- the full-rank pca_scores.parquet/
-// pca_components.parquet/pca_variance_explained.parquet are unaffected.
+// Every experiment's file has the same basename, so they're staged under
+// numbered names and passed as an explicit input_files list, paired
+// positionally with batch_stems -- the workflow hands both over as one
+// sorted tuple so the pairing can't drift.
+
+include { threadEnv; hydraList } from '../functions'
 
 process GLOBAL_VARIANT_EMBEDDINGS {
     errorStrategy 'ignore'
@@ -23,20 +23,20 @@ process GLOBAL_VARIANT_EMBEDDINGS {
     publishDir { "${params.pipeline_dir}/global/embeddings" }, mode: 'copy'
 
     input:
-    path(aggregate_parquets, stageAs: "agg_input_*.parquet")
-    val(batch_stems)
+    tuple val(batch_stems), path(aggregate_parquets, stageAs: "agg_input_*.parquet")
+    path(blocklist_parquet)
 
     output:
     tuple path("median_aggregate.parquet"), path("pca_scores.parquet"), path("pca_components.parquet"), path("pca_variance_explained.parquet"), path("pca_reduced.parquet"), emit: global
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.global_embeddings \\
         output_dir=. \\
-        'batch_stems=[${batch_stems.join(",")}]' \\
+        ${hydraList('input_files', aggregate_parquets)} \\
+        ${hydraList('batch_stems', batch_stems)} \\
+        blocklist_file=${blocklist_parquet} \\
         label_column=${params.filter_label_column} \\
         cumulative_variance_explained=${params.global_variant_embeddings_cumulative_variance_explained} \\
         random_seed=${params.random_seed}

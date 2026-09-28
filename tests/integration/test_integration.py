@@ -1,61 +1,39 @@
 """Integration tests for the Nextflow pipeline. Modeled on
 fisseq-data-pipeline's tests/integration/test_integration.py: a synthetic
-fixture, a subprocess-driven `nextflow run` of the real pipeline
-end-to-end, and output-file/column assertions against the result -- not a
-mock of any individual stage.
+fixture, a subprocess-driven `nextflow run` of the real pipeline end to
+end, and output-file/column assertions against the result -- not a mock of
+any individual stage.
 
 TWO MODES, mutually exclusive, selected by tests/integration/conftest.py's
 `--container` flag (see that file for why they can't run together):
 
-- `pytest tests/integration` -- the synthetic suite, `-profile local`,
-  stub `snakemake`. What CI runs.
-- `pytest tests/integration --container` -- only
-  `test_real_starcall_pipeline_produces_cell_images` (marked
-  `container`), the containerized real-starcall test at the bottom of
-  this file.
+- `pytest tests/integration` -- the synthetic suite, `-profile local` (no
+  container), with the nested starcall `snakemake` stubbed. What CI runs.
+- `pytest tests/integration --container` -- only the tests marked
+  `container`: a real, containerized starcall run on a tiny real-data
+  fixture, at the bottom of this file.
 
-Every test here is skipped automatically whenever `nextflow` isn't on
-PATH -- centralized in conftest.py's collection hook, not repeated per
-test. `-profile local` (nextflow.config) is what makes the synthetic
-suite runnable without a built Docker image -- every process here runs `python -m
-fisseq_embeddings_pipeline.<module>` directly against this repo's own
-venv, not `fisseq-embeddings-pipeline:latest`.
+Every test here is skipped automatically whenever `nextflow` isn't on PATH
+-- centralized in conftest.py's collection hook. `-profile local` is what
+makes the synthetic suite work without a built image: every task runs
+`python -m fisseq_embeddings_pipeline.<module>` directly against this
+repo's own venv.
 
 EMBED_CELLS (the one GPU-bound, real-checkpoint-dependent stage) is
-exercised here via a from-scratch, randomly-initialized vit_small
-checkpoint saved to a temp file, `device=cpu`, matching the precedent
-already established at the unit-test level in tests/unit/test_embed.py's
-`test_main_runs_end_to_end_via_cli`. This exercises the wrapper's real
-control flow (weight loading, forward pass, shape handling), not
-Cell-DINO's actual pretrained-checkpoint output quality.
+exercised via a from-scratch, randomly-initialized vit_small checkpoint
+saved to a temp file, `device=cpu` -- the wrapper's real control flow
+(weight loading, forward pass, shape handling), not Cell-DINO's actual
+pretrained-checkpoint output quality.
 
-BUILD_CELL_IMAGES (the one stage that shells out to a real `snakemake`
-binary against a real starcall-workflow checkout) is exercised here via a
-stub `snakemake` executable prepended onto PATH -- not by bypassing the
-real Nextflow process. The synthetic fixture pre-populates a
-starcall-workflow-shaped phenotyping_dir/sequencing_dir tree directly (the
-way a real `snakemake` invocation of `make_cell_images_bbox` would have
-left it -- the per-tile crop-stack pair, not the whole-tile phenotype
-image/segmentation mask those temp() intermediates never survive as), and
-the stub simply exits 0 without touching the filesystem, standing in for
-"every requested target is already up to date". This exercises
-BUILD_CELL_IMAGES' own real tile-enumeration, symlink-collection, and
-cell_table.parquet-building logic end to end through the real
-Nextflow/Hydra plumbing -- only the external `snakemake`/starcall-workflow
-dependency itself (unavailable in CI, and the root Dockerfile's own `ops`
-conda env -- which real rule execution would run in -- is unvalidated --
-see docs/architecture.md) is faked, matching the same "fake the
-expensive/external dependency, exercise real control flow elsewhere"
-precedent EMBED_CELLS' checkpoint fixture already sets. `-profile local`
-(which this test uses) has no `ops` env to point at at all, so
-`nextflow.config` overrides `process.ext.snakemake_bin` back to bare
-`snakemake`, resolved via the stub prepended onto PATH here -- the same
-override that lets every other stage run directly against this repo's own
-venv instead of a built image. (`--snakefile` still points for real at this
-repo's own `resources/starcall_overrides/wrapper.smk` --
-`process.ext.starcall_overrides_dir` under `-profile local` -- since the
-stub only fakes the `snakemake` binary itself, not the flags it's invoked
-with.)
+BUILD_CELL_IMAGES' nested starcall `snakemake` is a stub prepended onto
+PATH (under `-profile local`, `process.ext.snakemake_bin` is bare
+`snakemake`). The synthetic fixture pre-populates a starcall-shaped
+phenotyping_dir/sequencing_dir tree the way a real run would have left it
+-- per-tile cell/reads tables plus the whole-tile phenotype image and
+segmentation mask -- and the stub records its argv and exits 0, standing in
+for "every requested target is already up to date". So tile enumeration,
+the table build and the dataset crop all run for real; only
+starcall-workflow itself is faked.
 """
 
 from __future__ import annotations
@@ -64,6 +42,7 @@ import os
 import shutil
 import stat
 import subprocess
+import time
 from pathlib import Path
 from typing import Sequence, Tuple
 
@@ -75,7 +54,6 @@ import tifffile
 import torch
 import yaml
 
-from fisseq_embeddings_pipeline.build_cell_images_enumerate import resolve_data_dir
 from fisseq_embeddings_pipeline.filter import JOIN_KEYS
 from fisseq_embeddings_pipeline.utils.cell_table import CELL_METADATA_SCHEMA
 from fisseq_embeddings_pipeline.vendor.dinov2.models.vision_transformer import (
@@ -91,41 +69,37 @@ _NUM_CHANNELS = 4
 
 # 4 WT barcodes x 3 cells, 2 synonymous ("A1A") barcodes x 3 cells, 2
 # missense ("M1K") barcodes x 3 cells -- every threshold below is lowered
-# to match this fixture's small size (see _EXTRA_NF_PARAMS).
+# to match this fixture's small size (see _EXTRA_PARAMS).
 _VARIANTS = {
     "WT": ("bc_wt_{i}", 4, 3),
     "A1A": ("bc_syn_{i}", 2, 3),
     "M1K": ("bc_mis_{i}", 2, 3),
 }
 
-_EXTRA_NF_PARAMS = [
-    "--barcode_count_threshold",
-    "2",
-    "--variant_barcode_count_threshold",
-    "2",
-    "--edit_distance_threshold",
-    "5",
-    "--ovwt_n_folds",
-    "2",
-    "--ovwt_calibrate",
-    "false",
-    "--ovwt_min_cells",
-    "2",
-    "--ovwt_downsample_wt",
-    "false",
-    "--cell_dino_arch",
-    "vit_small",
-    "--cell_dino_patch_size",
-    "16",
-    "--cell_dino_crop_size",
-    str(_WINDOW),
-    "--cell_dino_device",
-    "cpu",
-    "--cell_dino_batch_size",
-    "4",
-    "--cell_dino_num_workers",
-    "0",
-]
+# Every threshold lowered to match this fixture's small size. Passed as
+# `--key value` pairs, which win over -params-file.
+_EXTRA_PARAMS = {
+    "barcode_count_threshold": 2,
+    "variant_barcode_count_threshold": 2,
+    "edit_distance_threshold": 5,
+    "ovwt_n_folds": 2,
+    "ovwt_calibrate": "false",
+    "ovwt_min_cells": 2,
+    "ovwt_downsample_wt": "false",
+    "cell_dino_arch": "vit_small",
+    "cell_dino_patch_size": 16,
+    "cell_dino_crop_size": _WINDOW,
+    "cell_dino_device": "cpu",
+    "cell_dino_batch_size": 4,
+    "cell_dino_num_workers": 0,
+}
+
+
+def _nf_params(params: dict) -> list[str]:
+    return [
+        token for key, value in params.items() for token in (f"--{key}", str(value))
+    ]
+
 
 _STUB_SNAKEMAKE_SCRIPT = """#!/bin/sh
 # Stub snakemake for integration testing: the fixture that invokes this
@@ -135,11 +109,10 @@ _STUB_SNAKEMAKE_SCRIPT = """#!/bin/sh
 # already up to date". See this test module's own docstring.
 echo "stub snakemake invoked: $*" >&2
 # Record the full argv so a test can assert on the command line
-# BUILD_CELL_IMAGES actually built -- the flags are the whole point of the
-# cluster-submission knob (task.ext.snakemake_cluster_args), and nothing
-# else in this suite can see them. Gated on the env var so every existing
-# test's behaviour is unchanged when it isn't set. One line per invocation,
-# appended, since a multi-experiment run invokes this stub once per batch.
+# BUILD_CELL_IMAGES actually built -- local vs profile mode is decided
+# entirely by those flags, and nothing else in this suite can see them. One
+# line per invocation, appended: each batch invokes it twice (--unlock,
+# then the real run).
 if [ -n "${SNAKEMAKE_STUB_ARGV_LOG:-}" ]; then
     echo "$*" >> "$SNAKEMAKE_STUB_ARGV_LOG"
 fi
@@ -154,24 +127,34 @@ def _write_stub_snakemake(bin_dir: Path) -> None:
     script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _make_crop_stack(num_cells: int, channels: int, window: int) -> np.ndarray:
-    """A synthetic (num_cells, channels, window, window) crop stack, shaped
-    like `make_cell_images_bbox`'s own real output -- no whole-tile image
-    or cropping involved any more (see this module's own docstring)."""
+def _write_failing_process_config(path: Path, process_name: str) -> Path:
+    """A `-c` config that makes exactly one process fail before its script
+    runs, without corrupting any input."""
+    path.write_text(
+        f"process {{ withName: '{process_name}' {{ beforeScript = 'exit 1' }} }}\n"
+    )
+    return path
+
+
+_TILE_SIZE = 128
+
+
+def _make_tile_image(channels: int) -> np.ndarray:
+    """A synthetic whole-tile phenotype image in starcall's own
+    (cycles, channels, H, W) `raw_pt.tif` layout."""
     rng = np.random.default_rng(0)
     return rng.integers(
-        0, 255, size=(num_cells, channels, window, window), dtype=np.uint16
+        0, 255, size=(1, channels, _TILE_SIZE, _TILE_SIZE), dtype=np.uint16
     )
 
 
-def _make_mask_crop_stack(num_cells: int, window: int) -> np.ndarray:
-    """A synthetic (num_cells, window, window) mask-crop stack: cell i's
-    mask is a single foreground pixel, labeled i + 1 (make_cell_images_bbox's
-    own positional-label convention)."""
-    stack = np.zeros((num_cells, window, window), dtype=np.uint8)
-    for i in range(num_cells):
-        stack[i, i % window, i % window] = i + 1
-    return stack
+def _make_tile_mask(centers: Sequence[Tuple[int, int]]) -> np.ndarray:
+    """A synthetic whole-tile label mask: cell i is a 3x3 blob labelled
+    i + 1 around its centre (starcall's row-i-is-label-i+1 convention)."""
+    mask = np.zeros((_TILE_SIZE, _TILE_SIZE), dtype=np.uint16)
+    for i, (cx, cy) in enumerate(centers):
+        mask[cx - 1 : cx + 2, cy - 1 : cy + 2] = i + 1
+    return mask
 
 
 _CELLPROFILER_PIPELINE = "test_pipeline"
@@ -227,21 +210,15 @@ def _write_starcall_tile(
     )
     reads_table.to_csv(seq_tile_dir / "cells_reads.csv")
 
-    # The per-tile crop-stack pair make_cell_images_bbox itself would have
-    # produced (and Snakemake's own temp() bookkeeping would have already
-    # deleted the whole-tile intermediates behind) -- see this module's own
-    # docstring. Content is synthetic/deterministic, not actually cropped
-    # from anything -- BUILD_DATASET only indexes into these now, it
-    # doesn't crop.
-    num_cells = len(cell_ids)
+    # The whole-tile image and mask starcall itself leaves under
+    # phenotyping_dir once they're requested as targets -- BUILD_DATASET
+    # crops each cell out of these.
     tifffile.imwrite(
-        pheno_tile_dir / f"cells_crops_{_WINDOW}.tif",
-        _make_crop_stack(num_cells, _NUM_CHANNELS, _WINDOW),
+        pheno_tile_dir / "raw_pt.tif",
+        _make_tile_image(_NUM_CHANNELS),
+        photometric="minisblack",
     )
-    tifffile.imwrite(
-        pheno_tile_dir / f"cells_mask_crops_{_WINDOW}.tif",
-        _make_mask_crop_stack(num_cells, _WINDOW),
-    )
+    tifffile.imwrite(pheno_tile_dir / "cells_mask.tif", _make_tile_mask(centers))
 
     if write_cellprofiler_csv:
         # Row-position matched to the cell table (cell_ids here are already
@@ -279,7 +256,7 @@ def _write_synthetic_experiment(
     starcall-workflow's own default-config.yaml naming) and omits all
     three keys from the experiment entry, exercising build_cell_images.nf's
     default-to-subdirectory-of-starcall_workflow_dir behavior through the
-    real Nextflow/Groovy plumbing, not just by construction.
+    real Nextflow/Hydra plumbing, not just by construction.
 
     project_config_dir_names, e.g. {"phenotyping_dir": "custom_pheno"},
     writes a starcall-workflow-shaped `config.yaml` under
@@ -345,7 +322,7 @@ def _write_synthetic_experiment(
         sequencing_dir,
         "well1",
         1,
-        "tile0x0y",
+        "tile00x00y",
         cell_ids,
         centers,
         barcodes,
@@ -371,6 +348,15 @@ def _write_synthetic_experiment(
     params["window"] = _WINDOW
     params["cellprofiler_pipeline"] = _CELLPROFILER_PIPELINE
     params["snakemake_cores"] = 1
+    # Two bootstrap replicates rather than params.yaml's production 10: the
+    # fan-out is reps x 2 halves x len(aggregate_methods) jobs per
+    # experiment, and 2 is the minimum that still exercises BLOCKLIST's
+    # median-across-replicates (validate_config rejects 1).
+    params["reproducibility_bootstrap_reps"] = 2
+    # Exercise the passthrough path for real: KSnegLogP must reach
+    # aggregate_with_passthrough.parquet and must NOT reach
+    # filtered_aggregate.parquet or the PCA.
+    params["aggregate_methods_passthrough"] = ["KSnegLogP"]
     params["experiments"] = [{"batch_stem": "batch1", **batch_config}]
     with open(exp_dir / "params.yaml", "w") as f:
         yaml.safe_dump(params, f)
@@ -390,35 +376,37 @@ def _write_tiny_checkpoint(path: Path) -> None:
 
 def _run_nextflow(
     exp_dir: Path,
-    checkpoint_path: Path,
+    checkpoint_path: Path | None,
     extra_args: tuple[str, ...] = (),
+    extra_params: dict | None = None,
+    params_file: Path | None = None,
+    profile: str | None = "local",
+    timeout: int = 900,
+    env_overrides: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """Shared `nextflow run` invocation, factored out of `pipeline_outputs`
     so `reproducibility_outputs` (below) can drive two independent, fully
     from-scratch runs against two separate `pipeline_dir`s with identical
-    params (including `random_seed`) -- not two invocations sharing one
-    `pipeline_dir`, which would let the second run's `-resume` cache hit
-    reuse the first run's outputs instead of genuinely recomputing them.
+    params (including `random_seed`) -- never `-resume`, so the second run
+    genuinely recomputes.
 
     PATH is prepended with exp_dir's own stub_bin/ (written by
-    _write_synthetic_experiment) so BUILD_CELL_IMAGES' `snakemake`
-    invocation resolves to the stub, not a real (likely absent) snakemake
-    binary -- see this module's own docstring.
+    _write_synthetic_experiment) so BUILD_CELL_IMAGES' nested `snakemake`
+    resolves to the stub -- see this module's own docstring.
 
-    extra_args are appended verbatim to the command line (e.g. an extra
-    `-c <config>` layering a per-test process directive on top of the
-    repo's own nextflow.config)."""
-    # exp_dir's own params.yaml (repo defaults + this run's `experiments:`
-    # entry, written by _write_synthetic_experiment) -- not the repo's root
-    # params.yaml, since Nextflow only accepts one -params-file per run and
-    # experiments now has to live inside it.
-    params_yaml = exp_dir / "params.yaml"
+    extra_args are appended verbatim (e.g. an extra `-c <config>`);
+    extra_params are `--key value` overrides on top of _EXTRA_PARAMS.
+    """
+    params_file = params_file or exp_dir / "params.yaml"
     env = os.environ.copy()
     env["PATH"] = f"{exp_dir / 'stub_bin'}{os.pathsep}{env.get('PATH', '')}"
     # Where the stub snakemake appends each invocation's argv (see
-    # _STUB_SNAKEMAKE_SCRIPT). Always set, so any test can read it; tests
-    # that don't care simply never look at the file.
+    # _STUB_SNAKEMAKE_SCRIPT). Always set, so any test can read it.
     env["SNAKEMAKE_STUB_ARGV_LOG"] = str(exp_dir / "stub_snakemake_argv.log")
+    env.update(env_overrides or {})
+    params = {"pipeline_dir": exp_dir, **_EXTRA_PARAMS, **(extra_params or {})}
+    if checkpoint_path is not None:
+        params["cell_dino_checkpoint"] = checkpoint_path
     return subprocess.run(
         [
             "nextflow",
@@ -426,21 +414,16 @@ def _run_nextflow(
             str(_PROJECT_ROOT),
             "-ansi-log",
             "false",
-            "-profile",
-            "local",
-            "--pipeline_dir",
-            str(exp_dir),
+            *(("-profile", profile) if profile else ()),
             "-params-file",
-            str(params_yaml),
-            "--cell_dino_checkpoint",
-            str(checkpoint_path),
-            *_EXTRA_NF_PARAMS,
+            str(params_file),
+            *_nf_params(params),
             *extra_args,
         ],
         cwd=exp_dir,
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=timeout,
         env=env,
     )
 
@@ -460,13 +443,15 @@ def pipeline_outputs(tmp_path_factory):
 
 def test_pipeline_exits_cleanly(pipeline_outputs):
     exp_dir, result = pipeline_outputs
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    # errorStrategy 'ignore' exits 0 even when a task failed -- so check
+    # the log for ignored failures too.
+    assert "Error is ignored" not in result.stdout, result.stdout
 
 
 def test_cell_images_produced(pipeline_outputs):
     """BUILD_CELL_IMAGES' own output -- the one complete, self-sufficient
-    cell table everything downstream reads, plus the collected per-tile
-    crop-stack pair (see build_cell_images.nf's module docstring)."""
+    cell table everything downstream reads, plus the per-tile image table."""
     exp_dir, _ = pipeline_outputs
     cell_images_dir = exp_dir / "cell_images" / "batch1"
     cell_table = pl.read_parquet(cell_images_dir / "cell_table.parquet")
@@ -476,9 +461,15 @@ def test_cell_images_produced(pipeline_outputs):
         cell_table.columns
     )
     assert any(c.startswith("cp_") for c in cell_table.columns)
-    tile_dir = cell_images_dir / "well1_grid1" / "tile0x0y"
-    assert (tile_dir / f"cells_crops_{_WINDOW}.tif").exists()
-    assert (tile_dir / f"cells_mask_crops_{_WINDOW}.tif").exists()
+    # Nothing is copied or linked out of starcall's tree: tiles.parquet
+    # just names the whole-tile image/mask BUILD_DATASET crops from.
+    tiles = pl.read_parquet(cell_images_dir / "tiles.parquet")
+    assert tiles.height == 1
+    tile = tiles.row(0, named=True)
+    assert tile["image_tif"].endswith("well1_grid1/tile00x00y/raw_pt.tif")
+    assert tile["mask_tif"].endswith("well1_grid1/tile00x00y/cells_mask.tif")
+    assert Path(tile["image_tif"]).exists() and Path(tile["mask_tif"]).exists()
+    assert not list(cell_images_dir.glob("*_grid*"))
 
 
 def test_cell_metadata_produced(pipeline_outputs):
@@ -518,289 +509,95 @@ def _read_stub_argv(exp_dir: Path) -> list[str]:
     return [line for line in log.read_text().splitlines() if line.strip()]
 
 
-def test_snakemake_runs_locally_by_default(pipeline_outputs):
-    """`process.ext.snakemake_cluster_args` is empty unless an executor
-    profile sets it, so the default path must invoke snakemake in LOCAL
-    mode -- `--cores <params.snakemake_cores>` and not one flag of the
-    cluster-submission machinery.
+def _main_invocations(exp_dir: Path) -> list[str]:
+    """The real nested runs -- every invocation but the --unlock preflight."""
+    return [argv for argv in _read_stub_argv(exp_dir) if "--unlock" not in argv]
 
-    This is the guard on the whole opt-in claim: the cluster path adds
-    flags to this exact command line, and nothing else in this suite looks
-    at it (the stub ignores its arguments)."""
+
+def test_nested_snakemake_runs_starcalls_own_snakefile_locally(pipeline_outputs):
+    """Default (no starcall_profile): every starcall rule runs inside the
+    one task, `--cores snakemake_cores`, against starcall-workflow's own
+    unmodified Snakefile -- and not one flag of profile mode."""
     exp_dir, _ = pipeline_outputs
+    swd = exp_dir / "starcall-workflow"
     invocations = _read_stub_argv(exp_dir)
 
-    for argv in invocations:
-        # _write_synthetic_experiment pins snakemake_cores to 1.
-        assert "--cores 1" in argv, argv
-        for cluster_flag in (
-            "--cluster",
-            "--jobs",
-            "--default-resources",
-            "--set-resources",
-            "--conda-base-path",
-        ):
-            assert cluster_flag not in argv, (
-                f"{cluster_flag} leaked into the default (non-cluster) "
-                f"invocation: {argv}"
-            )
+    assert any("--unlock" in argv for argv in invocations), invocations
+    main_runs = _main_invocations(exp_dir)
+    assert len(main_runs) == 1, main_runs
+    argv = main_runs[0]
+    assert f"--snakefile {swd}/workflow/Snakefile" in argv, argv
+    assert f"--directory {swd}" in argv, argv
+    # _write_synthetic_experiment pins snakemake_cores to 1.
+    assert "--cores 1" in argv, argv
+    assert "--rerun-incomplete" in argv, argv
+    assert "--profile" not in argv and "--jobscript" not in argv, argv
+    # Every requested target comes after the '--'.
+    options, targets = argv.split(" -- ", 1)
+    assert "raw_pt.tif" in targets and "cells_mask.tif" in targets, targets
+    assert ".tif" not in options, options
 
 
-def test_snakemake_cluster_args_are_opt_in(tmp_path_factory):
-    """Setting `ext.snakemake_cluster_args` adds its flags to phase 2's
-    invocation without disturbing the flags around them -- in particular
-    they must land BEFORE the `--` that separates snakemake's own options
-    from the target paths, or they'd be parsed as (nonexistent) targets.
-
-    Uses a harmless `--cluster "echo"` rather than a real scheduler command:
-    the stub snakemake never acts on any of it, so this asserts on the
-    command line the module *builds*, which is the part this repo owns."""
-    exp_dir = tmp_path_factory.mktemp("nf_experiment_cluster_args")
+def test_starcall_profile_switches_to_profile_mode(tmp_path_factory):
+    """starcall_profile adds --profile and our --jobscript, drops --cores
+    (the profile owns the job budget), and BUILD_CELL_IMAGES writes a
+    jobscript that re-enters starcall_job_image with every host path a
+    child job can touch bound. Nothing about the scheduler is ours: the
+    profile directory here is empty, and the stub never reads it."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_profile")
     _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_cluster_args") / "checkpoint.pth"
+    checkpoint_path = tmp_path_factory.mktemp("weights_profile") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
-
-    cluster_config = exp_dir / "cluster_args.config"
-    cluster_config.write_text(
-        "process { withName: 'BUILD_CELL_IMAGES' {\n"
-        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
-        "    ext.snakemake_cluster_cores = 17\n"
-        # The per-rule job wrapper runs outside any container, so this is a
-        # host path -- here, just this repo's own checked-out copy.
-        f"    ext.starcall_host_overrides_dir = "
-        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
-        "} }\n"
-    )
-    # The cluster preamble refuses to run without a real .sif for the child
-    # jobs to re-enter (see test_cluster_mode_requires_child_image). Nothing
-    # here execs it -- the stub snakemake submits nothing -- so any existing
-    # file satisfies the check.
-    fake_sif = exp_dir / "fake.sif"
-    fake_sif.write_text("not a real image")
+    profile_dir = exp_dir / "my_site_profile"
+    profile_dir.mkdir()
 
     result = _run_nextflow(
         exp_dir,
         checkpoint_path,
-        extra_args=(
-            "-c",
-            str(cluster_config),
-            "--starcall_child_image",
-            str(fake_sif),
-        ),
+        extra_params={
+            "starcall_profile": profile_dir,
+            "starcall_job_image": "/images/pipeline.sif",
+            "starcall_container_bin": "singularity",
+            "starcall_gpu": "false",
+            "embeddings_only": "true",
+        },
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
 
-    invocations = _read_stub_argv(exp_dir)
-    assert invocations, "BUILD_CELL_IMAGES never invoked snakemake"
+    [argv] = _main_invocations(exp_dir)
+    options = argv.split(" -- ", 1)[0]
+    assert f"--profile {profile_dir}" in options, argv
+    assert "--jobscript " in options and "starcall_jobscript.sh" in options, argv
+    assert "--cores" not in options, argv
 
-    # Cluster mode runs snakemake twice per batch: a `--unlock` preflight
-    # (which clears a lock left by a previously killed submitter) and then
-    # the real invocation. Only the latter carries the execution flags --
-    # the preflight deliberately doesn't, since it does no work.
-    unlock_calls = [a for a in invocations if "--unlock" in a]
-    real_calls = [a for a in invocations if "--use-conda" in a]
-    assert unlock_calls, f"no --unlock preflight in cluster mode: {invocations}"
-    assert real_calls, f"no real snakemake invocation: {invocations}"
-    for argv in unlock_calls:
-        assert "--cluster" not in argv, f"preflight must not submit jobs: {argv}"
-
-    for argv in real_calls:
-        tokens = argv.split()
-        assert "--cluster" in tokens, argv
-        assert tokens[tokens.index("--cluster") + 1] == "echo", argv
-        assert tokens[tokens.index("--jobs") + 1] == "3", argv
-        # The cluster core budget replaces params.snakemake_cores entirely
-        # (which _write_synthetic_experiment pins to 1) -- leaving the local
-        # value in would silently cap every rule's own `threads:`. Compared
-        # as a token, not a substring: "--cores 1" is a prefix of
-        # "--cores 17".
-        assert tokens.count("--cores") == 1, argv
-        assert tokens[tokens.index("--cores") + 1] == "17", argv
-        # Untouched neighbours, and correct ordering around `--`.
-        assert "--use-conda --conda-frontend conda" in argv, argv
-        assert "--rerun-triggers mtime" in argv, argv
-        assert argv.index("--cluster") < argv.index(" -- "), (
-            f"cluster flags must precede the `--` target separator: {argv}"
-        )
-
-    # The knob is purely additive: the stage still produces its real output.
-    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-
-
-def test_cluster_mode_requires_child_image(tmp_path_factory):
-    """Opting into cluster submission without `starcall_child_image` must
-    fail BUILD_CELL_IMAGES outright rather than submitting jobs that can't
-    start.
-
-    Each per-rule job re-enters the image on a bare exec node, so it needs a
-    real .sif file -- `container_image` is a `docker://` URI on a cluster,
-    which only Nextflow itself knows how to pull. Without the guard this
-    surfaces as N identical child-job failures minutes later; with it, the
-    stage dies immediately with a message naming the key.
-
-    `errorStrategy 'ignore'` means the run still exits 0, so the observable
-    symptom is the missing output -- the same shape as every other
-    BUILD_CELL_IMAGES failure mode this suite checks."""
-    exp_dir = tmp_path_factory.mktemp("nf_experiment_no_child_image")
-    _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_no_child") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
-    cluster_config = exp_dir / "cluster_no_image.config"
-    cluster_config.write_text(
-        "process { withName: 'BUILD_CELL_IMAGES' {\n"
-        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
-        "} }\n"
+    jobscript_path = Path(options.split("--jobscript ", 1)[1].split()[0])
+    jobscript = jobscript_path.read_text()
+    assert "{exec_job}" in jobscript and "# properties = {properties}" in jobscript
+    reentry = next(
+        line for line in jobscript.splitlines() if "exec singularity" in line
     )
+    assert "/images/pipeline.sif" in reentry
+    assert "--nv" not in reentry
+    for bound in (
+        exp_dir / "starcall-workflow",
+        exp_dir / "phenotyping",
+        exp_dir / "sequencing",
+        exp_dir / ".snakemake_cache",
+        jobscript_path.parent,  # the task dir: snakemake cd's there first
+    ):
+        assert f"{bound}:{bound}" in reentry, (bound, reentry)
 
-    result = _run_nextflow(
-        exp_dir, checkpoint_path, extra_args=("-c", str(cluster_config))
+
+def test_starcall_profile_without_job_image_fails_fast(tmp_path):
+    result = _run_validation_only(
+        tmp_path,
+        pipeline_dir=tmp_path,
+        cell_dino_checkpoint=tmp_path / "ckpt.pth",
+        starcall_profile=tmp_path,
+        experiments_file=_one_experiment_params(tmp_path),
     )
-    assert result.returncode == 0, result.stderr
-
-    assert not (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-    # It failed in the preamble, before ever reaching phase 2.
-    assert not (exp_dir / "stub_snakemake_argv.log").exists()
-
-
-def test_child_image_resolved_from_nextflow_cache_when_null(tmp_path_factory):
-    """With `starcall_child_image` null, the per-rule jobs fall back to the
-    image Nextflow already pulled and converted for the task itself.
-
-    That path has to be reconstructed: `task.container` yields the raw
-    `docker://` URI and the `singularity` config scope isn't readable from a
-    task context, so the module rebuilds Nextflow's own cache filename --
-    scheme stripped, `/` and `:` turned into `-`, `.img` appended. This test
-    is what pins that rule; if a Nextflow upgrade changes it, this fails here
-    rather than as hundreds of dead jobs on the cluster."""
-    exp_dir = tmp_path_factory.mktemp("nf_experiment_derived_image")
-    _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_derived") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
-    # Stand in for the image Nextflow would have pulled, named exactly as its
-    # SingularityCache does.
-    cache_dir = exp_dir / "singularity-cache"
-    cache_dir.mkdir()
-    container_image = "docker://ghcr.io/lilferrit/fisseq-embeddings-pipeline:abc1234"
-    cached_name = (
-        container_image.removeprefix("docker://").replace("/", "-").replace(":", "-")
-    )
-    cached_image = cache_dir / f"{cached_name}.img"
-    cached_image.write_text("stand-in for the converted image")
-
-    cluster_config = exp_dir / "cluster_derived.config"
-    cluster_config.write_text(
-        "process { withName: 'BUILD_CELL_IMAGES' {\n"
-        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
-        f"    ext.starcall_host_overrides_dir = "
-        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
-        f"    ext.starcall_singularity_cache_dir = '{cache_dir}'\n"
-        "} }\n"
-    )
-
-    result = _run_nextflow(
-        exp_dir,
-        checkpoint_path,
-        extra_args=(
-            "-c",
-            str(cluster_config),
-            "--container_image",
-            container_image,
-        ),
-    )
-    assert result.returncode == 0, result.stderr
-
-    # It got past the preamble's image check and ran phase 2 for real.
-    assert _read_stub_argv(exp_dir)
-    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-
-
-def test_explicit_child_image_wins_over_derived(tmp_path_factory):
-    """An explicit `starcall_child_image` is used even when a derivable cache
-    entry also exists -- the param is the escape hatch from Nextflow's cache
-    naming, so it must not be quietly overridden by it."""
-    exp_dir = tmp_path_factory.mktemp("nf_experiment_explicit_image")
-    _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_explicit") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
-    # A cache dir whose derived entry does NOT exist, so the run can only
-    # succeed via the explicit path.
-    empty_cache = exp_dir / "empty-cache"
-    empty_cache.mkdir()
-    explicit_sif = exp_dir / "explicit.sif"
-    explicit_sif.write_text("the image we asked for")
-
-    cluster_config = exp_dir / "cluster_explicit.config"
-    cluster_config.write_text(
-        "process { withName: 'BUILD_CELL_IMAGES' {\n"
-        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
-        f"    ext.starcall_host_overrides_dir = "
-        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
-        f"    ext.starcall_singularity_cache_dir = '{empty_cache}'\n"
-        "} }\n"
-    )
-
-    result = _run_nextflow(
-        exp_dir,
-        checkpoint_path,
-        extra_args=(
-            "-c",
-            str(cluster_config),
-            "--starcall_child_image",
-            str(explicit_sif),
-        ),
-    )
-    assert result.returncode == 0, result.stderr
-    assert _read_stub_argv(exp_dir)
-    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-
-
-def test_cluster_env_with_unset_value_fails(tmp_path_factory):
-    """A null/empty entry in `ext.starcall_cluster_env` must fail the stage
-    rather than exporting the literal string "null".
-
-    This is the shape of a real mistake: an executor profile builds that map
-    out of params (e.g. `SGE_ROOT: params.sge_root`, which scratch/run.sh
-    fills from the scheduler's own environment), so a launch script that
-    forgets to pass one leaves a null behind. Exported as-is it surfaces much
-    later as an unintelligible bind-mount or scheduler error on every child
-    job."""
-    exp_dir = tmp_path_factory.mktemp("nf_experiment_unset_cluster_env")
-    _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_unset_env") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
-    fake_sif = exp_dir / "fake.sif"
-    fake_sif.write_text("not a real image")
-
-    cluster_config = exp_dir / "cluster_unset_env.config"
-    cluster_config.write_text(
-        "process { withName: 'BUILD_CELL_IMAGES' {\n"
-        "    ext.snakemake_cluster_args = '--cluster \"echo\" --jobs 3'\n"
-        f"    ext.starcall_host_overrides_dir = "
-        f"'{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}'\n"
-        # params.does_not_exist resolves to null, exactly as an unpassed
-        # --sge_root would.
-        "    ext.starcall_cluster_env = [SGE_ROOT: params.does_not_exist]\n"
-        "} }\n"
-    )
-
-    result = _run_nextflow(
-        exp_dir,
-        checkpoint_path,
-        extra_args=(
-            "-c",
-            str(cluster_config),
-            "--starcall_child_image",
-            str(fake_sif),
-        ),
-    )
-
-    assert not (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-    combined = result.stdout + result.stderr
-    assert "starcall_cluster_env has no value for SGE_ROOT" in combined, combined
+    assert result.returncode != 0
+    assert "starcall_job_image is required" in result.stdout + result.stderr
 
 
 def test_cp_track_survives_dataset_failure(tmp_path_factory):
@@ -810,25 +607,23 @@ def test_cp_track_survives_dataset_failure(tmp_path_factory):
     nothing, but QC_FILTER and the entire CellProfiler branch still run
     to completion.
 
-    BUILD_DATASET is failed via an extra `-c` config rather than by
-    corrupting its inputs, so the failure is unambiguous and isolated to
-    that one process -- `beforeScript = 'exit 1'` makes the task exit
-    non-zero before its script runs, which every module's own
-    `errorStrategy 'ignore'` then swallows."""
+    BUILD_DATASET is failed via an extra `-c` config (a `beforeScript`
+    that exits 1) rather than by corrupting its inputs, so the failure is
+    unambiguous and isolated to that one process. errorStrategy 'ignore'
+    is what then lets the rest of the DAG finish."""
     exp_dir = tmp_path_factory.mktemp("nf_experiment_dataset_fail")
     _write_synthetic_experiment(exp_dir)
     checkpoint_path = tmp_path_factory.mktemp("weights_fail") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
-
-    fail_config = exp_dir / "fail_dataset.config"
-    fail_config.write_text(
-        "process { withName: 'BUILD_DATASET' { beforeScript = 'exit 1' } }\n"
+    fail_config = _write_failing_process_config(
+        exp_dir / "fail.config", "BUILD_DATASET"
     )
 
     result = _run_nextflow(
         exp_dir, checkpoint_path, extra_args=("-c", str(fail_config))
     )
-    assert result.returncode == 0, result.stderr
+    # errorStrategy 'ignore' exits 0 with the failed branch simply missing.
+    assert result.returncode == 0, result.stdout + result.stderr
 
     # The cellDINO branch is gone...
     assert not (exp_dir / "dataset" / "batch1" / "metadata.parquet").exists()
@@ -886,6 +681,147 @@ def test_aggregate_and_ovwt_outputs_exist(pipeline_outputs):
     assert {"auroc_pooled", "auroc_median_barcode"}.issubset(results.columns)
 
 
+# ---------------------------------------------------------------------------
+# Reproducibility filtering + passthrough aggregates (cellDINO track)
+# ---------------------------------------------------------------------------
+
+
+def test_reproducibility_chain_outputs_exist(pipeline_outputs):
+    """Every stage of GENERATE_SPLIT -> ... -> FILTER_AGGREGATE produced its
+    file, at the fan-out the rules declare (2 replicates x 2 halves x the
+    three default aggregate_methods)."""
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    for rep in (1, 2):
+        assert (base / "splits" / f"rep{rep}" / "half1.parquet").exists()
+        assert (base / "splits" / f"rep{rep}" / "half2.parquet").exists()
+        for half in (1, 2):
+            for method in ("median", "KS", "AUROC"):
+                assert (
+                    base
+                    / "half_aggregates"
+                    / f"rep{rep}"
+                    / f"half{half}"
+                    / f"{method}.parquet"
+                ).exists()
+        for method in ("median", "KS", "AUROC"):
+            assert (base / "correlations" / f"rep{rep}" / f"{method}.parquet").exists()
+
+    for method in ("median", "KS", "AUROC"):
+        assert (base / "blocklists" / f"{method}.parquet").exists()
+    assert (base / "blocklist.parquet").exists()
+    assert (base / "filtered_aggregate.parquet").exists()
+    assert (base / "aggregate_with_passthrough.parquet").exists()
+    assert (exp_dir / "global" / "embeddings" / "blocklist.parquet").exists()
+
+
+def test_halves_partition_the_qc_passed_cells(pipeline_outputs):
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+    keys = pl.read_parquet(
+        exp_dir / "filter_embeddings" / "batch1" / "filtered_keys.parquet"
+    ).select(JOIN_KEYS)
+
+    half1 = pl.read_parquet(base / "splits" / "rep1" / "half1.parquet")
+    half2 = pl.read_parquet(base / "splits" / "rep1" / "half2.parquet")
+
+    assert half1.height + half2.height == keys.height
+    assert half1.join(half2, on=JOIN_KEYS, how="inner").height == 0
+
+
+def test_blocklist_covers_every_aggregate_column(pipeline_outputs):
+    """The blocklist keys features by column name, so its coverage of
+    aggregate.parquet's feature columns is what makes FILTER_AGGREGATE's
+    drop meaningful. A mismatch here (bare vs suffixed names, say) would
+    silently filter nothing at all."""
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    agg = pl.read_parquet(base / "aggregate.parquet")
+    blocklist = pl.read_parquet(base / "blocklist.parquet")
+
+    feature_cols = {c for c in agg.columns if not c.startswith("meta_")}
+    assert feature_cols == set(blocklist["feature"].to_list())
+
+
+def test_filtered_aggregate_is_a_column_subset_of_aggregate(pipeline_outputs):
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    agg = pl.read_parquet(base / "aggregate.parquet")
+    filtered = pl.read_parquet(base / "filtered_aggregate.parquet")
+
+    assert set(filtered.columns) <= set(agg.columns)
+    assert filtered.height == agg.height
+    # Metadata is never filtered -- only feature columns carry a verdict.
+    assert {c for c in agg.columns if c.startswith("meta_")} <= set(filtered.columns)
+
+
+def test_passthrough_columns_reach_only_the_terminal_file(pipeline_outputs):
+    """aggregate_methods_passthrough is ["KSnegLogP"] in this fixture. Those
+    columns belong in the per-experiment deliverable and nowhere else --
+    above all not in the PCA, which is what the filtered/with-passthrough
+    file split exists to guarantee across a process boundary."""
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    with_pt = pl.read_parquet(base / "aggregate_with_passthrough.parquet")
+    filtered = pl.read_parquet(base / "filtered_aggregate.parquet")
+    components = pl.read_parquet(
+        exp_dir / "global" / "embeddings" / "pca_components.parquet"
+    )
+
+    assert any(c.endswith("_KSnegLogP") for c in with_pt.columns)
+    assert not any(c.endswith("_KSnegLogP") for c in filtered.columns)
+    assert not any(c.endswith("_KSnegLogP") for c in components.columns)
+
+
+def test_passthrough_methods_are_not_blocklisted(pipeline_outputs):
+    """A passthrough method never goes through the bootstrap halves, so it
+    has no reproducibility verdict at all -- that is the entire point of
+    the second list."""
+    exp_dir, _ = pipeline_outputs
+    base = exp_dir / "feature_select_batchwise" / "batch1"
+
+    blocklist = pl.read_parquet(base / "blocklist.parquet")
+    assert not any(f.endswith("_KSnegLogP") for f in blocklist["feature"].to_list())
+    assert not (base / "blocklists" / "KSnegLogP.parquet").exists()
+
+
+def test_global_blocklist_is_the_cross_experiment_vote(pipeline_outputs):
+    """One experiment here, so the vote is trivial -- but the schema and the
+    unanimity arithmetic are what GLOBAL_VARIANT_EMBEDDINGS consumes."""
+    exp_dir, _ = pipeline_outputs
+
+    batch_bl = pl.read_parquet(
+        exp_dir / "feature_select_batchwise" / "batch1" / "blocklist.parquet"
+    )
+    global_bl = pl.read_parquet(exp_dir / "global" / "embeddings" / "blocklist.parquet")
+
+    assert set(global_bl.columns) == {"feature", "n_batches", "n_ok", "feature_ok"}
+    assert set(global_bl["feature"].to_list()) == set(batch_bl["feature"].to_list())
+    assert global_bl["n_batches"].to_list() == [1] * global_bl.height
+    assert global_bl["feature_ok"].to_list() == (
+        batch_bl.sort("feature")["feature_ok"].to_list()
+    )
+
+
+def test_pca_sees_only_globally_reproducible_dimensions(pipeline_outputs):
+    """GLOBAL_VARIANT_EMBEDDINGS reads the unfiltered aggregates and applies
+    the global verdict itself -- so no blocked dimension may appear as a
+    principal component loading."""
+    exp_dir, _ = pipeline_outputs
+
+    global_bl = pl.read_parquet(exp_dir / "global" / "embeddings" / "blocklist.parquet")
+    components = pl.read_parquet(
+        exp_dir / "global" / "embeddings" / "pca_components.parquet"
+    )
+
+    blocked = set(global_bl.filter(~pl.col("feature_ok"))["feature"].to_list())
+    assert blocked.isdisjoint(set(components.columns))
+
+
 def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
     """grid_size can be omitted from an experiment entry entirely -- proves
     auto-detection works through the real Nextflow/Hydra override
@@ -914,7 +850,7 @@ def test_pipeline_defaults_data_dirs_under_starcall_workflow_dir_when_omitted(
     resolve_data_dir default to a subdirectory of starcall_workflow_dir
     (matching starcall-workflow's own default-config.yaml naming, when no
     project config.yaml exists to say otherwise) works through the real
-    Nextflow/Hydra plumbing, not just by construction."""
+    Snakemake/Hydra plumbing, not just by construction."""
 
     exp_dir = tmp_path_factory.mktemp("nf_experiment_default_dirs")
     _write_synthetic_experiment(exp_dir, omit_data_dirs=True)
@@ -957,14 +893,23 @@ def test_pipeline_reads_data_dirs_from_project_config_yaml_when_nonstandard(
     assert cell_table.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
 
 
-def test_fails_fast_when_pipeline_dir_missing(tmp_path):
-    """A required-with-no-default param left unset must fail with
-    EmbeddingsPipeline's own
-    specific message, not Nextflow's generic 'no such property' error --
-    and it must fail before scheduling any process (no synthetic fixture
-    needed here, unlike pipeline_outputs above)."""
+def _one_experiment_params(tmp_path: Path) -> Path:
+    """The repo's params.yaml with one (never-run) experiment in it."""
+    params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
+    params["experiments"] = [
+        {"batch_stem": "e1", "starcall_workflow_dir": str(tmp_path / "swd")}
+    ]
+    path = tmp_path / "one_experiment_params.yaml"
+    path.write_text(yaml.safe_dump(params))
+    return path
 
-    result = subprocess.run(
+
+def _run_validation_only(tmp_path, experiments_file=None, **nf_params):
+    """A run against the repo's own params.yaml (or experiments_file) that
+    PLAN_EXPERIMENTS -- the workflow's first task -- is expected to reject
+    before anything else is scheduled."""
+    params_file = experiments_file or _PROJECT_ROOT / "params.yaml"
+    return subprocess.run(
         [
             "nextflow",
             "run",
@@ -974,41 +919,40 @@ def test_fails_fast_when_pipeline_dir_missing(tmp_path):
             "-profile",
             "local",
             "-params-file",
-            str(_PROJECT_ROOT / "params.yaml"),
+            str(params_file),
+            *_nf_params(nf_params),
         ],
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=300,
     )
+
+
+def test_fails_fast_when_pipeline_dir_missing(tmp_path):
+    """A required-with-no-default key left unset must fail with this
+    pipeline's own specific message, not a generic error from deep inside a
+    task -- and it must fail before any other task is scheduled."""
+    result = _run_validation_only(tmp_path)
     assert result.returncode != 0
-    assert "ERROR: --pipeline_dir is required." in result.stderr + result.stdout
+    assert "pipeline_dir is required" in result.stderr + result.stdout
 
 
 def test_fails_fast_when_cell_dino_checkpoint_missing(tmp_path):
-    """Same as above, for the other required-with-no-default param."""
+    """Same as above, for the other required-with-no-default key."""
+    result = _run_validation_only(tmp_path, pipeline_dir=tmp_path)
+    assert result.returncode != 0
+    assert "cell_dino_checkpoint is required" in result.stderr + result.stdout
 
-    result = subprocess.run(
-        [
-            "nextflow",
-            "run",
-            str(_PROJECT_ROOT),
-            "-ansi-log",
-            "false",
-            "-profile",
-            "local",
-            "-params-file",
-            str(_PROJECT_ROOT / "params.yaml"),
-            "--pipeline_dir",
-            str(tmp_path),
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=60,
+
+def test_fails_fast_when_experiments_is_empty(tmp_path):
+    """params.yaml ships `experiments: []`, so this is the third required
+    key and the one a real run is most likely to forget."""
+    result = _run_validation_only(
+        tmp_path, pipeline_dir=tmp_path, cell_dino_checkpoint=tmp_path / "ckpt.pth"
     )
     assert result.returncode != 0
-    assert "ERROR: --cell_dino_checkpoint is required" in result.stderr + result.stdout
+    assert "experiments must be a non-empty list" in result.stderr + result.stdout
 
 
 def test_global_stage_outputs_exist(pipeline_outputs):
@@ -1096,7 +1040,7 @@ def reproducibility_outputs(tmp_path_factory):
     """Two independent, fully from-scratch `nextflow run` invocations
     against the same synthetic experiment fixture and the same
     `random_seed` (params.yaml's default, 0, unoverridden by
-    `_EXTRA_NF_PARAMS`) -- the test this backs is what actually proves the
+    `_EXTRA_PARAMS`) -- the test this backs is what actually proves the
     reproducibility claim end to end, not just that a `random_seed` field
     exists and is threaded through (that half is
     already covered per-stage at the unit level, e.g.
@@ -1110,16 +1054,24 @@ def reproducibility_outputs(tmp_path_factory):
     checkpoint_path = tmp_path_factory.mktemp("weights_repro") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
 
-    ovwt_results = []
+    runs = []
     for i in range(2):
         exp_dir = tmp_path_factory.mktemp(f"nf_repro_{i}")
         _write_synthetic_experiment(exp_dir)
         result = _run_nextflow(exp_dir, checkpoint_path)
         assert result.returncode == 0, result.stderr
-        ovwt_results.append(
-            pl.read_parquet(exp_dir / "ovwt_batchwise" / "batch1" / "results.parquet")
+        base = exp_dir / "feature_select_batchwise" / "batch1"
+        runs.append(
+            {
+                "ovwt": pl.read_parquet(
+                    exp_dir / "ovwt_batchwise" / "batch1" / "results.parquet"
+                ),
+                "blocklist": pl.read_parquet(base / "blocklist.parquet"),
+                "aggregate": pl.read_parquet(base / "aggregate.parquet"),
+                "filtered": pl.read_parquet(base / "filtered_aggregate.parquet"),
+            }
         )
-    return ovwt_results
+    return runs
 
 
 def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs):
@@ -1129,7 +1081,7 @@ def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs
     the actual numeric scores must match, since it's the numbers
     (auroc_pooled/auroc_median_barcode) downstream analyses actually
     compare across pipeline versions/reruns."""
-    first, second = reproducibility_outputs
+    first, second = (r["ovwt"] for r in reproducibility_outputs)
     first = first.sort("meta_aa_changes")
     second = second.sort("meta_aa_changes")
 
@@ -1142,254 +1094,130 @@ def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs
         )
 
 
+def test_rerunning_with_same_seed_reproduces_the_blocklist(reproducibility_outputs):
+    """The reproducibility chain is itself reproducible. Each replicate's
+    50/50 split is drawn at random_seed + bootstrap_idx, so two independent
+    from-scratch runs at the same seed must reach the same verdict -- the
+    same median r per dimension, not merely the same set of dimensions.
+
+    This is the assertion that would catch the split silently depending on
+    row order, or an unsorted group_by leaking into a correlation."""
+    first, second = (r["blocklist"] for r in reproducibility_outputs)
+    first = first.sort("feature")
+    second = second.sort("feature")
+
+    assert first["feature"].to_list() == second["feature"].to_list()
+    assert first["feature_ok"].to_list() == second["feature_ok"].to_list()
+    np.testing.assert_allclose(
+        first["median_r"].to_numpy(), second["median_r"].to_numpy()
+    )
+
+
+def test_rerunning_reproduces_aggregate_row_order(reproducibility_outputs):
+    """aggregate.parquet and filtered_aggregate.parquet are byte-stable
+    across runs, row order included. Polars' group_by and joins are not
+    order-preserving under multithreaded execution, so this only holds
+    because aggregate_embeddings sorts -- without which the blocklist above
+    would still match while the published files quietly differed."""
+    for key in ("aggregate", "filtered"):
+        first, second = (r[key] for r in reproducibility_outputs)
+        assert first.equals(second), key
+
+
 # ===========================================================================
-# The real-starcall test: containerized, opt-in via `--container`.
+# The real-starcall tests: containerized, opt-in via `--container`.
 #
-# Everything above fakes `snakemake` with a stub on PATH -- deliberately,
-# since a real run needs starcall-workflow's own heavy stack
-# (tensorflow/stardist/cellpose, in params.container_image's `ops` conda
-# env; see the root Dockerfile) plus real microscopy data, neither of
-# which belongs in the fast default suite. This is the one place that
-# actually invokes real Snakemake against real starcall-workflow data.
+# Everything above fakes the nested `snakemake` with a stub on PATH. These
+# run starcall-workflow for real -- background correction, stitching,
+# stardist/cellpose segmentation, base calling -- inside a real build of the
+# root Dockerfile (its `ops` env), on a deliberately tiny slice of real
+# data: testing_data/lmna_t3_mini (12 cycles of one 512 px sequencing tile,
+# one 512 px phenotype tile; generate it with
+# `uv run python scripts/prepare_real_starcall_test_data.py --minimal`).
+# Minutes, not the hour-plus the old full-size fixture took.
 #
-# Runs only under `pytest tests/integration --container`, and even then
-# self-skips (see `_skip_reason`) unless BOTH:
-#   - testing_data/lmna_t3/starcall_input/ exists -- generate it with
-#     `uv run python scripts/prepare_real_starcall_test_data.py` (~6.3GB
-#     download, cropped to a single tile per sequencing cycle). Never
-#     generated automatically here.
-#   - `docker` is on PATH, and a build of the root Dockerfile succeeds --
-#     this needs the real `ops` env, so it always runs through the default
-#     (containerized) profile, never `-profile local`.
+# Both stop after EMBED_CELLS (params.embeddings_only): everything
+# downstream is covered by the synthetic suite, and a few dozen real cells
+# are too few for QC thresholds and OVWT folds to mean anything.
 #
-# Slow: real background correction, cycle registration/stitching solving,
-# real stardist/cellpose segmentation, and real sequencing base-calling
-# against a real (if tiny) barcode library. Budget minutes, not seconds --
-# this is the appropriate place to pay that cost, once, deliberately,
-# rather than never paying it at all.
+# They self-skip unless the fixture exists and `docker` is on PATH. Set
+# FISSEQ_TEST_IMAGE to an already-built image tag to skip the
+# `docker build` (the slow part of a first run).
 #
-# It drives the pipeline exactly the way production does -- default
-# profile, real containers, real bind mounts -- deliberately not
-# special-cased for any particular host's Docker configuration (no
-# `docker cp` workaround, even though one was used to validate this
-# fixture manually during development: that path diverges from how
-# Nextflow's own Docker executor launches containers everywhere else).
-#
-# KNOWN GOTCHA, worth recognizing before filing a regression: Docker
-# Desktop's file-sharing allowlist (macOS/Windows) can silently reject
-# bind mounts of paths outside its shared-folders list. BUILD_CELL_IMAGES
-# then fails fast inside the container ("No such file or directory" on its
-# own .command.sh) and, since that process carries `errorStrategy
-# 'ignore'`, the overall `nextflow run` still exits 0 having produced
-# nothing. This test still catches it -- the cell_table.parquet read
-# raises FileNotFoundError rather than passing silently -- but the fix is
-# to add this repo's temp dirs to Docker Desktop's shared paths (or use a
-# Docker host without that restriction, e.g. native Linux/CI), not to
-# treat it as a pipeline bug.
-#
-# The arbitrary-host-path bind-mount gaps this test originally exposed
-# (BUILD_CELL_IMAGES couldn't see starcall_workflow_dir; BUILD_DATASET/
-# BUILD_CP_FEATURES couldn't see cell_images_dir, one stage later, for the
-# identical reason) are fixed in nextflow.config's three containerOptions
-# closures -- see that file's own comments and docs/nextflow.md's "Docker
-# and Singularity/Apptainer: arbitrary host paths" section. Those closures
-# now pick the bind flag off `workflow.containerEngine`, so a
-# Singularity/Apptainer profile gets `-B` instead of the `-v` that engine
-# rejects outright -- untested here, since this test only exercises
-# Docker.
+# KNOWN GOTCHA: a container runtime with its own file-sharing allowlist
+# (Docker Desktop on macOS/Windows) can silently refuse to bind paths
+# outside that list. BUILD_CELL_IMAGES then fails inside the container with
+# "No such file or directory" on a path that `ls` shows fine from the host
+# -- a container-visibility problem, not a pipeline bug. Add this repo's
+# temp dirs to the runtime's shared paths.
 # ===========================================================================
 
-_FIXTURE_DIR = _PROJECT_ROOT / "testing_data" / "lmna_t3"
-_STARCALL_INPUT_DIR = _FIXTURE_DIR / "starcall_input"
-_CONFIG_FIXTURE = Path(__file__).parent / "fixtures" / "lmna_t3_config.yaml"
-_STARCALL_WORKFLOW_CACHE = _FIXTURE_DIR / "_starcall_workflow_checkout"
-
+_MINI_FIXTURE_DIR = _PROJECT_ROOT / "testing_data" / "lmna_t3_mini"
+_MINI_INPUT_DIR = _MINI_FIXTURE_DIR / "starcall_input"
+_MINI_CONFIG = Path(__file__).parent / "fixtures" / "lmna_t3_mini_config.yaml"
+# Shared by every real-data fixture; an older checkout under lmna_t3/ is
+# reused rather than cloned again.
+_STARCALL_WORKFLOW_CACHE = (
+    _PROJECT_ROOT / "testing_data" / "_starcall_workflow_checkout"
+)
+_LEGACY_STARCALL_WORKFLOW_CACHE = (
+    _PROJECT_ROOT / "testing_data" / "lmna_t3" / "_starcall_workflow_checkout"
+)
 _STARCALL_WORKFLOW_GIT_URL = "https://github.com/FowlerLab/starcall-workflow.git"
 
-# Matches nextflow.config's ext.starcall_overrides_dir default (the Docker
-# profile this test builds against, not -profile local) -- wrapper.smk and
-# fixed_cell_images.smk are baked into the image at this path (Dockerfile's
-# `COPY resources/ resources/`) and used from there directly, same as the
-# real BUILD_CELL_IMAGES invocation.
-_STARCALL_OVERRIDES_DIR_IN_IMAGE = (
-    "/opt/fisseq-embeddings-pipeline/resources/starcall_overrides"
-)
-
 _IMAGE_TAG = "fisseq-embeddings-pipeline:real-starcall-test"
-
-# grid_size=1 means a single "tile" covering the whole stitched image (no
-# internal chunking) -- always exactly one tile, x=0/y=0, named per
-# qc.smk's own '{:02}' formatting convention (utils.constants.TILE_DIR_RE
-# matches any digit count, but starcall-workflow itself always emits
-# zero-padded names). BUILD_CELL_IMAGES' own params["experiments"][0]
-# below must keep using this same grid_size -- see _prime_tile_grid.
-_GRID_SIZE = 1
-_TILE_NAME = "tile00x00y"
-# The four final targets build_enumeration (build_cell_images_enumerate.py)
-# would itself compute for this one tile, at that module's own defaults
-# (segmentation_type="cells", window=_WINDOW, sequencing_reads_params="") --
-# BUILD_CELL_IMAGES' Nextflow module (build_cell_images.nf) doesn't
-# override any of those for this fixture, so these are hand-mirrored here
-# rather than importing build_enumeration itself, which would need a tile
-# to already be enumerable to compute them -- exactly the precondition
-# this function exists to establish. The crop-stack pair (not the
-# whole-tile phenotype image/segmentation mask) is what
-# `make_cell_images_bbox` actually produces -- see
-# resources/starcall_overrides/ and docs/architecture.md decision 17.
-_PRIME_TARGET_SUFFIXES = (
-    ("phenotyping_dir", f"cells_crops_{_WINDOW}.tif"),
-    ("phenotyping_dir", f"cells_mask_crops_{_WINDOW}.tif"),
-    ("phenotyping_dir", "cells.csv"),
-    ("sequencing_dir", "cells_reads.csv"),
-)
-
-
-def _fixture_available() -> bool:
-    return (_STARCALL_INPUT_DIR / "well1_subset1").is_dir()
-
-
-def _docker_available() -> bool:
-    return shutil.which("docker") is not None
+_MINI_WELL = "well1_subset1"
+_MINI_TILE = "tile00x00y"  # the one tile of grid size 1, in starcall's naming
 
 
 def _skip_reason() -> str | None:
-    if not _fixture_available():
+    if not (_MINI_INPUT_DIR / _MINI_WELL).is_dir():
         return (
-            "real starcall-workflow test data not present -- generate it with "
-            "`uv run python scripts/prepare_real_starcall_test_data.py` "
+            "real-data fixture not present -- generate it with "
+            "`uv run python scripts/prepare_real_starcall_test_data.py --minimal` "
             "(see testing_data/README.md)"
         )
-    if not _docker_available():
-        return "docker not on PATH -- this test needs the real ops-env-bearing image"
-    if shutil.which("nextflow") is None:
-        return "nextflow not on PATH"
+    if shutil.which("docker") is None:
+        return "docker not on PATH -- needed to build and run the pipeline image"
     return None
 
 
 def _prepare_starcall_workflow_checkout() -> Path:
     """A real `origin/devel` starcall-workflow checkout, cached under
-    testing_data/ (gitignored) so repeat test runs don't re-clone. This
-    is the same ref/URL the root Dockerfile's own `ops` env build uses --
-    kept as a *separate* checkout here, not that image-internal one,
-    because this one needs this fixture's own config.yaml + input/ tree
-    living alongside it as `starcall_workflow_dir`."""
-    if not (_STARCALL_WORKFLOW_CACHE / "workflow" / "Snakefile").exists():
-        _STARCALL_WORKFLOW_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            [
-                "git",
-                "clone",
-                "--recursive",
-                "--branch",
-                "devel",
-                _STARCALL_WORKFLOW_GIT_URL,
-                str(_STARCALL_WORKFLOW_CACHE),
-            ],
-            check=True,
-            timeout=300,
-        )
+    testing_data/ (gitignored) so repeat runs don't re-clone -- the same
+    ref the root Dockerfile builds its `ops` env from."""
+    for cached in (_STARCALL_WORKFLOW_CACHE, _LEGACY_STARCALL_WORKFLOW_CACHE):
+        if (cached / "workflow" / "Snakefile").exists():
+            return cached
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "--recursive",
+            "--branch",
+            "devel",
+            _STARCALL_WORKFLOW_GIT_URL,
+            str(_STARCALL_WORKFLOW_CACHE),
+        ],
+        check=True,
+        timeout=300,
+    )
     return _STARCALL_WORKFLOW_CACHE
 
 
 def _write_starcall_workflow_dir(dest: Path) -> Path:
-    """Assembles one experiment's `starcall_workflow_dir`: a copy of the
-    cached checkout (Snakemake's `--directory` also becomes its own
-    working/lock directory -- must be per-experiment, never shared
-    concurrently, matching build_cell_images.nf's own module docstring),
-    this fixture's own config.yaml, and the prepared input/ tree."""
-    checkout = _prepare_starcall_workflow_checkout()
+    """One experiment's `starcall_workflow_dir`: a copy of the checkout
+    (snakemake's --directory is also its lock directory, so it must be
+    per-experiment), the fixture's config.yaml, and the input/ tree."""
     shutil.copytree(
-        checkout, dest, symlinks=True, ignore=shutil.ignore_patterns(".git")
+        _prepare_starcall_workflow_checkout(),
+        dest,
+        symlinks=True,
+        ignore=shutil.ignore_patterns(".git"),
     )
-    shutil.copy(_CONFIG_FIXTURE, dest / "config.yaml")
-    shutil.copytree(_STARCALL_INPUT_DIR, dest / "input")
+    shutil.copy(_MINI_CONFIG, dest / "config.yaml")
+    shutil.copytree(_MINI_INPUT_DIR, dest / "input")
     return dest
-
-
-def _prime_tile_grid(image: str, starcall_workflow_dir: Path, well: str) -> None:
-    """Establishes BUILD_CELL_IMAGES' own enumerate-phase precondition (see
-    this module's own docstring) for one well at `_GRID_SIZE`: a real,
-    direct Snakemake invocation -- the same image, same `ops` env,
-    `task.ext.snakemake_bin`'s own absolute path (nextflow.config) -- for
-    the concrete tile00x00y targets, run straight from a from-scratch
-    starcall-workflow checkout. Mirrors
-    modules/local/build_cell_images/main.nf's own invocation shape exactly
-    (including the `--` separator ending `--config`'s own arg list, the
-    conda_bin_dir PATH prefix --use-conda itself needs -- both real bugs
-    this session's manual debugging against this exact fixture found and
-    fixed there -- and pointing `--snakefile` at the image's own baked-in
-    wrapper.smk, `_STARCALL_OVERRIDES_DIR_IN_IMAGE`), since this is
-    genuinely the same command BUILD_CELL_IMAGES' own script block would
-    run, just pointed at concrete paths instead of a glob-discovered list.
-
-    "Mirrors exactly" means the LOCAL-mode invocation, which is what that
-    module emits unless an executor profile sets
-    `process.ext.snakemake_cluster_args` (nextflow.config). The `--cores 4`
-    below is that path's `--cores ${params.snakemake_cores}`; a cluster
-    profile replaces it with `--cores ${task.ext.snakemake_cluster_cores}`
-    plus a `--cluster ...` block, which this fixture deliberately does not
-    mirror -- it has no scheduler to submit to, and priming the grid is a
-    one-tile job. Keep this in sync with the local path only.
-    """
-    resolved_dirs = {
-        dir_key: resolve_data_dir(str(starcall_workflow_dir), dir_key, None)
-        for dir_key in ("phenotyping_dir", "segmentation_dir", "sequencing_dir")
-    }
-    grid_dir = f"{well}_grid{_GRID_SIZE}"
-    # Absolute, joined with an explicit '/' -- matching build_enumeration's
-    # own tile_dir/seq_tile_dir construction exactly (build_cell_images_
-    # enumerate.py), since these targets must resolve against the *same*
-    # --config-overridden (absolute) phenotyping_dir/sequencing_dir passed
-    # below, not starcall-workflow's own relative config.yaml defaults --
-    # a relative target here would silently mismatch every rule's
-    # (now-absolute) output pattern and fail DAG resolution outright.
-    targets = [
-        f"{resolved_dirs[dir_key]}/{grid_dir}/{_TILE_NAME}/{name}"
-        for dir_key, name in _PRIME_TARGET_SUFFIXES
-    ]
-
-    subprocess.run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "-v",
-            f"{starcall_workflow_dir}:{starcall_workflow_dir}",
-            "-w",
-            str(starcall_workflow_dir),
-            image,
-            "bash",
-            "-c",
-            'export PATH="/opt/conda/bin:$PATH"; '
-            "/opt/conda/envs/ops/bin/snakemake "
-            f'--snakefile "{_STARCALL_OVERRIDES_DIR_IN_IMAGE}/wrapper.smk" '
-            f'--directory "{starcall_workflow_dir}" '
-            "--cores 4 --use-conda --conda-frontend conda --rerun-triggers mtime "
-            # Trailing '/' on each value -- see build_cell_images.nf's own
-            # comment at its matching --config invocation: workflow/rules/
-            # *.smk concatenates these directly onto '{well}_grid.../...'
-            # with no separator of its own, matching config.yaml's own
-            # always-slash-terminated defaults ('phenotyping/', etc.).
-            # starcall_workflow_dir itself gets none -- wrapper.smk's own
-            # `include:` joins onto it via os.path.join, not string
-            # concatenation.
-            f'--config phenotyping_dir="{resolved_dirs["phenotyping_dir"]}/" '
-            f'segmentation_dir="{resolved_dirs["segmentation_dir"]}/" '
-            f'sequencing_dir="{resolved_dirs["sequencing_dir"]}/" '
-            f'starcall_workflow_dir="{starcall_workflow_dir}" -- ' + " ".join(targets),
-        ],
-        check=True,
-        timeout=3600,
-    )
-
-
-def _build_image() -> str:
-    subprocess.run(
-        ["docker", "build", "-t", _IMAGE_TAG, str(_PROJECT_ROOT)],
-        check=True,
-        timeout=1800,
-    )
-    return _IMAGE_TAG
 
 
 @pytest.fixture(scope="session")
@@ -1397,114 +1225,211 @@ def real_starcall_image():
     reason = _skip_reason()
     if reason:
         pytest.skip(reason)
-    return _build_image()
-
-
-@pytest.mark.container
-def test_real_starcall_pipeline_produces_cell_images(
-    tmp_path_factory, real_starcall_image
-):
-    """Runs the real Nextflow pipeline (`-profile docker`, the default --
-    real containers, real bind mounts) against the real, cropped LMNA_T3
-    fixture, through BUILD_CELL_IMAGES' actual real `snakemake`
-    invocation (`task.ext.snakemake_bin`'s absolute ops-env path -- see
-    nextflow.config), all the way through EMBED_CELLS. Asserts real,
-    non-trivial output shapes -- not just that files exist -- since a
-    silently-empty cell table would defeat the point of this test."""
-    exp_dir = tmp_path_factory.mktemp("real_starcall_experiment")
-    starcall_workflow_dir = _write_starcall_workflow_dir(exp_dir / "starcall-workflow")
-    _prime_tile_grid(real_starcall_image, starcall_workflow_dir, "well1_subset1")
-
-    checkpoint_path = (
-        tmp_path_factory.mktemp("real_starcall_weights") / "checkpoint.pth"
+    prebuilt = os.environ.get("FISSEQ_TEST_IMAGE")
+    if prebuilt:
+        return prebuilt
+    subprocess.run(
+        ["docker", "build", "-t", _IMAGE_TAG, str(_PROJECT_ROOT)],
+        check=True,
+        timeout=3600,
     )
-    _write_tiny_checkpoint(checkpoint_path)
+    return _IMAGE_TAG
 
+
+@pytest.fixture(scope="session")
+def real_starcall_experiment(tmp_path_factory):
+    """One starcall_workflow_dir + checkpoint shared by both tests, so
+    starcall's expensive chain runs once (in local mode)."""
+    reason = _skip_reason()
+    if reason:
+        pytest.skip(reason)
+    root = tmp_path_factory.mktemp("real_starcall")
+    swd = _write_starcall_workflow_dir(root / "starcall-workflow")
+    checkpoint_path = root / "checkpoint.pth"
+    _write_tiny_checkpoint(checkpoint_path)
+    return swd, checkpoint_path
+
+
+@pytest.fixture(scope="session")
+def real_starcall_local_run(
+    real_starcall_image, real_starcall_experiment, tmp_path_factory
+):
+    """The from-raw local-mode run, shared: test_real_starcall_local checks
+    it, and test_real_starcall_profile_mode builds on its starcall outputs."""
+    swd, checkpoint_path = real_starcall_experiment
+    pipeline_dir, result = _run_real_pipeline(
+        tmp_path_factory.mktemp("real_starcall_local"),
+        real_starcall_image,
+        swd,
+        checkpoint_path,
+    )
+    return swd, checkpoint_path, pipeline_dir, result
+
+
+def _run_real_pipeline(
+    tmp_path: Path,
+    image: str,
+    swd: Path,
+    checkpoint_path: Path,
+    timeout: int = 3600,
+    **extra_params,
+) -> tuple[Path, subprocess.CompletedProcess]:
+    """The outer pipeline under Docker (nextflow.config's default), nested
+    starcall running inside BUILD_CELL_IMAGES' container, stopping after
+    EMBED_CELLS."""
+    pipeline_dir = tmp_path / "pipeline"
+    pipeline_dir.mkdir()
     params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
-    params["container_image"] = real_starcall_image
-    params["window"] = _WINDOW
-    # EMBED_CELLS overrides -- previously missing here entirely, since this
-    # test never got far enough (past the since-fixed BUILD_CELL_IMAGES/
-    # BUILD_DATASET bind-mount gaps -- see nextflow.config's own
-    # containerOptions comments) to reach EMBED_CELLS and notice. Without
-    # these, EMBED_CELLS runs with params.yaml's own production defaults
-    # (cell_dino_arch=vit_large, cell_dino_crop_size=224,
-    # cell_dino_device=cuda) -- a real GPU checkpoint's shape, not
-    # _write_tiny_checkpoint's `vit_small`/`img_size=_WINDOW`, and a device
-    # this (or any GPU-less) host doesn't have. Mirrors
-    # this file's own `_EXTRA_NF_PARAMS` precedent (same values,
-    # `--cell_dino_device cpu` there too) -- _WINDOW's own comment
-    # ("small enough to run fast on CPU") already says this was always the
-    # intent.
-    params["cell_dino_arch"] = "vit_small"
-    params["cell_dino_patch_size"] = 16
-    params["cell_dino_crop_size"] = _WINDOW
-    params["cell_dino_device"] = "cpu"
-    params["cell_dino_batch_size"] = 4
-    params["cell_dino_num_workers"] = 0
-    # Same reason as cell_dino_device=cpu above, for BUILD_CELL_IMAGES'
-    # own GPU flag: params.yaml defaults starcall_gpu to true (the ops
-    # env's stardist/cellpose segmentation is GPU-capable, and the image
-    # is CUDA-based), which puts `--gpus all` on this task's `docker run`
-    # line -- and that fails outright on a GPU-less host, before the
-    # container's entrypoint runs: "Error response from daemon: failed to
-    # discover GPU vendor from CDI: no known GPU vendor found" (exit 125).
-    # Confirmed directly: without this line BUILD_CELL_IMAGES dies exactly
-    # that way here, `nextflow run` still exits 0 (errorStrategy
-    # 'ignore'), and cell_table.parquet is simply never written.
-    params["starcall_gpu"] = False
     params["experiments"] = [
         {
             "batch_stem": "lmna_t3",
-            "starcall_workflow_dir": str(starcall_workflow_dir),
-            # 'well1_subset1', matching the fixture's actual input/ well
-            # directory name (scripts/prepare_real_starcall_test_data.py's
-            # _CROPPED_WELL) and lmna_t3_config.yaml's own `wells:` --
-            # not the source dataset's original 'well1'.
-            "wells": ["well1_subset1"],
-            "grid_size": _GRID_SIZE,
-            # phenotyping_dir/segmentation_dir/sequencing_dir omitted --
-            # resolved from starcall_workflow_dir's own config.yaml /
-            # default-config.yaml (resolve_data_dir), matching how this
-            # fixture's config.yaml was itself validated to work.
+            "starcall_workflow_dir": str(swd),
+            "wells": [_MINI_WELL],
+            "grid_size": 1,
         }
     ]
-    params_path = exp_dir / "params.yaml"
-    with open(params_path, "w") as f:
-        yaml.safe_dump(params, f)
+    params_file = tmp_path / "params.yaml"
+    params_file.write_text(yaml.safe_dump(params))
 
-    result = subprocess.run(
-        [
-            "nextflow",
-            "run",
-            str(_PROJECT_ROOT),
-            "-ansi-log",
-            "false",
-            "--pipeline_dir",
-            str(exp_dir),
-            "-params-file",
-            str(params_path),
-            "--cell_dino_checkpoint",
-            str(checkpoint_path),
-        ],
-        cwd=exp_dir,
-        capture_output=True,
-        text=True,
-        timeout=3600,
+    start = time.monotonic()
+    result = _run_nextflow(
+        pipeline_dir,
+        checkpoint_path,
+        params_file=params_file,
+        profile=None,  # nextflow.config's default: Docker
+        timeout=timeout,
+        extra_params={
+            "container_image": image,
+            "window": _WINDOW,
+            "embeddings_only": "true",
+            # Every image here is ~512 px, so two nested jobs at once --
+            # even both segmentation models -- fit in well under 8GB.
+            "snakemake_cores": 2,
+            # Docker's --gpus fails outright on a GPU-less host.
+            "starcall_gpu": "false",
+            **extra_params,
+        },
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    print(f"real-starcall run took {time.monotonic() - start:.0f}s")
+    return pipeline_dir, result
+
+
+def _assert_cells_embedded(pipeline_dir: Path, result: subprocess.CompletedProcess):
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "Error is ignored" not in result.stdout, output
 
     cell_table = pl.read_parquet(
-        exp_dir / "cell_images" / "lmna_t3" / "cell_table.parquet"
+        pipeline_dir / "cell_images" / "lmna_t3" / "cell_table.parquet"
     )
     assert cell_table.height > 0
     assert {"editDistance", "bbox_x1", "crop_index"}.issubset(cell_table.columns)
 
-    metadata = pl.read_parquet(exp_dir / "dataset" / "lmna_t3" / "metadata.parquet")
-    assert metadata.height == cell_table.height
+    dataset_meta = pl.read_parquet(
+        pipeline_dir / "dataset" / "lmna_t3" / "metadata.parquet"
+    )
+    assert dataset_meta.height == cell_table.height
 
     embeddings = pl.read_parquet(
-        exp_dir / "embeddings" / "lmna_t3" / "embeddings.parquet"
+        pipeline_dir / "embeddings" / "lmna_t3" / "embeddings.parquet"
     )
-    assert embeddings.height == metadata.height
+    assert embeddings.height == cell_table.height
     assert any(c.startswith("emb_") for c in embeddings.columns)
+    return cell_table
+
+
+@pytest.mark.container
+def test_real_starcall_local(real_starcall_local_run):
+    """Real starcall, local mode: every starcall rule runs inside
+    BUILD_CELL_IMAGES' own container, against starcall's unmodified
+    Snakefile, from raw input (an explicit grid_size needs no pre-existing
+    tile directories)."""
+    swd, _, pipeline_dir, result = real_starcall_local_run
+    _assert_cells_embedded(pipeline_dir, result)
+
+    # temp() upstream, but requested as targets -- so still there for
+    # BUILD_DATASET to crop from.
+    tile_dir = swd / "phenotyping" / f"{_MINI_WELL}_grid1" / _MINI_TILE
+    assert (tile_dir / "raw_pt.tif").exists()
+    assert (tile_dir / "cells_mask.tif").exists()
+
+
+_FAKE_RUNTIME = """#!/bin/sh
+# Stands in for apptainer on a compute node. The job already runs inside the
+# pipeline image here (the fake "cluster" backgrounds it inside
+# BUILD_CELL_IMAGES' own container), so check what the jobscript passed
+# and run the job as the real runtime would.
+#   exec --bind SRC:DST,... IMAGE /bin/sh JOBSCRIPT
+[ "$1" = exec ] || { echo "fake runtime: expected 'exec', got $1" >&2; exit 90; }
+[ "$2" = --bind ] || { echo "fake runtime: expected --bind, got $2" >&2; exit 91; }
+for pair in $(echo "$3" | tr ',' ' '); do
+    [ -e "${pair%%:*}" ] || { echo "fake runtime: bind source missing: $pair" >&2; exit 92; }
+done
+echo "entered $4 for $6" >> "$(dirname "$0")/fake_runtime.log"
+shift 4
+exec "$@"
+"""
+
+
+@pytest.mark.container
+def test_real_starcall_profile_mode(
+    real_starcall_image, real_starcall_local_run, tmp_path
+):
+    """Real starcall under a starcall_profile: the nested snakemake 7
+    submits each starcall job through the profile's `cluster:` command and
+    our --jobscript, which re-enters starcall_job_image.
+
+    The "cluster" is `sh` backgrounding the jobscript, and the container
+    runtime is a fake that validates the jobscript's arguments and then
+    runs the job in place -- the job is already inside the image, since the
+    submit command runs inside BUILD_CELL_IMAGES' container. That exercises
+    snakemake's real profile/--jobscript handling and our template's
+    formatting, guard and bind list end to end; the one thing only a real
+    cluster can check is apptainer itself re-entering the .sif on a node.
+
+    Builds on the local-mode run, re-submitting only the last few cheap
+    per-tile jobs: the fake cluster has no status command, so a job killed
+    outright (say, out of memory) would never report back and the run
+    would hang rather than fail.
+    """
+    swd, checkpoint_path, local_dir, _ = real_starcall_local_run
+    if not (local_dir / "cell_images" / "lmna_t3" / "cell_table.parquet").exists():
+        pytest.skip("the local-mode run failed -- see test_real_starcall_local")
+    # Remove the per-tile outputs and let mtime-based rerun rebuild them
+    # (and only them) through the "cluster".
+    tile_dir = swd / "phenotyping" / f"{_MINI_WELL}_grid1" / _MINI_TILE
+    for name in ("cells.csv", "raw_pt.tif", "cells_mask.tif"):
+        (tile_dir / name).unlink(missing_ok=True)
+
+    fake_runtime = swd / "fake_apptainer"
+    fake_runtime.write_text(_FAKE_RUNTIME)
+    fake_runtime.chmod(0o755)
+    profile_dir = swd / "fake_cluster_profile"
+    profile_dir.mkdir(exist_ok=True)
+    (profile_dir / "config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                # snakemake appends the jobscript path; print a job id first.
+                "cluster": 'sh -c \'sh "$0" > "$0.out" 2>&1 & echo $!\'',
+                "jobs": 1,
+                "latency-wait": 30,
+            }
+        )
+    )
+
+    pipeline_dir, result = _run_real_pipeline(
+        tmp_path,
+        real_starcall_image,
+        swd,
+        checkpoint_path,
+        starcall_profile=profile_dir,
+        starcall_job_image="/images/pipeline.sif",
+        starcall_container_bin=fake_runtime,
+        timeout=1200,
+    )
+    _assert_cells_embedded(pipeline_dir, result)
+    assert (tile_dir / "raw_pt.tif").exists()
+
+    log = swd / "fake_runtime.log"
+    assert log.exists(), result.stdout
+    assert "entered /images/pipeline.sif" in log.read_text()

@@ -5,6 +5,8 @@
 // `aggregate_methods_cp_features` defaults to `["median"]`, unlike
 // AGGREGATE_EMBEDDINGS' `aggregate_methods` (`["median", "KS", "AUROC"]`).
 
+include { threadEnv } from '../functions'
+
 process AGGREGATE_CP_FEATURES {
     errorStrategy 'ignore'
     label 'process_medium'
@@ -17,11 +19,9 @@ process AGGREGATE_CP_FEATURES {
     output:
     tuple val(batch_stem), path("aggregate.parquet"), emit: aggregate
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.aggregate_cp_features \\
         output_dir=. \\
         cp_features_file=${cp_features_parquet} \\
@@ -29,6 +29,7 @@ process AGGREGATE_CP_FEATURES {
         normalizer_file=${normalizer_parquet} \\
         label_column=${params.filter_label_column} \\
         'aggregators=[${params.aggregate_methods_cp_features.join(",")}]' \\
+        feature_chunk_size=${params.aggregate_feature_chunk_size == null ? 'null' : params.aggregate_feature_chunk_size} \\
         random_seed=${params.random_seed}
     """
 }

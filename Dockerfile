@@ -1,5 +1,7 @@
-# Dockerfile -- single image every Nextflow process runs in, including
-# BUILD_CELL_IMAGES (modules/local/build_cell_images.nf). One CUDA-capable
+# Dockerfile -- the single image every Nextflow task runs in (Docker by
+# default, or Apptainer via `-profile apptainer`), including
+# BUILD_CELL_IMAGES' nested starcall snakemake and, in cluster mode, every
+# starcall child job it submits (params.starcall_job_image). One CUDA-capable
 # base serves CPU-only stages too (simpler to build/publish as one
 # artifact); revisit splitting into a CPU + GPU image later if the pull
 # cost matters in practice.
@@ -46,6 +48,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # version explicitly, which is what actually determines what runs at
 # container run time anyway (see the ENV PATH line below).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# Put that managed interpreter somewhere every user can read. By default uv
+# installs it under /root/.local/share/uv/python/, and .venv/bin/python is
+# only a symlink into there -- so every task failed with "python:
+# Permission denied" whenever the container ran as a non-root user, which
+# Apptainer always does and docker does under nextflow.config's
+# `-u $(id -u):$(id -g)`.
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 
 WORKDIR /opt/fisseq-embeddings-pipeline
 
@@ -80,7 +89,7 @@ RUN uv sync --frozen --no-install-project --no-dev
 # `python3` must always resolve to the uv-managed 3.13 venv (ENV PATH line
 # near the bottom), never ambiguously to this env's Python 3.10. Every
 # process that needs something from `ops` (just the one `snakemake ...`
-# line in modules/local/build_cell_images.nf) reaches it by absolute path,
+# line in BUILD_CELL_IMAGES) reaches it by absolute path,
 # /opt/conda/envs/ops/bin/<binary>, instead.
 # Architecture-detected, not hardcoded to x86_64 -- confirmed via a real
 # `docker build` that a hardcoded x86_64 installer run under arm64 (native
@@ -114,10 +123,10 @@ SHELL ["/opt/conda/bin/conda", "run", "--no-capture-output", "-n", "ops", "/bin/
 # snakemake (starcall-workflow's own requirement is `snakemake>=7`) plus
 # conda-frontend support for `--use-conda` (materializing the CellProfiler
 # env on demand, the first time a cp_features: true experiment actually
-# needs it -- see modules/local/build_cell_images/main.nf's `--use-conda
+# needs it -- see BUILD_CELL_IMAGES's `--use-conda
 # --conda-frontend conda` invocation). mamba is already on PATH via
 # Miniforge, and would be faster than conda's own solver for
-# `--conda-frontend`, but build_cell_images/main.nf's own invocation uses
+# `--conda-frontend`, but BUILD_CELL_IMAGES' invocation uses
 # --conda-frontend conda for the widest compatibility; switch it there if
 # mamba is confirmed to work once real rule execution is validated.
 #
@@ -126,10 +135,10 @@ SHELL ["/opt/conda/bin/conda", "run", "--no-capture-output", "-n", "ops", "/bin/
 # `requires_python >=3.11` (confirmed against PyPI for 8.0.0/8.5.0/9.0.1/
 # 9.27.0), so a bare `>=7` silently resolves to 7.32.4 today *only* because
 # `conda create -n ops python=3.10` above holds it back. That accident is
-# load-bearing: snakemake 8 replaced `--cluster`/`--cluster-cancel` with the
-# executor-plugin interface, and modules/local/build_cell_images/main.nf's
-# cluster path (task.ext.snakemake_cluster_args, nextflow.config) is written
-# against the 7.x spelling. Pinning here means a future `ops` Python bump
+# load-bearing: snakemake 8 replaced `--cluster`/`--cluster-cancel`/
+# `--jobscript` with the executor-plugin interface, and BUILD_CELL_IMAGES'
+# cluster mode (params.starcall_profile, a snakemake 7 profile, plus our
+# --jobscript) is written against the 7.x spelling. Pinning here means a future `ops` Python bump
 # fails loudly at build time instead of teleporting that invocation into an
 # 8.x where its flags no longer parse. Moving to 8/9 means first re-resolving
 # starcall-workflow's requirements.txt (tensorflow==2.13.0/stardist==0.8.5/
@@ -148,7 +157,7 @@ RUN pip install --no-cache-dir "snakemake==7.32.4"
 # starcall_workflow_dir should point at; that always points at a real,
 # already-populated experiment-specific checkout mounted from outside the
 # container (starcall_workflow_dir is per-experiment, not baked into this
-# image -- see modules/local/build_cell_images.nf's own comment on why).
+# image -- see BUILD_CELL_IMAGES's own comment on why).
 # Removed once its pip installs succeed (below) -- nothing at runtime reads
 # this checkout, only the `ops` env's now-installed site-packages.
 ARG STARCALL_WORKFLOW_GIT_URL=https://github.com/FowlerLab/starcall-workflow.git
@@ -206,18 +215,11 @@ SHELL ["/bin/bash", "-c"]
 # installs with it -- no xformers/cuml/git-dependency wrangling needed.
 COPY README.md ./
 COPY src/ src/
-# resources/starcall_overrides/{wrapper.smk,fixed_cell_images.smk}: the
-# `make_cell_images_bbox` rule patch + wrapper Snakefile
-# modules/local/build_cell_images.nf materializes a task-local copy of
-# before every snakemake invocation (STARCALL_WORKFLOW_DIR substituted in
-# via `sed`), composed into starcall-workflow's own real Snakefile via
-# `ruleorder:` + plain `include:` -- see docs/architecture.md decision 17/18.
-COPY resources/ resources/
 RUN uv sync --frozen --no-dev
 
 # `uv sync` installs into a project-local .venv/, not any system Python --
 # put it on PATH so the bare `python -m fisseq_embeddings_pipeline.<module>`
-# every modules/local/*.nf script block invokes actually resolves there.
+# every task's script invokes actually resolves there.
 # Confirmed empirically this matters: without it, `python`/`python3` would
 # fall through to whatever's first on the base image's own PATH (nothing,
 # now that no system Python is installed above -- but even with one, none

@@ -4,7 +4,7 @@
 Covers `resolve_data_dir` (phenotyping_dir/segmentation_dir/sequencing_dir
 resolution against a real or absent starcall-workflow project config),
 `resolve_grid_size`/`enumerate_tile_names`, and `build_enumeration` (the
-target-list/manifest/symlinks logic feeding the Nextflow module's own
+target-list/manifest logic feeding BUILD_CELL_IMAGES' own
 `snakemake` invocation and `build_cell_images_table.py`).
 """
 
@@ -145,40 +145,55 @@ def test_resolve_grid_size_raises_when_multiple_grid_sizes_found(tmp_path: Path)
 def test_enumerate_tile_names_finds_every_tile(tmp_path: Path):
     _make_tile_dir(tmp_path, "well1", 4, 0, 0)
     _make_tile_dir(tmp_path, "well1", 4, 1, 0)
-    tiles = mod.enumerate_tile_names(str(tmp_path), "well1", 4)
+    tiles = mod.enumerate_tile_names(str(tmp_path), "well1", 4, explicit=False)
     assert set(tiles) == {"tile0x0y", "tile1x0y"}
 
 
 def test_enumerate_tile_names_empty_when_nothing_matches(tmp_path: Path):
-    assert mod.enumerate_tile_names(str(tmp_path), "well1", 4) == []
+    assert mod.enumerate_tile_names(str(tmp_path), "well1", 4, explicit=False) == []
+
+
+def test_enumerate_tile_names_generates_full_grid_when_explicit(tmp_path: Path):
+    """An explicit grid size lists every tile in starcall-workflow's own
+    zero-padded naming without touching the filesystem -- so a run
+    starting from raw input, with nothing under phenotyping_dir yet,
+    still has targets to request."""
+    tiles = mod.enumerate_tile_names(str(tmp_path), "well1", 2, explicit=True)
+    assert tiles == ["tile00x00y", "tile00x01y", "tile01x00y", "tile01x01y"]
 
 
 # ---------------------------------------------------------------------------
-# build_enumeration -- target list / manifest / symlinks
+# build_enumeration -- target list / manifest
 # ---------------------------------------------------------------------------
+
+
+def _enumerate(tmp_path: Path, **overrides):
+    kwargs = dict(
+        phenotyping_dir=str(tmp_path),
+        sequencing_dir=str(tmp_path / "sequencing"),
+        wells=["well1"],
+        grid_size=None,
+        segmentation_type="cells",
+        use_corrected=False,
+        sequencing_reads_params="",
+        cp_features=False,
+        cellprofiler_cycle="",
+        cellprofiler_pipeline="",
+    )
+    kwargs.update(overrides)
+    return mod.build_enumeration(**kwargs)
 
 
 def test_build_enumeration_lists_expected_targets_without_cp_features(tmp_path: Path):
     _make_tile_dir(tmp_path, "well1", 4, 0, 0)
     seq_dir = tmp_path / "sequencing"
 
-    result = mod.build_enumeration(
-        phenotyping_dir=str(tmp_path),
-        sequencing_dir=str(seq_dir),
-        wells=["well1"],
-        grid_size=None,
-        segmentation_type="cells",
-        window=32,
-        sequencing_reads_params="",
-        cp_features=False,
-        cellprofiler_cycle="",
-        cellprofiler_pipeline="",
-    )
+    result = _enumerate(tmp_path)
 
     tile_dir = f"{tmp_path}/well1_grid4/tile0x0y"
     assert set(result["targets"]) == {
-        f"{tile_dir}/cells_crops_32.tif",
-        f"{tile_dir}/cells_mask_crops_32.tif",
+        f"{tile_dir}/raw_pt.tif",
+        f"{tile_dir}/cells_mask.tif",
         f"{tile_dir}/cells.csv",
         f"{seq_dir}/well1_grid4/tile0x0y/cells_reads.csv",
     }
@@ -187,31 +202,35 @@ def test_build_enumeration_lists_expected_targets_without_cp_features(tmp_path: 
     assert row["cellprofiler_csv"] == ""
     assert row["segmentation_csv"] == f"{tile_dir}/cells.csv"
     assert row["reads_csv"] == f"{seq_dir}/well1_grid4/tile0x0y/cells_reads.csv"
-    assert row["crops_tif"] == f"{tile_dir}/cells_crops_32.tif"
-    assert row["mask_crops_tif"] == f"{tile_dir}/cells_mask_crops_32.tif"
+    assert row["image_tif"] == f"{tile_dir}/raw_pt.tif"
+    assert row["mask_tif"] == f"{tile_dir}/cells_mask.tif"
+    assert set(row) == set(mod._MANIFEST_FIELDNAMES)
 
-    symlink_map = dict(result["symlinks"])
-    assert (
-        symlink_map["well1_grid4/tile0x0y/cells_crops_32.tif"]
-        == f"{tile_dir}/cells_crops_32.tif"
-    )
-    assert (
-        symlink_map["well1_grid4/tile0x0y/cells_mask_crops_32.tif"]
-        == f"{tile_dir}/cells_mask_crops_32.tif"
-    )
+
+def test_build_enumeration_targets_corrected_image_when_use_corrected(tmp_path: Path):
+    """Mirrors starcall-workflow's own get_phenotyping_pt."""
+    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
+
+    result = _enumerate(tmp_path, use_corrected=True)
+
+    tile_dir = f"{tmp_path}/well1_grid4/tile0x0y"
+    assert f"{tile_dir}/corrected_pt.tif" in result["targets"]
+    assert f"{tile_dir}/raw_pt.tif" not in result["targets"]
+    assert result["manifest_rows"][0]["image_tif"] == f"{tile_dir}/corrected_pt.tif"
+
+
+def test_build_enumeration_with_explicit_grid_needs_no_existing_tiles(tmp_path: Path):
+    result = _enumerate(tmp_path, grid_size=1)
+
+    assert [r["tile"] for r in result["manifest_rows"]] == ["tile00x00y"]
+    assert f"{tmp_path}/well1_grid1/tile00x00y/cells_mask.tif" in result["targets"]
 
 
 def test_build_enumeration_includes_cellprofiler_target_when_enabled(tmp_path: Path):
     _make_tile_dir(tmp_path, "well1", 4, 0, 0)
 
-    result = mod.build_enumeration(
-        phenotyping_dir=str(tmp_path),
-        sequencing_dir=str(tmp_path / "sequencing"),
-        wells=["well1"],
-        grid_size=None,
-        segmentation_type="cells",
-        window=32,
-        sequencing_reads_params="",
+    result = _enumerate(
+        tmp_path,
         cp_features=True,
         cellprofiler_cycle="cycle0",
         cellprofiler_pipeline="my_pipeline",
@@ -222,37 +241,76 @@ def test_build_enumeration_includes_cellprofiler_target_when_enabled(tmp_path: P
     assert result["manifest_rows"][0]["cellprofiler_csv"] == expected_cp
 
 
-def test_build_enumeration_interpolates_window_into_target_filenames(tmp_path: Path):
-    """`window` is embedded directly in the requested crop-stack target
-    filenames -- a regression guard that it's actually threaded through,
-    not silently ignored/hardcoded."""
-    _make_tile_dir(tmp_path, "well1", 4, 0, 0)
+# ---------------------------------------------------------------------------
+# render_starcall_jobscript -- child-job image re-entry
+# ---------------------------------------------------------------------------
 
-    result = mod.build_enumeration(
-        phenotyping_dir=str(tmp_path),
-        sequencing_dir=str(tmp_path / "sequencing"),
-        wells=["well1"],
-        grid_size=None,
-        segmentation_type="cells",
-        window=224,
-        sequencing_reads_params="",
-        cp_features=False,
-        cellprofiler_cycle="",
-        cellprofiler_pipeline="",
+
+def _fill(template: str, exec_job: str = "cd /work && python -m snakemake x") -> str:
+    """What snakemake 7's ClusterExecutor.write_jobscript does."""
+    return template.format(properties='{"rule": "r"}', exec_job=exec_job)
+
+
+def test_render_starcall_jobscript_formats_like_snakemake():
+    script = mod.render_starcall_jobscript(
+        "apptainer", "/imgs/pipe.sif", ["/data", "/work"], gpu=False
     )
+    filled = _fill(script)
+    assert filled.startswith("#!/bin/sh\n# properties = {")
+    assert (
+        "exec apptainer exec --bind /data:/data,/work:/work /imgs/pipe.sif /bin/sh"
+        in filled
+    )
+    assert filled.rstrip().endswith("cd /work && python -m snakemake x")
+    assert "--nv" not in filled
 
-    assert any(t.endswith("cells_crops_224.tif") for t in result["targets"])
-    assert any(t.endswith("cells_mask_crops_224.tif") for t in result["targets"])
-    assert not any("_32.tif" in t for t in result["targets"])
+
+def test_render_starcall_jobscript_passes_nv_for_gpu():
+    script = mod.render_starcall_jobscript("singularity", "/i.sif", ["/d"], gpu=True)
+    assert "exec singularity exec --nv --bind /d:/d /i.sif" in _fill(script)
 
 
-def test_window_is_a_required_config_field():
-    """window has no default -- BuildCellImagesEnumerateConfig requires it,
-    matching the other starcall-workflow-facing required fields
-    (starcall_workflow_dir, wells): its own centroid-fixed crop stack now
-    embeds `window` in its target filename, so this stage needs it even
-    though it never crops anything itself."""
-    from omegaconf import MISSING
+def test_render_starcall_jobscript_quotes_paths_with_spaces():
+    script = mod.render_starcall_jobscript(
+        "apptainer", "/my imgs/p.sif", ["/a b"], False
+    )
+    assert "'/a b:/a b' '/my imgs/p.sif'" in _fill(script)
 
-    fields = mod.BuildCellImagesEnumerateConfig.__dataclass_fields__
-    assert fields["window"].default is MISSING
+
+def test_render_starcall_jobscript_rejects_braces():
+    with pytest.raises(ValueError, match="brace"):
+        mod.render_starcall_jobscript("apptainer", "/i.sif", ["/data/{x}"], False)
+
+
+def test_render_starcall_jobscript_reenters_image_once(tmp_path: Path):
+    """Run the rendered script for real, with a fake container runtime
+    that just runs its trailing command: the job body runs exactly once,
+    inside the 'image'."""
+    fake_bin = tmp_path / "fakeapptainer"
+    # Drop "exec [--nv] --bind X IMAGE" and run the rest.
+    fake_bin.write_text(
+        '#!/bin/sh\nshift\n[ "$1" = --nv ] && shift\nshift 3\n'
+        'echo entered >> "$LOG"\nexec "$@"\n'
+    )
+    fake_bin.chmod(0o755)
+    script = mod.render_starcall_jobscript(str(fake_bin), "/i.sif", ["/d"], False)
+    jobscript = tmp_path / "job.sh"
+    jobscript.write_text(_fill(script, exec_job='echo ran >> "$LOG"'))
+
+    import os
+    import subprocess
+
+    log = tmp_path / "log"
+    env = {**os.environ, "LOG": str(log)}
+    env.pop("FISSEQ_STARCALL_IN_IMAGE", None)
+    subprocess.run(["/bin/sh", str(jobscript)], check=True, env=env)
+    assert log.read_text().split() == ["entered", "ran"]
+
+
+def test_jobscript_bind_paths_includes_cwd_and_dedupes():
+    binds = mod.jobscript_bind_paths(
+        {"phenotyping_dir": "/s/p", "sequencing_dir": "/s/q"},
+        ["/s/p", "/cache"],
+        "/work/ab/123",
+    )
+    assert binds == ["/cache", "/s/p", "/s/q", "/work/ab/123"]

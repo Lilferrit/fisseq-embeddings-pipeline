@@ -1,6 +1,8 @@
 // FILTER_EMBEDDINGS. Publishes only the QC-passed join key + fitted
 // Normalizer -- no emb_* columns.
 
+include { threadEnv } from '../functions'
+
 process FILTER_EMBEDDINGS {
     errorStrategy 'ignore'
     label 'process_low'
@@ -13,11 +15,9 @@ process FILTER_EMBEDDINGS {
     output:
     tuple val(batch_stem), path("filtered_keys.parquet"), path("normalizer.parquet"), emit: filtered
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.filter \\
         output_dir=. \\
         embeddings_file=${embeddings_parquet} \\

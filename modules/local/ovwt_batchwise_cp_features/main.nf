@@ -3,6 +3,8 @@
 // OVWT_BATCHWISE -- OVWT hyperparameters are about scoring methodology,
 // not feature type, so there is no parallel `ovwt_*_cp_features` set.
 
+include { threadEnv } from '../functions'
+
 process OVWT_BATCHWISE_CP_FEATURES {
     errorStrategy 'ignore'
     label 'process_high'
@@ -15,11 +17,9 @@ process OVWT_BATCHWISE_CP_FEATURES {
     output:
     tuple val(batch_stem), path("results.parquet"), path("cell_scores.parquet"), path("models.pkl"), emit: ovwt
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.ovwt_cp_features \\
         output_dir=. \\
         cp_features_file=${cp_features_parquet} \\

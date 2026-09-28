@@ -2,8 +2,8 @@
 
 Hydra entry point (`python -m
 fisseq_embeddings_pipeline.build_cell_images_table`), backing the third of
-BUILD_CELL_IMAGES' three phases (modules/local/build_cell_images.nf), run
-after the Nextflow module's own `snakemake` invocation (phase 2, the one
+BUILD_CELL_IMAGES' three phases (the `build_cell_images` rule), run
+after the rule's own nested `snakemake` invocation (phase 2, the one
 step that still needs the separate `ops` conda env -- see the root
 `Dockerfile`) has materialized every tile's segmentation/reads/CellProfiler
 CSVs.
@@ -31,7 +31,8 @@ genotype values -- it now projects with polars via
 
 Until this stage's Docker image merged starcall-workflow's own `ops` conda
 env into this repo's main image (see the root `Dockerfile`), this logic
-lived in a standalone `modules/local/build_cell_images_glue.py` that
+lived in a standalone `modules/local/build_cell_images_glue.py` (since
+deleted) that
 deliberately avoided importing `fisseq_embeddings_pipeline`, because it ran
 inside a wholly separate container. That constraint no longer applies --
 this module runs like every other stage, via this repo's own installed
@@ -72,10 +73,15 @@ class BuildCellImagesTableConfig(AppConfig):
     output : str
         Output parquet filename (relative to `output_dir`). Defaults to
         ``"cell_table.parquet"``.
+    tiles_output : str
+        Output parquet filename (relative to `output_dir`) for the per-tile
+        image table -- see :func:`build_tiles_table`. Defaults to
+        ``"tiles.parquet"``.
     """
 
     manifest: str = "tiles_manifest.csv"
     output: str = "cell_table.parquet"
+    tiles_output: str = "tiles.parquet"
 
 
 def _read_indexed_csv(path: str) -> pd.DataFrame:
@@ -98,7 +104,7 @@ def build_tile_table(
     ----------
     segmentation_csv : str
         This tile's ``{segmentation_type}.csv`` (phenotyping_dir-rooted --
-        see ``build_cell_images.nf``'s Phase 1 comment on why
+        see `the `build_cell_images` rule`'s Phase 1 comment on why
         phenotyping_dir specifically, matching ``dataset.py``'s own
         existing, proven-working read path). Provides ``bbox_x1/y1/x2/y2``,
         ``orig_index``, ``mask8``, and this tile's own row index (renamed
@@ -134,7 +140,7 @@ def build_tile_table(
     ValueError
         If the segmentation and reads tables' ``tile_cell_index`` sets
         don't match exactly (index-value join -- see
-        ``build_cell_images.nf``'s module docstring), or if
+        `the `build_cell_images` rule`'s module docstring), or if
         ``cellprofiler_csv`` is given and its row count doesn't match the
         segmentation table's (row-position join).
     """
@@ -159,7 +165,7 @@ def build_tile_table(
             f"reads table {reads_csv!r} have different tile_cell_index "
             f"sets (segmentation-only: {sorted(seg_keys - reads_keys)}, "
             f"reads-only: {sorted(reads_keys - seg_keys)}) -- expected an "
-            "exact match (see build_cell_images.nf's module docstring on "
+            "exact match (see the `build_cell_images` rule's module docstring on "
             "the index-value join this relies on)."
         )
 
@@ -178,7 +184,7 @@ def build_tile_table(
                 f"{len(seg.index)} row(s) but CellProfiler output "
                 f"{cellprofiler_csv!r} has {len(cp.index)} row(s) -- the "
                 "row-position join this relies on requires equal row "
-                "counts (see build_cell_images.nf's module docstring)."
+                "counts (see the `build_cell_images` rule's module docstring)."
             )
         cp = cp.reset_index(drop=True)
         cp.columns = [f"cp_{c}" for c in cp.columns]
@@ -206,7 +212,7 @@ def build_cell_table(tiles: List[Dict[str, Any]]) -> pl.DataFrame:
     pl.DataFrame
         Concatenated ``how="diagonal_relaxed"`` across tiles -- schema
         legitimately varies per experiment (aux-table/CellProfiler columns
-        aren't fixed; see ``build_cell_images.nf``'s module docstring).
+        aren't fixed; see `the `build_cell_images` rule`'s module docstring).
         Empty (no columns) if ``tiles`` is empty.
     """
     frames = []
@@ -222,6 +228,30 @@ def build_cell_table(tiles: List[Dict[str, Any]]) -> pl.DataFrame:
     if not frames:
         return pl.DataFrame()
     return pl.concat(frames, how="diagonal_relaxed")
+
+
+TILES_SCHEMA: Dict[str, pl.DataType] = {
+    "well": pl.String,
+    "tile": pl.String,
+    "image_tif": pl.String,
+    "mask_tif": pl.String,
+}
+
+
+def build_tiles_table(tiles: List[Dict[str, Any]]) -> pl.DataFrame:
+    """One row per tile: where starcall-workflow left its whole-tile
+    phenotype image and segmentation mask.
+
+    BUILD_DATASET crops every cell out of these itself (see
+    ``dataset.py``'s ``crop_cell``). They're kept in a sidecar rather than
+    as ``cell_table.parquet`` columns so a tile-level fact isn't repeated
+    on every one of that tile's cell rows, and so ``cell_table.parquet``
+    stays purely per-cell.
+    """
+    return pl.DataFrame(
+        [{key: tile_info[key] for key in TILES_SCHEMA} for tile_info in tiles],
+        schema=TILES_SCHEMA,
+    )
 
 
 def _read_tiles_manifest(path: str) -> List[Dict[str, str]]:
@@ -247,7 +277,8 @@ def main(cfg: DictConfig) -> None:
         python -m fisseq_embeddings_pipeline.build_cell_images_table \\
             output_dir=./out \\
             manifest=tiles_manifest.csv \\
-            output=cell_table.parquet
+            output=cell_table.parquet \\
+            tiles_output=tiles.parquet
     """
     table_cfg: BuildCellImagesTableConfig = OmegaConf.to_object(cfg)
 
@@ -262,6 +293,7 @@ def main(cfg: DictConfig) -> None:
 
     output_path = output_dir / table_cfg.output
     table.write_parquet(output_path)
+    build_tiles_table(tiles).write_parquet(output_dir / table_cfg.tiles_output)
 
     logging.info(
         "Wrote %s (%d cell(s) across %d tile(s))",

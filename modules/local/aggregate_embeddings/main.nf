@@ -3,6 +3,8 @@
 // reconstructs filtered_lf itself via load_filtered_embeddings() before
 // aggregating.
 
+include { threadEnv } from '../functions'
+
 process AGGREGATE_EMBEDDINGS {
     errorStrategy 'ignore'
     label 'process_medium'
@@ -15,11 +17,9 @@ process AGGREGATE_EMBEDDINGS {
     output:
     tuple val(batch_stem), path("aggregate.parquet"), emit: aggregate
 
-    when:
-    task.ext.when == null || task.ext.when
-
     script:
     """
+    ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.aggregate \\
         output_dir=. \\
         embeddings_file=${embeddings_parquet} \\
@@ -27,6 +27,7 @@ process AGGREGATE_EMBEDDINGS {
         normalizer_file=${normalizer_parquet} \\
         label_column=${params.filter_label_column} \\
         'aggregators=[${params.aggregate_methods.join(",")}]' \\
+        feature_chunk_size=${params.aggregate_feature_chunk_size == null ? 'null' : params.aggregate_feature_chunk_size} \\
         random_seed=${params.random_seed}
     """
 }
