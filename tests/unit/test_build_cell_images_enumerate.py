@@ -239,3 +239,78 @@ def test_build_enumeration_includes_cellprofiler_target_when_enabled(tmp_path: P
     expected_cp = f"{tmp_path}/well1_grid4/tile0x0y/cellprofilercycle0_my_pipeline.csv"
     assert expected_cp in result["targets"]
     assert result["manifest_rows"][0]["cellprofiler_csv"] == expected_cp
+
+
+# ---------------------------------------------------------------------------
+# render_starcall_jobscript -- child-job image re-entry
+# ---------------------------------------------------------------------------
+
+
+def _fill(template: str, exec_job: str = "cd /work && python -m snakemake x") -> str:
+    """What snakemake 7's ClusterExecutor.write_jobscript does."""
+    return template.format(properties='{"rule": "r"}', exec_job=exec_job)
+
+
+def test_render_starcall_jobscript_formats_like_snakemake():
+    script = mod.render_starcall_jobscript(
+        "apptainer", "/imgs/pipe.sif", ["/data", "/work"], gpu=False
+    )
+    filled = _fill(script)
+    assert filled.startswith("#!/bin/sh\n# properties = {")
+    assert (
+        "exec apptainer exec --bind /data:/data,/work:/work /imgs/pipe.sif /bin/sh"
+        in filled
+    )
+    assert filled.rstrip().endswith("cd /work && python -m snakemake x")
+    assert "--nv" not in filled
+
+
+def test_render_starcall_jobscript_passes_nv_for_gpu():
+    script = mod.render_starcall_jobscript("singularity", "/i.sif", ["/d"], gpu=True)
+    assert "exec singularity exec --nv --bind /d:/d /i.sif" in _fill(script)
+
+
+def test_render_starcall_jobscript_quotes_paths_with_spaces():
+    script = mod.render_starcall_jobscript(
+        "apptainer", "/my imgs/p.sif", ["/a b"], False
+    )
+    assert "'/a b:/a b' '/my imgs/p.sif'" in _fill(script)
+
+
+def test_render_starcall_jobscript_rejects_braces():
+    with pytest.raises(ValueError, match="brace"):
+        mod.render_starcall_jobscript("apptainer", "/i.sif", ["/data/{x}"], False)
+
+
+def test_render_starcall_jobscript_reenters_image_once(tmp_path: Path):
+    """Run the rendered script for real, with a fake container runtime
+    that just runs its trailing command: the job body runs exactly once,
+    inside the 'image'."""
+    fake_bin = tmp_path / "fakeapptainer"
+    # Drop "exec [--nv] --bind X IMAGE" and run the rest.
+    fake_bin.write_text(
+        '#!/bin/sh\nshift\n[ "$1" = --nv ] && shift\nshift 3\n'
+        'echo entered >> "$LOG"\nexec "$@"\n'
+    )
+    fake_bin.chmod(0o755)
+    script = mod.render_starcall_jobscript(str(fake_bin), "/i.sif", ["/d"], False)
+    jobscript = tmp_path / "job.sh"
+    jobscript.write_text(_fill(script, exec_job='echo ran >> "$LOG"'))
+
+    import os
+    import subprocess
+
+    log = tmp_path / "log"
+    env = {**os.environ, "LOG": str(log)}
+    env.pop("FISSEQ_STARCALL_IN_IMAGE", None)
+    subprocess.run(["/bin/sh", str(jobscript)], check=True, env=env)
+    assert log.read_text().split() == ["entered", "ran"]
+
+
+def test_jobscript_bind_paths_includes_cwd_and_dedupes():
+    binds = mod.jobscript_bind_paths(
+        {"phenotyping_dir": "/s/p", "sequencing_dir": "/s/q"},
+        ["/s/p", "/cache"],
+        "/work/ab/123",
+    )
+    assert binds == ["/cache", "/s/p", "/s/q", "/work/ab/123"]

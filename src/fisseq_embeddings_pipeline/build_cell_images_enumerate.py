@@ -22,6 +22,10 @@ starcall-workflow's own `phenotyping_dir` tree, then writes:
 - `manifest_out`: a CSV (`well,tile,segmentation_csv,reads_csv,
   cellprofiler_csv,image_tif,mask_tif`) driving phase 3
   (`build_cell_images_table.py`).
+- `jobscript_out`, only when `starcall_job_image` is set (i.e. the run
+  passes a `starcall_profile` for per-rule cluster submission): the
+  `--jobscript` template every starcall child job runs through. See
+  :func:`render_starcall_jobscript`.
 
 Until this stage's Docker image merged starcall-workflow's own `ops` conda
 env into this repo's main image (see the root `Dockerfile`), this logic
@@ -67,6 +71,7 @@ import logging
 import os
 import pathlib
 import re
+import shlex
 from typing import Any, Dict, List, Optional
 
 import hydra
@@ -158,6 +163,20 @@ class BuildCellImagesEnumerateConfig(AppConfig):
         set. Default to ``""``.
     targets_out, manifest_out : str
         Output filenames, written under `output_dir`.
+    starcall_job_image : str or None
+        The image file (a ``.sif``) each starcall child job re-enters. Set
+        only in cluster mode; when set, `jobscript_out` is written.
+    starcall_container_bin : str
+        The container runtime a child job re-enters the image with.
+        Defaults to ``"apptainer"``; some nodes only ship ``singularity``.
+    starcall_job_gpu : bool
+        Pass ``--nv`` to that runtime. Apptainer only warns on a node with
+        no GPU, so this is safe to leave on. Defaults to ``False``.
+    jobscript_binds : list[str]
+        Extra host paths to bind into each child job, on top of the ones
+        this stage derives itself (see :func:`jobscript_bind_paths`).
+    jobscript_out : str
+        Output filename for the jobscript, written under `output_dir`.
     resolved_dirs_out : str
         Output filename (under `output_dir`) for the fully-resolved
         `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` -- a
@@ -181,6 +200,11 @@ class BuildCellImagesEnumerateConfig(AppConfig):
     cellprofiler_pipeline: str = ""
     targets_out: str = "targets.txt"
     manifest_out: str = "tiles_manifest.csv"
+    starcall_job_image: Optional[str] = None
+    starcall_container_bin: str = "apptainer"
+    starcall_job_gpu: bool = False
+    jobscript_binds: List[str] = dataclasses.field(default_factory=list)
+    jobscript_out: str = "starcall_jobscript.sh"
     resolved_dirs_out: str = "resolved_dirs.env"
 
 
@@ -384,6 +408,62 @@ def build_enumeration(
     return {"targets": targets, "manifest_rows": manifest_rows}
 
 
+def jobscript_bind_paths(
+    resolved_dirs: Dict[str, str], extra: List[str], cwd: str
+) -> List[str]:
+    """Every host path a starcall child job can touch, deduplicated.
+
+    ``cwd`` is not optional: snakemake prefixes every cluster job with
+    ``cd <the directory the submitter was launched from>``
+    (``ClusterExecutor.get_job_exec_prefix``), which is the task's own work
+    directory, not ``--directory``.
+    """
+    return sorted({*resolved_dirs.values(), *extra, cwd})
+
+
+def render_starcall_jobscript(
+    container_bin: str, image: str, binds: List[str], gpu: bool
+) -> str:
+    """The ``--jobscript`` template each starcall child job runs through.
+
+    A child job lands on a bare node, but its snakemake command
+    (``{exec_job}``) names the image's own ops-env interpreter, and
+    starcall's ``run:`` rule bodies execute inside that interpreter -- so
+    the job has to run inside the pipeline image. The script re-executes
+    itself there once (guarded by an environment variable, which Apptainer
+    passes through by default), then runs the job as usual.
+
+    Every path is bound at its own unchanged location because starcall's
+    rules build output paths by concatenating strings onto phenotyping_dir
+    and friends: a path that merely reaches the data isn't enough.
+
+    Snakemake fills in ``{properties}``/``{exec_job}`` with ``str.format``,
+    so the script must contain no other braces.
+    """
+    bind_arg = ",".join(f"{p}:{p}" for p in binds)
+    runtime_args = ["exec"]
+    if gpu:
+        runtime_args.append("--nv")
+    runtime_args += ["--bind", bind_arg, image]
+    command = " ".join(shlex.quote(a) for a in [container_bin, *runtime_args])
+    script = f"""#!/bin/sh
+# properties = {{properties}}
+# Written by fisseq_embeddings_pipeline.build_cell_images_enumerate.
+if [ -z "$FISSEQ_STARCALL_IN_IMAGE" ]; then
+    FISSEQ_STARCALL_IN_IMAGE=1
+    export FISSEQ_STARCALL_IN_IMAGE
+    exec {command} /bin/sh "$0" "$@"
+fi
+{{exec_job}}
+"""
+    if "{" in script.replace("{properties}", "").replace("{exec_job}", ""):
+        raise ValueError(
+            "starcall jobscript would contain a literal brace (from a bind path "
+            f"or image name), which snakemake's str.format would reject: {script!r}"
+        )
+    return script
+
+
 _cs = ConfigStore.instance()
 _cs.store(name="build_cell_images_enumerate_main", node=BuildCellImagesEnumerateConfig)
 
@@ -450,6 +530,24 @@ def main(cfg: DictConfig) -> None:
         writer = csv.DictWriter(f, fieldnames=_MANIFEST_FIELDNAMES)
         writer.writeheader()
         writer.writerows(result["manifest_rows"])
+
+    if enum_cfg.starcall_job_image:
+        binds = jobscript_bind_paths(
+            resolved_dirs,
+            list(enum_cfg.jobscript_binds),
+            os.path.abspath(os.getcwd()),
+        )
+        jobscript_path = output_dir / enum_cfg.jobscript_out
+        jobscript_path.write_text(
+            render_starcall_jobscript(
+                enum_cfg.starcall_container_bin,
+                enum_cfg.starcall_job_image,
+                binds,
+                enum_cfg.starcall_job_gpu,
+            )
+        )
+        jobscript_path.chmod(0o755)
+        logging.info("Wrote starcall jobscript %s (binds: %s)", jobscript_path, binds)
 
     logging.info(
         "Enumerated %d tile(s) across %d well(s); wrote %d Snakemake target(s) to %s",

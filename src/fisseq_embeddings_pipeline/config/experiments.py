@@ -1,12 +1,14 @@
 """Validation and per-experiment field routing for ``params.yaml``.
 
-Ported from ``config/experiments.py``'s Groovy (deleted in the Snakemake
-rewrite), which validated ``params.experiments`` inline and routed each
-entry's keys to the stage(s) that own them via three disjoint
-include/exclude sets. Living here instead of inside a ``.smk`` file makes
-that logic ordinary, unit-testable Python -- it never was, in Groovy.
+The workflow's first task (``PLAN_EXPERIMENTS``, ``modules/local/
+plan_experiments``) runs this module's :func:`main` over the run's params,
+serialized to JSON, and gets back one plan per experiment: every stage's
+Hydra override string, already rendered. Keeping validation and routing
+here rather than in ``workflows/embeddings.nf``'s Groovy makes it ordinary,
+unit-testable Python, and running it as a task (rather than at workflow
+parse time) means it runs inside the pipeline image like everything else.
 
-The routing contract, unchanged from the Nextflow version:
+The routing contract:
 
 - ``BUILD_CELL_IMAGES`` is the only stage that touches starcall-workflow's
   tree, so every starcall-facing key (:data:`CELL_IMAGES_FIELDS`) routes
@@ -23,7 +25,10 @@ The routing contract, unchanged from the Nextflow version:
   cuts each cell at.
 """
 
-from typing import Any, Dict, List, Mapping
+import argparse
+import json
+import sys
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 #: Keys routed to ``BUILD_CELL_IMAGES`` only -- the starcall-workflow-facing
 #: fields plus the three ``cp_features``-related ones it folds into
@@ -67,13 +72,12 @@ def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
 
     Fails fast with a specific message for every required-with-no-default
     param, rather than letting a missing-key error surface deep inside a
-    rule. Mirrors ``config/experiments.py``'s own validation block.
+    task.
 
     Parameters
     ----------
     config : Mapping[str, Any]
-        Snakemake's ``config`` dict (``params.yaml`` plus any ``--config``
-        overrides).
+        The run's params (``params.yaml`` plus any command-line overrides).
 
     Returns
     -------
@@ -93,7 +97,7 @@ def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
         below 2.
     """
     if config.get("pipeline_dir") is None:
-        raise ValueError("pipeline_dir is required (--config pipeline_dir=...).")
+        raise ValueError("pipeline_dir is required (--pipeline_dir ...).")
     if config.get("cell_dino_checkpoint") is None:
         raise ValueError(
             "cell_dino_checkpoint is required (path to a Cell-DINO .pth checkpoint)."
@@ -131,6 +135,7 @@ def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
 
     _validate_aggregate_methods(config)
     _validate_reproducibility(config)
+    _validate_starcall_profile(config)
 
     return [dict(entry) for entry in experiments]
 
@@ -139,11 +144,11 @@ def _validate_aggregate_methods(config: Mapping[str, Any]) -> None:
     """
     Check both aggregator lists name real aggregators and stay disjoint.
 
-    Validated here, at parse time, rather than being left to each stage's
-    own Hydra config: the method names are interpolated straight into a
-    rule's shell command and into its output paths, so a bad entry
-    otherwise surfaces as a confusing Snakemake wildcard or a shell-level
-    failure long before any Python validation could fire. This is the
+    Validated here, up front, rather than being left to each stage's own
+    Hydra config: the method names are interpolated straight into task
+    scripts and publish paths, so a bad entry otherwise surfaces as a
+    shell-level failure deep in the fan-out long before any Python
+    validation could fire. This is the
     Python counterpart of the ``aggregatorKeys()`` check
     fisseq-data-pipeline does in Groovy.
     """
@@ -228,6 +233,18 @@ def _validate_reproducibility(config: Mapping[str, Any]) -> None:
         )
 
 
+def _validate_starcall_profile(config: Mapping[str, Any]) -> None:
+    """``starcall_profile`` turns on per-rule cluster submission for the
+    nested starcall run, whose child jobs must re-enter the pipeline image
+    on their own node -- so they need a real image file to re-enter."""
+    if config.get("starcall_profile") and not config.get("starcall_job_image"):
+        raise ValueError(
+            "starcall_job_image is required when starcall_profile is set: every "
+            "starcall child job re-enters the pipeline image from it (a local "
+            ".sif path on storage the compute nodes can read)."
+        )
+
+
 def _with_fallbacks(
     overrides: Dict[str, Any], config: Mapping[str, Any], keys: "tuple[str, ...]"
 ) -> Dict[str, Any]:
@@ -260,7 +277,7 @@ def dataset_overrides(
 
     Everything the starcall-facing set and :data:`_NON_STAGE_FIELDS` don't
     claim, with the ``window`` global fallback applied. ``cell_images_dir``
-    is injected by the rule, not here.
+    is injected by the workflow, not here.
     """
     excluded = CELL_IMAGES_FIELDS | _NON_STAGE_FIELDS
     overrides = {k: v for k, v in entry.items() if k not in excluded}
@@ -305,3 +322,79 @@ def hydra_overrides(mapping: Mapping[str, Any]) -> str:
         else:
             parts.append(f"{key}={value}")
     return " ".join(parts)
+
+
+def _starcall_bind_paths(entry: Mapping[str, Any]) -> List[str]:
+    """Host paths BUILD_CELL_IMAGES' container must see for this experiment:
+    the starcall checkout and any data dir set explicitly. A data dir
+    resolved from the project's own config.yaml to somewhere outside the
+    checkout isn't known here -- bind it via the site config instead."""
+    keys = (
+        "starcall_workflow_dir",
+        "phenotyping_dir",
+        "segmentation_dir",
+        "sequencing_dir",
+    )
+    return [str(entry[k]) for k in keys if entry.get(k)]
+
+
+def plan_experiments(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Validate ``config`` and render each experiment's per-stage overrides.
+
+    Returns
+    -------
+    list[dict]
+        One dict per experiment, in ``experiments:`` order: ``batch_stem``,
+        ``cp_features`` (bool), ``starcall_workflow_dir``, ``bind_paths``
+        (see :func:`_starcall_bind_paths`), and ``cell_images_args``/
+        ``dataset_args``/``cp_features_args`` -- Hydra override strings for
+        BUILD_CELL_IMAGES' enumerate phase, BUILD_DATASET and
+        BUILD_CP_FEATURES.
+    """
+    plans = []
+    for entry in validate_config(config):
+        plans.append(
+            {
+                "batch_stem": entry["batch_stem"],
+                "cp_features": bool(entry.get("cp_features", False)),
+                "starcall_workflow_dir": str(entry.get("starcall_workflow_dir", "")),
+                "bind_paths": _starcall_bind_paths(entry),
+                "cell_images_args": hydra_overrides(
+                    cell_images_overrides(entry, config)
+                ),
+                "dataset_args": hydra_overrides(dataset_overrides(entry, config)),
+                "cp_features_args": hydra_overrides(
+                    cp_features_overrides(entry, config)
+                ),
+            }
+        )
+    return plans
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """``python -m fisseq_embeddings_pipeline.config.experiments PARAMS OUT``.
+
+    Reads the run's params as JSON, writes the plan list (see
+    :func:`plan_experiments`) as JSON. A validation failure prints just its
+    message and exits 1, so it reads cleanly in the Nextflow task log.
+    """
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("params_json", help="The run's params, as JSON.")
+    parser.add_argument("output_json", help="Where to write the experiment plans.")
+    args = parser.parse_args(argv)
+
+    with open(args.params_json) as f:
+        config = json.load(f)
+    try:
+        plans = plan_experiments(config)
+    except ValueError as err:
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 1
+    with open(args.output_json, "w") as f:
+        json.dump(plans, f, indent=2)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

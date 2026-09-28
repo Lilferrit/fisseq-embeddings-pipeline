@@ -1,9 +1,8 @@
 """Tests for config/experiments.py -- params.yaml validation and the
 per-experiment field routing.
 
-This logic lived in Groovy (``workflows/embeddings.nf``) before the
-Snakemake rewrite and was only ever exercised end to end by the integration
-suite. These tests pin each validation error and each routing set directly.
+The workflow runs this module as its first task (PLAN_EXPERIMENTS). These
+tests pin each validation error and each routing set directly.
 """
 
 from __future__ import annotations
@@ -16,6 +15,8 @@ from fisseq_embeddings_pipeline.config.experiments import (
     cp_features_overrides,
     dataset_overrides,
     hydra_overrides,
+    main,
+    plan_experiments,
     validate_config,
 )
 
@@ -27,7 +28,7 @@ def _config(**overrides):
     params.yaml rather than being required-with-no-default like
     pipeline_dir, but validate_config still insists on them being present:
     a config without them is a config params.yaml was never loaded into,
-    and every rule in the reproducibility chain interpolates them straight
+    and every task in the reproducibility chain interpolates them straight
     into a shell command or an output path.
     """
     config = {
@@ -277,3 +278,63 @@ def test_hydra_overrides_lowercases_booleans():
 
 def test_hydra_overrides_empty_mapping_is_empty_string():
     assert hydra_overrides({}) == ""
+
+
+# ── starcall_profile ───────────────────────────────────────────────────────
+
+
+def test_starcall_profile_requires_job_image():
+    with pytest.raises(ValueError, match="starcall_job_image is required"):
+        validate_config(_config(starcall_profile="/profiles/sge"))
+    validate_config(
+        _config(starcall_profile="/profiles/sge", starcall_job_image="/imgs/p.sif")
+    )
+
+
+# ── plan_experiments / main ────────────────────────────────────────────────
+
+
+def test_plan_experiments_renders_each_stage_override():
+    config = _config(
+        window=224,
+        cellprofiler_pipeline="pipe",
+        experiments=[
+            {
+                "batch_stem": "expt1",
+                "starcall_workflow_dir": "/data/e1",
+                "sequencing_dir": "/seq/e1",
+                "wells": ["w1", "w2"],
+                "cp_features": True,
+                "shard_maxcount": 500,
+            },
+            {"batch_stem": "expt2", "starcall_workflow_dir": "/data/e2"},
+        ],
+    )
+    plans = plan_experiments(config)
+
+    assert [p["batch_stem"] for p in plans] == ["expt1", "expt2"]
+    first = plans[0]
+    assert first["cp_features"] is True and plans[1]["cp_features"] is False
+    assert first["starcall_workflow_dir"] == "/data/e1"
+    assert first["bind_paths"] == ["/data/e1", "/seq/e1"]
+    assert "'wells=[w1,w2]'" in first["cell_images_args"]
+    assert "cp_features=true" in first["cell_images_args"]
+    assert "cellprofiler_pipeline=pipe" in first["cell_images_args"]
+    assert "window" not in first["cell_images_args"]
+    assert first["dataset_args"] == "shard_maxcount=500 window=224"
+    assert first["cp_features_args"] == "shard_maxcount=500"
+
+
+def test_main_writes_plans_and_reports_validation_errors(tmp_path, capsys):
+    import json
+
+    params = tmp_path / "params.json"
+    out = tmp_path / "plans.json"
+    params.write_text(json.dumps(_config()))
+    assert main([str(params), str(out)]) == 0
+    assert json.loads(out.read_text())[0]["batch_stem"] == "expt1"
+
+    params.write_text(json.dumps(_config(pipeline_dir=None)))
+    assert main([str(params), str(tmp_path / "never.json")]) == 1
+    assert "ERROR: pipeline_dir is required" in capsys.readouterr().err
+    assert not (tmp_path / "never.json").exists()

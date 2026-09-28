@@ -1,8 +1,8 @@
 name: PR Checks
 
-# Runs on every pull request against main: unit tests, the Snakemake
-# integration suite, and lint. The suite runs uncontainerized (no image
-# needed), and EMBED_CELLS' GPU/checkpoint dependency runs against a
+# Runs on every pull request against main: unit tests, the Nextflow
+# integration suite, and lint. `-profile local` (nextflow.config) needs no
+# Docker image, and EMBED_CELLS' GPU/checkpoint dependency runs against a
 # tiny CPU-only stub checkpoint the integration fixture builds itself (see
 # AGENTS.md's Testing section) -- so the whole suite is cheap and
 # dependency-free enough to run on every PR, not gated to a slower
@@ -52,12 +52,24 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
-      # The integration suite drives the real pipeline
-      # (tests/integration/test_integration.py) uncontainerized -- no image
-      # needed; the containerized real-starcall test is skipped unless
-      # --container is passed, which it isn't here. Snakemake is an ordinary
-      # dependency installed by `uv sync` above, so this job has no
-      # non-Python setup step at all any more.
+      # The integration suite drives the real Nextflow pipeline
+      # (tests/integration/test_integration.py, -profile local -- no
+      # Docker image needed; the containerized real-starcall test is
+      # skipped unless --container is passed, which it isn't here);
+      # without nextflow on PATH it's skipped
+      # entirely (conftest.py's collection hook), but install it so the suite actually
+      # runs, not just no-ops green.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: "latest-stable"
+
       - name: Run integration tests
         run: uv run pytest tests/integration
 

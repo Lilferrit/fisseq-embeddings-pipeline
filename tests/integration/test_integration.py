@@ -1,60 +1,43 @@
-"""Integration tests for the Snakemake pipeline. Modeled on
+"""Integration tests for the Nextflow pipeline. Modeled on
 fisseq-data-pipeline's tests/integration/test_integration.py: a synthetic
-fixture, a subprocess-driven `snakemake` run of the real pipeline
-end-to-end, and output-file/column assertions against the result -- not a
-mock of any individual stage.
+fixture, a subprocess-driven `nextflow run` of the real pipeline end to
+end, and output-file/column assertions against the result -- not a mock of
+any individual stage.
 
 TWO MODES, mutually exclusive, selected by tests/integration/conftest.py's
 `--container` flag (see that file for why they can't run together):
 
-- `pytest tests/integration` -- the synthetic suite, uncontainerized, with
-  the nested starcall `snakemake` stubbed. What CI runs.
-- `pytest tests/integration --container` -- only
-  `test_real_starcall_pipeline_produces_cell_images` (marked `container`),
-  the containerized real-starcall test at the bottom of this file.
+- `pytest tests/integration` -- the synthetic suite, `-profile local` (no
+  container), with the nested starcall `snakemake` stubbed. What CI runs.
+- `pytest tests/integration --container` -- only the tests marked
+  `container`: a real, containerized starcall run on a tiny real-data
+  fixture, at the bottom of this file.
 
-Every test here is skipped automatically whenever snakemake isn't
-importable -- centralized in conftest.py's collection hook, not repeated
-per test. Running uncontainerized is what makes the synthetic suite work
-without a built image: every rule runs `python -m
-fisseq_embeddings_pipeline.<module>` directly against this repo's own venv,
-not `fisseq-embeddings-pipeline:latest`.
+Every test here is skipped automatically whenever `nextflow` isn't on PATH
+-- centralized in conftest.py's collection hook. `-profile local` is what
+makes the synthetic suite work without a built image: every task runs
+`python -m fisseq_embeddings_pipeline.<module>` directly against this
+repo's own venv.
 
 EMBED_CELLS (the one GPU-bound, real-checkpoint-dependent stage) is
-exercised here via a from-scratch, randomly-initialized vit_small
-checkpoint saved to a temp file, `device=cpu`, matching the precedent
-already established at the unit-test level in tests/unit/test_embed.py's
-`test_main_runs_end_to_end_via_cli`. This exercises the wrapper's real
-control flow (weight loading, forward pass, shape handling), not
-Cell-DINO's actual pretrained-checkpoint output quality.
+exercised via a from-scratch, randomly-initialized vit_small checkpoint
+saved to a temp file, `device=cpu` -- the wrapper's real control flow
+(weight loading, forward pass, shape handling), not Cell-DINO's actual
+pretrained-checkpoint output quality.
 
-BUILD_CELL_IMAGES (the one stage that shells out to a real `snakemake`
-binary against a real starcall-workflow checkout) is exercised here via a
-stub `snakemake` executable prepended onto PATH -- not by bypassing the
-real rule. The synthetic fixture pre-populates a starcall-workflow-shaped
-phenotyping_dir/sequencing_dir tree directly (the way a real `snakemake`
-invocation would have left it: per-tile cell/reads tables plus the
-whole-tile phenotype image and segmentation mask, which survive because
-they're requested as targets), and the stub simply exits 0 without
-touching the filesystem, standing in for "every requested target is already
-up to date". This exercises build_cell_images' own real tile-enumeration
-and cell_table.parquet-building logic end to end
-through the real Snakemake/Hydra plumbing -- only the external
-`snakemake`/starcall-workflow dependency itself (unavailable in CI, and the
-root Dockerfile's own `ops` conda env -- which real rule execution would
-run in -- is unvalidated) is faked, matching the same "fake the
-expensive/external dependency, exercise real control flow elsewhere"
-precedent EMBED_CELLS' checkpoint fixture already sets.
-
-The stub works because the NESTED invocation resolves `snakemake` by name
-(params.yaml's `snakemake_bin`, bare `snakemake` by default), while the
-OUTER snakemake is invoked as `sys.executable -m snakemake` and so bypasses
-PATH entirely -- see `_run_snakemake`.
+BUILD_CELL_IMAGES' nested starcall `snakemake` is a stub prepended onto
+PATH (under `-profile local`, `process.ext.snakemake_bin` is bare
+`snakemake`). The synthetic fixture pre-populates a starcall-shaped
+phenotyping_dir/sequencing_dir tree the way a real run would have left it
+-- per-tile cell/reads tables plus the whole-tile phenotype image and
+segmentation mask -- and the stub records its argv and exits 0, standing in
+for "every requested target is already up to date". So tile enumeration,
+the table build and the dataset crop all run for real; only
+starcall-workflow itself is faked.
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import stat
@@ -94,22 +77,30 @@ _VARIANTS = {
     "M1K": ("bc_mis_{i}", 2, 3),
 }
 
-_EXTRA_PARAMS = [
-    # Passed after a single `--config`, which overrides --configfile values.
-    "barcode_count_threshold=2",
-    "variant_barcode_count_threshold=2",
-    "edit_distance_threshold=5",
-    "ovwt_n_folds=2",
-    "ovwt_calibrate=false",
-    "ovwt_min_cells=2",
-    "ovwt_downsample_wt=false",
-    "cell_dino_arch=vit_small",
-    "cell_dino_patch_size=16",
-    f"cell_dino_crop_size={_WINDOW}",
-    "cell_dino_device=cpu",
-    "cell_dino_batch_size=4",
-    "cell_dino_num_workers=0",
-]
+# Every threshold lowered to match this fixture's small size. Passed as
+# `--key value` pairs, which win over -params-file.
+_EXTRA_PARAMS = {
+    "barcode_count_threshold": 2,
+    "variant_barcode_count_threshold": 2,
+    "edit_distance_threshold": 5,
+    "ovwt_n_folds": 2,
+    "ovwt_calibrate": "false",
+    "ovwt_min_cells": 2,
+    "ovwt_downsample_wt": "false",
+    "cell_dino_arch": "vit_small",
+    "cell_dino_patch_size": 16,
+    "cell_dino_crop_size": _WINDOW,
+    "cell_dino_device": "cpu",
+    "cell_dino_batch_size": 4,
+    "cell_dino_num_workers": 0,
+}
+
+
+def _nf_params(params: dict) -> list[str]:
+    return [
+        token for key, value in params.items() for token in (f"--{key}", str(value))
+    ]
+
 
 _STUB_SNAKEMAKE_SCRIPT = """#!/bin/sh
 # Stub snakemake for integration testing: the fixture that invokes this
@@ -119,11 +110,10 @@ _STUB_SNAKEMAKE_SCRIPT = """#!/bin/sh
 # already up to date". See this test module's own docstring.
 echo "stub snakemake invoked: $*" >&2
 # Record the full argv so a test can assert on the command line
-# BUILD_CELL_IMAGES actually built -- the flags are the whole point of the
-# cluster-submission knob (task.ext.snakemake_cluster_args), and nothing
-# else in this suite can see them. Gated on the env var so every existing
-# test's behaviour is unchanged when it isn't set. One line per invocation,
-# appended, since a multi-experiment run invokes this stub once per batch.
+# BUILD_CELL_IMAGES actually built -- local vs profile mode is decided
+# entirely by those flags, and nothing else in this suite can see them. One
+# line per invocation, appended: each batch invokes it twice (--unlock,
+# then the real run).
 if [ -n "${SNAKEMAKE_STUB_ARGV_LOG:-}" ]; then
     echo "$*" >> "$SNAKEMAKE_STUB_ARGV_LOG"
 fi
@@ -138,65 +128,13 @@ def _write_stub_snakemake(bin_dir: Path) -> None:
     script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
-_FAILING_PYTHON_STUB = """#!/bin/sh
-# Fails exactly one pipeline stage and passes everything else through to the
-# real interpreter, so a rule can be made to fail without corrupting its
-# inputs. $FISSEQ_REAL_PYTHON is exported by _run_snakemake.
-case " $* " in
-    *" fisseq_embeddings_pipeline.%(module)s "*) exit 1 ;;
-esac
-exec "$FISSEQ_REAL_PYTHON" "$@"
-"""
-
-
-def _write_failing_python_stub(bin_dir: Path, module: str) -> None:
-    """Put a `python` on PATH that fails one stage's invocation.
-
-    Under Nextflow this test layered an extra `-c` config setting
-    `beforeScript = 'exit 1'` on one process. Snakemake has no per-rule
-    beforeScript, so use the same stub-on-PATH idiom the stub snakemake
-    already establishes. Every rule invokes bare `python`, so this fails
-    precisely the named stage; the outer snakemake is run as
-    `sys.executable -m snakemake` and is unaffected.
-    """
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    script = bin_dir / "python"
-    script.write_text(_FAILING_PYTHON_STUB % {"module": module})
-    script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-
-
-def _cluster_config(
-    *,
-    with_host_overrides: bool = True,
-    snakemake_cluster_cores: int | None = None,
-    apptainer_prefix: str | None = None,
-    cluster_env: str | None = None,
-) -> tuple[str, ...]:
-    """The `--config` tokens that opt build_cell_images into per-rule cluster
-    submission.
-
-    Under Nextflow these were `process.ext.*` directives and each test had to
-    write a whole `-c` config file layering a `withName:` block; they're
-    ordinary config keys now, so this is just a token list. A harmless
-    `--cluster "echo"` stands in for a real scheduler command -- the stub
-    snakemake never acts on any of it, so these tests assert on the command
-    line the rule *builds*, which is the part this repo owns.
-    """
-    tokens = ['snakemake_cluster_args=--cluster "echo" --jobs 3']
-    if with_host_overrides:
-        # The per-rule job wrapper runs outside any container, so this is a
-        # host path -- here, just this repo's own checked-out copy.
-        tokens.append(
-            "starcall_host_overrides_dir="
-            f"{_PROJECT_ROOT / 'resources' / 'starcall_overrides'}"
-        )
-    if snakemake_cluster_cores is not None:
-        tokens.append(f"snakemake_cluster_cores={snakemake_cluster_cores}")
-    if apptainer_prefix is not None:
-        tokens.append(f"apptainer_prefix={apptainer_prefix}")
-    if cluster_env is not None:
-        tokens.append(f"starcall_cluster_env={cluster_env}")
-    return tuple(tokens)
+def _write_failing_process_config(path: Path, process_name: str) -> Path:
+    """A `-c` config that makes exactly one process fail before its script
+    runs, without corrupting any input."""
+    path.write_text(
+        f"process {{ withName: '{process_name}' {{ beforeScript = 'exit 1' }} }}\n"
+    )
+    return path
 
 
 _TILE_SIZE = 128
@@ -319,7 +257,7 @@ def _write_synthetic_experiment(
     starcall-workflow's own default-config.yaml naming) and omits all
     three keys from the experiment entry, exercising build_cell_images.nf's
     default-to-subdirectory-of-starcall_workflow_dir behavior through the
-    real Snakemake/Hydra plumbing, not just by construction.
+    real Nextflow/Hydra plumbing, not just by construction.
 
     project_config_dir_names, e.g. {"phenotyping_dir": "custom_pheno"},
     writes a starcall-workflow-shaped `config.yaml` under
@@ -328,7 +266,7 @@ def _write_synthetic_experiment(
     the plain defaults, and (like omit_data_dirs) omits the corresponding
     keys from the experiment entry -- exercising
     build_cell_images_enumerate.py's resolve_data_dir reading a project's
-    own config.yaml through the real Snakemake/Hydra plumbing, not just a
+    own config.yaml through the real Nextflow/Hydra plumbing, not just a
     bare subdirectory-name default. Implies omit_data_dirs semantics for
     any key it sets; segmentation_dir (unused by the stub) is left at its
     plain default either way.
@@ -437,63 +375,57 @@ def _write_tiny_checkpoint(path: Path) -> None:
     torch.save({"teacher": reference.state_dict()}, path)
 
 
-def _run_snakemake(
+def _run_nextflow(
     exp_dir: Path,
-    checkpoint_path: Path,
+    checkpoint_path: Path | None,
     extra_args: tuple[str, ...] = (),
-    extra_config: tuple[str, ...] = (),
+    extra_params: dict | None = None,
+    params_file: Path | None = None,
+    profile: str = "local",
+    timeout: int = 900,
+    env_overrides: dict | None = None,
 ) -> subprocess.CompletedProcess:
-    """Shared `snakemake` invocation, factored out of `pipeline_outputs` so
-    `reproducibility_outputs` (below) can drive two independent, fully
+    """Shared `nextflow run` invocation, factored out of `pipeline_outputs`
+    so `reproducibility_outputs` (below) can drive two independent, fully
     from-scratch runs against two separate `pipeline_dir`s with identical
-    config (including `random_seed`) -- not two invocations sharing one
-    `pipeline_dir`, where the second would simply find every output already
-    up to date instead of genuinely recomputing them.
+    params (including `random_seed`) -- never `-resume`, so the second run
+    genuinely recomputes.
 
     PATH is prepended with exp_dir's own stub_bin/ (written by
-    _write_synthetic_experiment) so build_cell_images' NESTED `snakemake`
-    invocation resolves to the stub rather than a real starcall run -- see
-    this module's own docstring.
+    _write_synthetic_experiment) so BUILD_CELL_IMAGES' nested `snakemake`
+    resolves to the stub -- see this module's own docstring.
 
-    The OUTER snakemake is deliberately invoked as `sys.executable -m
-    snakemake`, never as bare "snakemake": bare would resolve through that
-    same stubbed PATH and exit 0 without running the pipeline at all.
-
-    extra_args are appended verbatim; extra_config adds `key=value` tokens to
-    the single --config this builds.
+    extra_args are appended verbatim (e.g. an extra `-c <config>`);
+    extra_params are `--key value` overrides on top of _EXTRA_PARAMS.
     """
-    params_yaml = exp_dir / "params.yaml"
+    params_file = params_file or exp_dir / "params.yaml"
     env = os.environ.copy()
     env["PATH"] = f"{exp_dir / 'stub_bin'}{os.pathsep}{env.get('PATH', '')}"
     # Where the stub snakemake appends each invocation's argv (see
-    # _STUB_SNAKEMAKE_SCRIPT). Always set, so any test can read it; tests
-    # that don't care simply never look at the file.
+    # _STUB_SNAKEMAKE_SCRIPT). Always set, so any test can read it.
     env["SNAKEMAKE_STUB_ARGV_LOG"] = str(exp_dir / "stub_snakemake_argv.log")
-    # So a stubbed `python` can still reach the real interpreter (see
-    # _write_failing_python_stub).
-    env["FISSEQ_REAL_PYTHON"] = sys.executable
+    env.update(env_overrides or {})
+    params = {"pipeline_dir": exp_dir, **_EXTRA_PARAMS, **(extra_params or {})}
+    if checkpoint_path is not None:
+        params["cell_dino_checkpoint"] = checkpoint_path
     return subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "snakemake",
-            "--snakefile",
-            str(_PROJECT_ROOT / "workflow" / "Snakefile"),
-            "--configfile",
-            str(params_yaml),
-            "--cores",
-            "1",
-            "--config",
-            f"pipeline_dir={exp_dir}",
-            f"cell_dino_checkpoint={checkpoint_path}",
-            *_EXTRA_PARAMS,
-            *extra_config,
+            "nextflow",
+            "run",
+            str(_PROJECT_ROOT),
+            "-ansi-log",
+            "false",
+            "-profile",
+            profile,
+            "-params-file",
+            str(params_file),
+            *_nf_params(params),
             *extra_args,
         ],
         cwd=exp_dir,
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=timeout,
         env=env,
     )
 
@@ -501,19 +433,22 @@ def _run_snakemake(
 @pytest.fixture(scope="session")
 def pipeline_outputs(tmp_path_factory):
 
-    exp_dir = tmp_path_factory.mktemp("smk_experiment")
+    exp_dir = tmp_path_factory.mktemp("nf_experiment")
     _write_synthetic_experiment(exp_dir)
 
     checkpoint_path = tmp_path_factory.mktemp("weights") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
 
-    result = _run_snakemake(exp_dir, checkpoint_path)
+    result = _run_nextflow(exp_dir, checkpoint_path)
     return exp_dir, result
 
 
 def test_pipeline_exits_cleanly(pipeline_outputs):
     exp_dir, result = pipeline_outputs
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    # errorStrategy 'ignore' exits 0 even when a task failed -- so check
+    # the log for ignored failures too.
+    assert "Error executing process" not in result.stdout, result.stdout
 
 
 def test_cell_images_produced(pipeline_outputs):
@@ -568,7 +503,7 @@ def test_qc_filter_runs_off_cell_metadata(pipeline_outputs):
 def _read_stub_argv(exp_dir: Path) -> list[str]:
     """Every `snakemake` command line BUILD_CELL_IMAGES built during a run,
     one per invoked batch, as recorded by the stub on PATH (see
-    _STUB_SNAKEMAKE_SCRIPT / _run_snakemake)."""
+    _STUB_SNAKEMAKE_SCRIPT / _run_nextflow)."""
     log = exp_dir / "stub_snakemake_argv.log"
     assert log.exists(), (
         "stub snakemake never ran -- BUILD_CELL_IMAGES didn't invoke it"
@@ -576,232 +511,95 @@ def _read_stub_argv(exp_dir: Path) -> list[str]:
     return [line for line in log.read_text().splitlines() if line.strip()]
 
 
-def test_snakemake_runs_locally_by_default(pipeline_outputs):
-    """`snakemake_cluster_args` is empty unless a
-    profile sets it, so the default path must invoke snakemake in LOCAL
-    mode -- `--cores <params.snakemake_cores>` and not one flag of the
-    cluster-submission machinery.
+def _main_invocations(exp_dir: Path) -> list[str]:
+    """The real nested runs -- every invocation but the --unlock preflight."""
+    return [argv for argv in _read_stub_argv(exp_dir) if "--unlock" not in argv]
 
-    This is the guard on the whole opt-in claim: the cluster path adds
-    flags to this exact command line, and nothing else in this suite looks
-    at it (the stub ignores its arguments)."""
+
+def test_nested_snakemake_runs_starcalls_own_snakefile_locally(pipeline_outputs):
+    """Default (no starcall_profile): every starcall rule runs inside the
+    one task, `--cores snakemake_cores`, against starcall-workflow's own
+    unmodified Snakefile -- and not one flag of profile mode."""
     exp_dir, _ = pipeline_outputs
+    swd = exp_dir / "starcall-workflow"
     invocations = _read_stub_argv(exp_dir)
 
-    for argv in invocations:
-        # _write_synthetic_experiment pins snakemake_cores to 1.
-        assert "--cores 1" in argv, argv
-        for cluster_flag in (
-            "--cluster",
-            "--jobs",
-            "--default-resources",
-            "--set-resources",
-            "--conda-base-path",
-        ):
-            assert cluster_flag not in argv, (
-                f"{cluster_flag} leaked into the default (non-cluster) "
-                f"invocation: {argv}"
-            )
+    assert any("--unlock" in argv for argv in invocations), invocations
+    main_runs = _main_invocations(exp_dir)
+    assert len(main_runs) == 1, main_runs
+    argv = main_runs[0]
+    assert f"--snakefile {swd}/workflow/Snakefile" in argv, argv
+    assert f"--directory {swd}" in argv, argv
+    # _write_synthetic_experiment pins snakemake_cores to 1.
+    assert "--cores 1" in argv, argv
+    assert "--rerun-incomplete" in argv, argv
+    assert "--profile" not in argv and "--jobscript" not in argv, argv
+    # Every requested target comes after the '--'.
+    options, targets = argv.split(" -- ", 1)
+    assert "raw_pt.tif" in targets and "cells_mask.tif" in targets, targets
+    assert ".tif" not in options, options
 
 
-def test_snakemake_cluster_args_are_opt_in(tmp_path_factory):
-    """Setting `snakemake_cluster_args` adds its flags to phase 2's
-    invocation without disturbing the flags around them -- in particular
-    they must land BEFORE the `--` that separates snakemake's own options
-    from the target paths, or they'd be parsed as (nonexistent) targets.
-
-    Uses a harmless `--cluster "echo"` rather than a real scheduler command:
-    the stub snakemake never acts on any of it, so this asserts on the
-    command line the module *builds*, which is the part this repo owns."""
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_cluster_args")
+def test_starcall_profile_switches_to_profile_mode(tmp_path_factory):
+    """starcall_profile adds --profile and our --jobscript, drops --cores
+    (the profile owns the job budget), and BUILD_CELL_IMAGES writes a
+    jobscript that re-enters starcall_job_image with every host path a
+    child job can touch bound. Nothing about the scheduler is ours: the
+    profile directory here is empty, and the stub never reads it."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_profile")
     _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_cluster_args") / "checkpoint.pth"
+    checkpoint_path = tmp_path_factory.mktemp("weights_profile") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
+    profile_dir = exp_dir / "my_site_profile"
+    profile_dir.mkdir()
 
-    cluster_config = _cluster_config(snakemake_cluster_cores=17)
-    # The cluster preamble refuses to run without a real .sif for the child
-    # jobs to re-enter (see test_cluster_mode_requires_child_image). Nothing
-    # here execs it -- the stub snakemake submits nothing -- so any existing
-    # file satisfies the check.
-    fake_sif = exp_dir / "fake.sif"
-    fake_sif.write_text("not a real image")
-
-    result = _run_snakemake(
+    result = _run_nextflow(
         exp_dir,
         checkpoint_path,
-        extra_config=(*cluster_config, f"starcall_child_image={fake_sif}"),
+        extra_params={
+            "starcall_profile": profile_dir,
+            "starcall_job_image": "/images/pipeline.sif",
+            "starcall_container_bin": "singularity",
+            "starcall_gpu": "false",
+            "embeddings_only": "true",
+        },
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
 
-    invocations = _read_stub_argv(exp_dir)
-    assert invocations, "BUILD_CELL_IMAGES never invoked snakemake"
+    [argv] = _main_invocations(exp_dir)
+    options = argv.split(" -- ", 1)[0]
+    assert f"--profile {profile_dir}" in options, argv
+    assert "--jobscript " in options and "starcall_jobscript.sh" in options, argv
+    assert "--cores" not in options, argv
 
-    # Cluster mode runs snakemake twice per batch: a `--unlock` preflight
-    # (which clears a lock left by a previously killed submitter) and then
-    # the real invocation. Only the latter carries the execution flags --
-    # the preflight deliberately doesn't, since it does no work.
-    unlock_calls = [a for a in invocations if "--unlock" in a]
-    real_calls = [a for a in invocations if "--use-conda" in a]
-    assert unlock_calls, f"no --unlock preflight in cluster mode: {invocations}"
-    assert real_calls, f"no real snakemake invocation: {invocations}"
-    for argv in unlock_calls:
-        assert "--cluster" not in argv, f"preflight must not submit jobs: {argv}"
-
-    for argv in real_calls:
-        tokens = argv.split()
-        assert "--cluster" in tokens, argv
-        assert tokens[tokens.index("--cluster") + 1] == "echo", argv
-        assert tokens[tokens.index("--jobs") + 1] == "3", argv
-        # The cluster core budget replaces params.snakemake_cores entirely
-        # (which _write_synthetic_experiment pins to 1) -- leaving the local
-        # value in would silently cap every rule's own `threads:`. Compared
-        # as a token, not a substring: "--cores 1" is a prefix of
-        # "--cores 17".
-        assert tokens.count("--cores") == 1, argv
-        assert tokens[tokens.index("--cores") + 1] == "17", argv
-        # Untouched neighbours, and correct ordering around `--`.
-        assert "--use-conda --conda-frontend conda" in argv, argv
-        assert "--rerun-triggers mtime" in argv, argv
-        assert argv.index("--cluster") < argv.index(" -- "), (
-            f"cluster flags must precede the `--` target separator: {argv}"
-        )
-
-    # The knob is purely additive: the stage still produces its real output.
-    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
+    jobscript_path = Path(options.split("--jobscript ", 1)[1].split()[0])
+    jobscript = jobscript_path.read_text()
+    assert "{exec_job}" in jobscript and "# properties = {properties}" in jobscript
+    reentry = next(
+        line for line in jobscript.splitlines() if "exec singularity" in line
+    )
+    assert "/images/pipeline.sif" in reentry
+    assert "--nv" not in reentry
+    for bound in (
+        exp_dir / "starcall-workflow",
+        exp_dir / "phenotyping",
+        exp_dir / "sequencing",
+        exp_dir / ".snakemake_cache",
+        jobscript_path.parent,  # the task dir: snakemake cd's there first
+    ):
+        assert f"{bound}:{bound}" in reentry, (bound, reentry)
 
 
-def test_cluster_mode_requires_child_image(tmp_path_factory):
-    """Opting into cluster submission without `starcall_child_image` must
-    fail BUILD_CELL_IMAGES outright rather than submitting jobs that can't
-    start.
-
-    Each per-rule job re-enters the image on a bare exec node, so it needs a
-    real .sif file -- `container_image` is a `docker://` URI on a cluster,
-    which those bare nodes have no way to resolve. Without the guard this
-    surfaces as N identical child-job failures minutes later; with it, the
-    rule dies immediately with a message naming the key.
-
-    `keep-going` means the rest of the DAG still runs, so the observable
-    symptom is the missing output -- the same shape as every other
-    BUILD_CELL_IMAGES failure mode this suite checks."""
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_no_child_image")
-    _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_no_child") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
-    cluster_config = _cluster_config(with_host_overrides=False)
-
-    result = _run_snakemake(exp_dir, checkpoint_path, extra_config=cluster_config)
-    # The rule fails, and --keep-going no longer hides that in the exit code.
+def test_starcall_profile_without_job_image_fails_fast(tmp_path):
+    result = _run_validation_only(
+        tmp_path,
+        pipeline_dir=tmp_path,
+        cell_dino_checkpoint=tmp_path / "ckpt.pth",
+        starcall_profile=tmp_path,
+        experiments_file=_one_experiment_params(tmp_path),
+    )
     assert result.returncode != 0
-
-    assert not (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-    # It failed in the preamble, before ever reaching phase 2.
-    assert not (exp_dir / "stub_snakemake_argv.log").exists()
-
-
-def test_child_image_resolved_from_apptainer_prefix_when_null(tmp_path_factory):
-    """With `starcall_child_image` null, the per-rule jobs fall back to the
-    image Snakemake already pulled and converted under its
-    --apptainer-prefix.
-
-    That path has to be reconstructed rather than asked for: a rule can't
-    read the deployment setting, so the profile mirrors it into the
-    `apptainer_prefix` config key and the rule rebuilds Snakemake's own cache
-    filename -- `md5(url).hexdigest() + ".simg"`
-    (snakemake/deployment/singularity.py's Image). That is an implementation
-    detail, not an API. This test is what pins it; if a Snakemake upgrade
-    changes the naming, this fails here rather than as hundreds of dead jobs
-    on the cluster."""
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_derived_image")
-    _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_derived") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
-    # Stand in for the image Snakemake would have pulled, named exactly as
-    # its own Image.hash does.
-    cache_dir = exp_dir / "apptainer-prefix"
-    cache_dir.mkdir()
-    container_image = "docker://ghcr.io/lilferrit/fisseq-embeddings-pipeline:abc1234"
-    cached_name = hashlib.md5(
-        container_image.encode(), usedforsecurity=False
-    ).hexdigest()
-    cached_image = cache_dir / f"{cached_name}.simg"
-    cached_image.write_text("stand-in for the converted image")
-
-    cluster_config = _cluster_config(apptainer_prefix=str(cache_dir))
-
-    result = _run_snakemake(
-        exp_dir,
-        checkpoint_path,
-        extra_config=(*cluster_config, f"container_image={container_image}"),
-    )
-    assert result.returncode == 0, result.stderr
-
-    # It got past the preamble's image check and ran phase 2 for real.
-    assert _read_stub_argv(exp_dir)
-    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-
-
-def test_explicit_child_image_wins_over_derived(tmp_path_factory):
-    """An explicit `starcall_child_image` is used even when a derivable cache
-    entry also exists -- the key is the escape hatch from Snakemake's cache
-    naming, so it must not be quietly overridden by it."""
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_explicit_image")
-    _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_explicit") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
-    # A cache dir whose derived entry does NOT exist, so the run can only
-    # succeed via the explicit path.
-    empty_cache = exp_dir / "empty-cache"
-    empty_cache.mkdir()
-    explicit_sif = exp_dir / "explicit.sif"
-    explicit_sif.write_text("the image we asked for")
-
-    cluster_config = _cluster_config(apptainer_prefix=str(empty_cache))
-
-    result = _run_snakemake(
-        exp_dir,
-        checkpoint_path,
-        extra_config=(*cluster_config, f"starcall_child_image={explicit_sif}"),
-    )
-    assert result.returncode == 0, result.stderr
-    assert _read_stub_argv(exp_dir)
-    assert (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-
-
-def test_cluster_env_with_unset_value_fails(tmp_path_factory):
-    """A null/empty entry in `starcall_cluster_env` must fail the rule
-    rather than exporting the literal string "null".
-
-    This is the shape of a real mistake: an executor profile builds that map
-    out of params (e.g. `SGE_ROOT: params.sge_root`, which scratch/run.sh
-    fills from the scheduler's own environment), so a launch script that
-    forgets to pass one leaves a null behind. Exported as-is it surfaces much
-    later as an unintelligible bind-mount or scheduler error on every child
-    job."""
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_unset_cluster_env")
-    _write_synthetic_experiment(exp_dir)
-    checkpoint_path = tmp_path_factory.mktemp("weights_unset_env") / "checkpoint.pth"
-    _write_tiny_checkpoint(checkpoint_path)
-
-    fake_sif = exp_dir / "fake.sif"
-    fake_sif.write_text("not a real image")
-
-    # A null value, exactly as a profile interpolating something that was
-    # never set would produce.
-    cluster_config = _cluster_config(cluster_env='{"SGE_ROOT": null}')
-
-    result = _run_snakemake(
-        exp_dir,
-        checkpoint_path,
-        extra_config=(*cluster_config, f"starcall_child_image={fake_sif}"),
-    )
-
-    assert not (exp_dir / "cell_images" / "batch1" / "cell_table.parquet").exists()
-    combined = result.stdout + result.stderr
-    assert "starcall_cluster_env has no value for SGE_ROOT" in combined, combined
+    assert "starcall_job_image is required" in result.stdout + result.stderr
 
 
 def test_cp_track_survives_dataset_failure(tmp_path_factory):
@@ -811,24 +609,23 @@ def test_cp_track_survives_dataset_failure(tmp_path_factory):
     nothing, but QC_FILTER and the entire CellProfiler branch still run
     to completion.
 
-    build_dataset is failed via a stub `python` on PATH that exits 1 for
-    that one module (see _write_failing_python_stub) rather than by
-    corrupting its inputs, so the failure is unambiguous and isolated to
-    that one rule. `keep-going` (workflow/profiles/default) is what then
-    lets the rest of the DAG finish, in place of every Nextflow module's
-    own `errorStrategy 'ignore'`."""
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_dataset_fail")
+    BUILD_DATASET is failed via an extra `-c` config (a `beforeScript`
+    that exits 1) rather than by corrupting its inputs, so the failure is
+    unambiguous and isolated to that one process. errorStrategy 'ignore'
+    is what then lets the rest of the DAG finish."""
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_dataset_fail")
     _write_synthetic_experiment(exp_dir)
     checkpoint_path = tmp_path_factory.mktemp("weights_fail") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
+    fail_config = _write_failing_process_config(
+        exp_dir / "fail.config", "BUILD_DATASET"
+    )
 
-    _write_failing_python_stub(exp_dir / "stub_bin", "dataset")
-
-    result = _run_snakemake(exp_dir, checkpoint_path)
-    # keep-going runs every other branch to completion, but -- unlike
-    # `nextflow run` under errorStrategy 'ignore' -- still reports the
-    # failure in the exit code rather than exiting 0 with outputs missing.
-    assert result.returncode != 0
+    result = _run_nextflow(
+        exp_dir, checkpoint_path, extra_args=("-c", str(fail_config))
+    )
+    # errorStrategy 'ignore' exits 0 with the failed branch simply missing.
+    assert result.returncode == 0, result.stdout + result.stderr
 
     # The cellDINO branch is gone...
     assert not (exp_dir / "dataset" / "batch1" / "metadata.parquet").exists()
@@ -1029,18 +826,18 @@ def test_pca_sees_only_globally_reproducible_dimensions(pipeline_outputs):
 
 def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
     """grid_size can be omitted from an experiment entry entirely -- proves
-    auto-detection works through the real Snakemake/Hydra override
+    auto-detection works through the real Nextflow/Hydra override
     plumbing, not just in-process (see
     tests/unit/test_build_cell_images_enumerate.py for the in-process
     coverage of the detection logic itself)."""
 
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_auto_grid")
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_auto_grid")
     _write_synthetic_experiment(exp_dir, include_grid_size=False)
 
     checkpoint_path = tmp_path_factory.mktemp("weights_auto_grid") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
 
-    result = _run_snakemake(exp_dir, checkpoint_path)
+    result = _run_nextflow(exp_dir, checkpoint_path)
     assert result.returncode == 0, result.stderr
 
     metadata = pl.read_parquet(exp_dir / "dataset" / "batch1" / "metadata.parquet")
@@ -1057,13 +854,13 @@ def test_pipeline_defaults_data_dirs_under_starcall_workflow_dir_when_omitted(
     project config.yaml exists to say otherwise) works through the real
     Snakemake/Hydra plumbing, not just by construction."""
 
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_default_dirs")
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_default_dirs")
     _write_synthetic_experiment(exp_dir, omit_data_dirs=True)
 
     checkpoint_path = tmp_path_factory.mktemp("weights_default_dirs") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
 
-    result = _run_snakemake(exp_dir, checkpoint_path)
+    result = _run_nextflow(exp_dir, checkpoint_path)
     assert result.returncode == 0, result.stderr
 
 
@@ -1073,11 +870,11 @@ def test_pipeline_reads_data_dirs_from_project_config_yaml_when_nonstandard(
     """A starcall-workflow project's own config.yaml can remap
     phenotyping_dir/sequencing_dir to nonstandard subdirectory names --
     proves resolve_data_dir reads that real project config (not just a
-    fixed 'phenotyping'/'sequencing' guess) through the real Snakemake/Hydra
+    fixed 'phenotyping'/'sequencing' guess) through the real Nextflow/Hydra
     plumbing, the actual case this behavior exists for ("handle cases
     where the output looks different for whatever reason")."""
 
-    exp_dir = tmp_path_factory.mktemp("smk_experiment_custom_dirs")
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_custom_dirs")
     _write_synthetic_experiment(
         exp_dir,
         project_config_dir_names={
@@ -1089,7 +886,7 @@ def test_pipeline_reads_data_dirs_from_project_config_yaml_when_nonstandard(
     checkpoint_path = tmp_path_factory.mktemp("weights_custom_dirs") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
 
-    result = _run_snakemake(exp_dir, checkpoint_path)
+    result = _run_nextflow(exp_dir, checkpoint_path)
     assert result.returncode == 0, result.stderr
 
     cell_table = pl.read_parquet(
@@ -1098,35 +895,46 @@ def test_pipeline_reads_data_dirs_from_project_config_yaml_when_nonstandard(
     assert cell_table.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
 
 
-def _run_validation_only(tmp_path, *config_tokens):
-    """A dry run against the repo's own params.yaml. Validation happens at
-    parse time, before the DAG is built, so --dry-run is enough and needs no
-    synthetic fixture."""
+def _one_experiment_params(tmp_path: Path) -> Path:
+    """The repo's params.yaml with one (never-run) experiment in it."""
+    params = yaml.safe_load((_PROJECT_ROOT / "params.yaml").read_text())
+    params["experiments"] = [
+        {"batch_stem": "e1", "starcall_workflow_dir": str(tmp_path / "swd")}
+    ]
+    path = tmp_path / "one_experiment_params.yaml"
+    path.write_text(yaml.safe_dump(params))
+    return path
+
+
+def _run_validation_only(tmp_path, experiments_file=None, **nf_params):
+    """A run against the repo's own params.yaml (or experiments_file) that
+    PLAN_EXPERIMENTS -- the workflow's first task -- is expected to reject
+    before anything else is scheduled."""
+    params_file = experiments_file or _PROJECT_ROOT / "params.yaml"
     return subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "snakemake",
-            "--snakefile",
-            str(_PROJECT_ROOT / "workflow" / "Snakefile"),
-            "--configfile",
-            str(_PROJECT_ROOT / "params.yaml"),
-            "--cores",
-            "1",
-            "--dry-run",
-            *(("--config", *config_tokens) if config_tokens else ()),
+            "nextflow",
+            "run",
+            str(_PROJECT_ROOT),
+            "-ansi-log",
+            "false",
+            "-profile",
+            "local",
+            "-params-file",
+            str(params_file),
+            *_nf_params(nf_params),
         ],
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=300,
     )
 
 
 def test_fails_fast_when_pipeline_dir_missing(tmp_path):
     """A required-with-no-default key left unset must fail with this
-    pipeline's own specific message, not a generic KeyError from deep inside
-    a rule -- and it must fail before any job is scheduled."""
+    pipeline's own specific message, not a generic error from deep inside a
+    task -- and it must fail before any other task is scheduled."""
     result = _run_validation_only(tmp_path)
     assert result.returncode != 0
     assert "pipeline_dir is required" in result.stderr + result.stdout
@@ -1134,7 +942,7 @@ def test_fails_fast_when_pipeline_dir_missing(tmp_path):
 
 def test_fails_fast_when_cell_dino_checkpoint_missing(tmp_path):
     """Same as above, for the other required-with-no-default key."""
-    result = _run_validation_only(tmp_path, f"pipeline_dir={tmp_path}")
+    result = _run_validation_only(tmp_path, pipeline_dir=tmp_path)
     assert result.returncode != 0
     assert "cell_dino_checkpoint is required" in result.stderr + result.stdout
 
@@ -1143,9 +951,7 @@ def test_fails_fast_when_experiments_is_empty(tmp_path):
     """params.yaml ships `experiments: []`, so this is the third required
     key and the one a real run is most likely to forget."""
     result = _run_validation_only(
-        tmp_path,
-        f"pipeline_dir={tmp_path}",
-        f"cell_dino_checkpoint={tmp_path / 'ckpt.pth'}",
+        tmp_path, pipeline_dir=tmp_path, cell_dino_checkpoint=tmp_path / "ckpt.pth"
     )
     assert result.returncode != 0
     assert "experiments must be a non-empty list" in result.stderr + result.stdout
@@ -1233,7 +1039,7 @@ def test_global_cp_features_stage_outputs_exist(pipeline_outputs):
 
 @pytest.fixture(scope="session")
 def reproducibility_outputs(tmp_path_factory):
-    """Two independent, fully from-scratch `snakemake` invocations
+    """Two independent, fully from-scratch `nextflow run` invocations
     against the same synthetic experiment fixture and the same
     `random_seed` (params.yaml's default, 0, unoverridden by
     `_EXTRA_PARAMS`) -- the test this backs is what actually proves the
@@ -1254,7 +1060,7 @@ def reproducibility_outputs(tmp_path_factory):
     for i in range(2):
         exp_dir = tmp_path_factory.mktemp(f"nf_repro_{i}")
         _write_synthetic_experiment(exp_dir)
-        result = _run_snakemake(exp_dir, checkpoint_path)
+        result = _run_nextflow(exp_dir, checkpoint_path)
         assert result.returncode == 0, result.stderr
         base = exp_dir / "feature_select_batchwise" / "batch1"
         runs.append(

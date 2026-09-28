@@ -23,11 +23,16 @@ wheels/
 # Generated docs output
 site/
 
-# Snakemake
+# Nextflow
+.nextflow/
+.nextflow.log*
+work/
+nf-report*.html
+nf-timeline*.html
+nf-trace*.txt
+nf-dag*.html
+# The nested starcall snakemake's own state, if run from a checkout here
 .snakemake/
-# Rendered DAG images from `snakemake --dag | dot -Tsvg`
-dag.svg
-dag.png
 
 # Model checkpoints / large artifacts (kept out of git; documented in README)
 *.pth
@@ -48,5 +53,5 @@ testing_data/*
 
 # Hydra CLI runs default to ./outputs/<date>/<time>/ when a stage is invoked
 # by hand without output_dir pointing elsewhere. Never a pipeline result --
-# every rule passes an explicit output_dir under pipeline_dir.
+# every task passes an explicit output_dir under pipeline_dir.
 outputs/

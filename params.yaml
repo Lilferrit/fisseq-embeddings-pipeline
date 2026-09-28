@@ -1,11 +1,13 @@
 # params.yaml -- every default pipeline parameter, nothing else. Load
 # explicitly:
 #
-#   snakemake --configfile params.yaml --config pipeline_dir=/path/to/experiment -c 8
+#   nextflow run . -params-file params.yaml --pipeline_dir /path/to/run \
+#       --cell_dino_checkpoint /path/to/checkpoint.pth
 #
-# Per-run overrides: `--config key=value` wins over this file, and so does a
-# profile's own `config:` block. Executor/deployment settings live in
-# profiles/ (see docs/snakemake.md) -- never default parameter values.
+# Per-run overrides: `--key value` on the command line wins over this file.
+# Executor/container settings live in nextflow.config and your own site
+# config (`-c site.config`; see docs/nextflow.md) -- never default parameter
+# values.
 
 # ── Required, no default (fail fast if unset) ──────────────────────────────
 pipeline_dir: null
@@ -125,140 +127,43 @@ cellprofiler_pipeline: null    # the CellProfiler .cppipe pipeline's basename --
 cellprofiler_cycle: ""         # "" (no cycle) unless starcall-workflow ran cellprofiler per-cycle
 
 
-# ── Snakemake invocation (BUILD_CELL_IMAGES) ─────────────────────────────────
-snakemake_cores: 4             # --cores passed to the NESTED starcall snakemake within one build_cell_images job -- local parallelism inside that one invocation, distinct from the outer snakemake's own --cores budget across rules
-# LOCAL MODE ONLY. When a profile opts into cluster submission
-# (snakemake_cluster_args, below), the nested snakemake instead
-# submits each starcall rule as its own scheduler job and --cores becomes the
-# global budget ACROSS those jobs -- supplied by snakemake_cluster_cores,
-# not by this value, because a 4 here would silently cap every rule's own
-# `threads:` declaration. See docs/snakemake.md.
+# ── Nested starcall run (BUILD_CELL_IMAGES) ──────────────────────────────────
+# BUILD_CELL_IMAGES runs starcall-workflow's own Snakefile as a nested
+# snakemake (7.32, in the image's ops env). By default every starcall rule
+# runs inside that one task:
+snakemake_cores: 4             # the nested run's --cores in local mode (no starcall_profile)
 #
-# Where the per-rule cluster jobs re-enter this pipeline's image. Each one
-# runs on a bare exec node outside the outer snakemake's own container
-# handling, so it needs a real .sif FILE -- container_image is a `docker://`
-# URI on the cluster, and having hundreds of concurrently-starting jobs each
-# re-resolve that URI against one shared Apptainer cache, with registry
-# credentials in every job's environment, is exactly what this avoids.
+# To fan starcall's rules out across your cluster instead, point
+# starcall_profile at a snakemake 7 profile directory saying how to submit
+# jobs (`cluster:`, `cluster-cancel:`, `jobs:`, resources...). It lives
+# outside this repo -- nothing scheduler-specific does. Each submitted job
+# lands on a bare node but has to run inside the pipeline image (starcall's
+# rule bodies execute in the ops env's interpreter), so BUILD_CELL_IMAGES
+# also passes a --jobscript that re-enters starcall_job_image there. See
+# docs/nextflow.md.
+starcall_profile: null         # path to a snakemake 7 profile dir; null = local mode
+starcall_job_image: null       # a .sif of container_image on storage every node can read -- required with starcall_profile
+starcall_container_bin: apptainer  # what a child job re-enters the image with; some nodes only ship `singularity`
 #
-# OPTIONAL. Left null, build_cell_images reconstructs the path of the image
-# Snakemake has already pulled and converted under its --apptainer-prefix
-# (mirrored into apptainer_prefix below), so the usual case needs nothing
-# here. Set it explicitly to point the child jobs at a different (or
-# independently built) image, or to avoid depending on Snakemake's cache
-# naming -- an explicit value always wins. Either way the rule fails fast if
-# the file isn't there. Build it once with `apptainer pull` beforehand and
-# pin it to the same commit as container_image. null is fine unless a profile
-# sets snakemake_cluster_args, in which case build_cell_images fails fast
-# with a message naming this key.
-starcall_child_image: null
-# Where BUILD_CELL_IMAGES points $XDG_CACHE_HOME (and $HOME) for its one
-# snakemake invocation. Snakemake's SourceCache mkdir's
-# $XDG_CACHE_HOME/snakemake (falling back to $HOME/.cache) while
-# CONSTRUCTING the Workflow object -- before any rule runs, and with no
-# CLI flag to relocate it -- and under Singularity/Apptainer autoMounts
-# the container's $HOME is the submitting user's real cluster home, which
-# is frequently read-only on compute nodes ("OSError: [Errno 30]
-# Read-only file system"). null resolves to <pipeline_dir>/.snakemake_cache,
-# which is writable and persists across tasks and runs (so the source
-# cache, and conda's own ~/.conda bookkeeping under --use-conda, are
-# built once rather than per job). Set this explicitly to put the cache
-# on shared scratch instead. Whatever it resolves to is bind-mounted into
-# every containerized rule automatically (see extra_bind_paths below).
+# Where BUILD_CELL_IMAGES points $XDG_CACHE_HOME (and $HOME) for the nested
+# run. Snakemake mkdir's $XDG_CACHE_HOME/snakemake while constructing its
+# Workflow object -- before any rule runs, with no flag to move it -- and
+# under Apptainer $HOME is often a read-only cluster home ("OSError: [Errno
+# 30] Read-only file system"). null resolves to
+# <pipeline_dir>/.snakemake_cache, which is writable and persists across
+# runs. It's bind-mounted into BUILD_CELL_IMAGES' container automatically.
 snakemake_cache_dir: null
-# Request a GPU for build_cell_images' nested snakemake invocation --
-# starcall-workflow's segmentation rules run stardist/cellpose/tensorflow out
-# of the image's `ops` conda env, and the image is CUDA-based
-# (nvidia/cuda:12.4.1-runtime-ubuntu22.04). Together with cell_dino_device,
-# this decides whether $APPTAINER_NV is exported for the run (Apptainer's
-# --nv), so either stage asking for a GPU turns it on.
-#
-# Unlike Docker, this is no longer dangerous to leave true on a GPU-less
-# host: `apptainer exec --nv` warns ("could not find any nv files") and
-# proceeds, where `docker run --gpus all` failed outright before the
-# container's entrypoint ran. Set it false anyway if you want the intent
-# recorded.
-#
-# Under a profile that opts into cluster submission (snakemake_cluster_args),
-# this governs only the submitter job's own container -- which by then is
-# just waiting on the scheduler and needs no GPU. The GPU request that
-# matters there is the per-rule one in that profile's own
-# --set-resources/submit template; see docs/snakemake.md.
+# Request a GPU for the nested starcall run -- its segmentation rules run
+# stardist/cellpose/tensorflow out of the ops env. Adds --nv/--gpus to
+# BUILD_CELL_IMAGES' container, and --nv to every child job in cluster
+# mode. Apptainer only warns on a GPU-less node; Docker's --gpus fails
+# outright there, so set this false on a GPU-less Docker host.
 starcall_gpu: true
-# ── Nested snakemake environment (BUILD_CELL_IMAGES phase 2) ─────────────────
-# These four used to be `process.ext.*` directives in nextflow.config rather
-# than params, purely because -params-file outranked a profile's own
-# `params.*` assignments in Nextflow's config precedence, so a profile could
-# not have overridden them here. Snakemake has the opposite precedence -- a
-# profile's `config:` entries are injected as --config, which WINS over
-# --configfile -- so they are ordinary config keys now, and
-# profiles/apptainer/config.yaml overrides them.
-#
-# The defaults below are the UNCONTAINERIZED ones (what `-profile local`
-# used to set), matching the new default of running straight against this
-# repo's own venv. profiles/apptainer/config.yaml flips all three to the
-# in-image paths.
-snakemake_bin: snakemake       # the nested starcall invocation's binary; in-image this is /opt/conda/envs/ops/bin/snakemake, kept off PATH so bare `python` never resolves to the ops env's 3.10
-conda_bin_dir: ""              # prepended onto PATH for that one invocation only (--use-conda shells out to a bare `conda` whatever snakemake_bin's own path is); "" emits no PATH= prefix at all
-starcall_overrides_dir: null   # null resolves to this repo's own resources/starcall_overrides; the image bakes the same pair at /opt/fisseq-embeddings-pipeline/resources/starcall_overrides
 
-# ── Snakemake cluster submission (BUILD_CELL_IMAGES phase 2) ─────────────────
-# Empty by default: phase 2's snakemake runs in LOCAL mode, forking each
-# starcall rule as a subprocess of the one build_cell_images job, capped by
-# snakemake_cores above. On a cluster that means every rule for an
-# experiment shares the single scheduler job submitted for that rule -- there
-# is parallelism across experiments and none within one.
-#
-# A profile opts in by setting this to a complete `--cluster ... --jobs ...`
-# string, which makes snakemake submit each starcall rule as its own
-# scheduler job (profiles/sge/config.yaml is the worked example; see
-# docs/snakemake.md). Everything the cluster path needs is gated on this
-# being non-empty, so the default command line is unchanged.
-#
-# ONE knob rather than several because snakemake's local and cluster
-# spellings are mutually exclusive -- `--cores N` means the local CPU budget
-# in one and the global cross-job budget in the other -- and a half-set pair
-# would produce a silently wrong invocation rather than an error.
-snakemake_cluster_args: ""
-# --cores in cluster mode. Separate from snakemake_cores because there it is
-# the GLOBAL budget across all submitted jobs and it silently CAPS every
-# rule's own threads: (Rule.expand_resources does
-# `min(global_cores, rule.threads)`), so a 4 would quietly downgrade
-# starcall's `threads: 8` rules. Ignored unless snakemake_cluster_args is set.
-snakemake_cluster_cores: 128
-# Site-specific environment for resources/starcall_overrides/sge_submit.sh --
-# scheduler project/queue/runtime, plus whatever the scheduler client itself
-# needs (on SGE: SGE_ROOT, SGE_CELL). A map, exported verbatim, so the repo
-# side stays scheduler-agnostic and every site value lives in the profile.
-starcall_cluster_env: {}
-# The container engine each per-rule job re-enters the image with, on a bare
-# exec node outside any container. Apptainer is commonly installed behind a
-# `singularity` symlink (as on the Fowler lab nodes), hence this default.
-starcall_apptainer_bin: singularity
-# Host-side path to this repo's resources/starcall_overrides, on storage the
-# compute nodes can read. Needed only in cluster mode, and needed SEPARATELY
-# from starcall_overrides_dir above because the two helper scripts sit on
-# opposite sides of the container boundary: snakemake invokes sge_submit.sh
-# from inside the job's own container, while the scheduler runs
-# sge_job_wrapper.sh on a bare exec node where /opt/... does not exist.
-starcall_host_overrides_dir: ""
-# Where Snakemake keeps its converted Apptainer images (its --apptainer-prefix).
-# Only consulted when starcall_child_image is null, to reconstruct the .sif
-# Snakemake already pulled, rather than making you supply a second copy. A
-# profile that sets `apptainer-prefix:` must mirror the same value here --
-# the deployment setting is not readable from inside a rule, so the two must
-# agree.
-apptainer_prefix: ""
-# Extra host paths to bind into every containerized rule, beyond the ones
-# derived from this file automatically (the checkpoint, pipeline_dir, each
-# experiment's starcall_workflow_dir and resolved data dirs, and the
-# snakemake cache dir). This is where a site's shared storage root goes --
-# it replaces Nextflow's `singularity.runOptions = '-B ...'`.
-#
-# Set this rather than putting -B in --apptainer-args: Apptainer's own
-# --bind flag REPLACES $APPTAINER_BIND rather than merging with it, and the
-# derived binds above travel through that variable.
-extra_bind_paths: []
+# ── Stopping early ───────────────────────────────────────────────────────────
+# true = stop after EMBED_CELLS: no QC-dependent cellDINO stages, no
+# reproducibility filtering, no CellProfiler track, no global stages.
+embeddings_only: false
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
 random_seed: 0

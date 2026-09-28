@@ -1,7 +1,7 @@
 [project]
 name = "fisseq-embeddings-pipeline"
 version = "0.1.0"
-description = "Snakemake + Python pipeline for learned (Cell-DINO) cell embeddings and variant distinguish-ability scoring -- sibling to fisseq-data-pipeline, retargeted from CellProfiler features to embeddings."
+description = "Nextflow + Python pipeline for learned (Cell-DINO) cell embeddings and variant distinguish-ability scoring -- sibling to fisseq-data-pipeline, retargeted from CellProfiler features to embeddings."
 readme = "README.md"
 authors = [
     { email = "gwynneth.idk@gmail.com" }
@@ -22,13 +22,6 @@ dependencies = [
     "polars>=1.32.3",
     "pyarrow>=21.0.0",
     "pyyaml>=6.0.2",
-    # The workflow engine itself (workflow/Snakefile). >=8 for the executor-
-    # plugin interface profiles/sge/config.yaml uses; fine on this repo's
-    # Python 3.13. NOT the same snakemake as the nested starcall invocation,
-    # which is pinned to 7.32.4 inside the image's Python 3.10 `ops` env and
-    # reached by absolute path (see params.yaml's snakemake_bin).
-    "snakemake>=8.20",
-    "snakemake-executor-plugin-cluster-generic>=1.0.9",
     "scikit-learn>=1.7.1",
     "tifffile>=2025.5.10",
     "tqdm>=4.67.3",
@@ -48,7 +41,7 @@ markers = [
     # tests/integration/conftest.py's mode switch: marked tests run only
     # under `pytest tests/integration --container`, unmarked ones only
     # without it. See that file for why the two are mutually exclusive.
-    "container: containerized real-starcall integration test (opt-in, needs docker + testing_data/)",
+    "container: containerized real-starcall integration test (opt-in, needs docker + testing_data/lmna_t3_mini)",
 ]
 
 [tool.ruff]
