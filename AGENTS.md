@@ -121,11 +121,9 @@ see **CI** below for what runs where.
 ## Testing
 
 ```bash
-uv sync --group dev
 uv run pytest tests/unit                      # fast, no GPU needed
 uv run pytest tests/integration                # drives real `snakemake` runs
 uv run pytest tests/integration --container    # real-starcall instead; needs docker + testing_data/
-uv run ruff check --fix . && uv run ruff format .
 uv run pre-commit run --all-files
 ```
 
@@ -163,19 +161,10 @@ exact failure signature and how to tell it apart from a real bug).
 
 ## CI
 
-Three workflows under `.github/workflows/`:
-
-- **`pr-checks.yml`** — every pull request against `main`: unit tests,
-  the integration suite, and lint.
-- **`docker.yml`** — builds the Docker image on every PR (build-only, no
-  push); on every push to `main` (and on a pushed `v*` tag) it also
-  pushes to `ghcr.io/<owner>/<repo>`. See
-  [`docs/configuration.md`](docs/configuration.md#docker-image-versioning-publishing)
-  for the tagging convention.
-- **`docs.yml`** — builds the mkdocs site and deploys it to the
-  `gh-pages` branch on every push to `main` that touches `docs/`,
-  `mkdocs.yml`, `src/`, or `README.md`. `gh-pages` holds only the
-  generated site, never the source.
+Three workflows under `.github/workflows/` — `pr-checks.yml`,
+`docker.yml`, `docs.yml`; read them for their exact triggers. The image
+tagging convention is in
+[`docs/configuration.md`](docs/configuration.md#docker-image-versioning-publishing).
 
 ## Docker / devcontainer
 
