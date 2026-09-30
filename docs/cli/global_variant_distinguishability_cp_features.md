@@ -9,7 +9,8 @@ described on the
 page, run over `OVWT_BATCHWISE_CP_FEATURES`' per-experiment
 `results.parquet` files instead. No code changes were needed to
 `global_variant_distinguishability()` itself -- it only ever touches the
-`auroc_pooled`/`auroc_median_barcode` columns, never the underlying
+scalar AUROC columns (`auroc_pooled`/`auroc_median_barcode`/`auroc_median_fold`),
+never the underlying
 feature space.
 
 ## Config fields
@@ -26,7 +27,7 @@ Extends the [common config fields](#common-config-fields) below.
 `global_scores.parquet` -- same columns as
 `GLOBAL_VARIANT_DISTINGUISHABILITY`: `meta_aa_changes`,
 `meta_median_auroc_pooled`, `meta_median_auroc_median_barcode`,
-`meta_num_experiments`.
+`meta_median_auroc_median_fold`, `meta_num_experiments`.
 
 ## Example
 

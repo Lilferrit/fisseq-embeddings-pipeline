@@ -52,6 +52,10 @@ def test_default_n_folds():
     assert _cfg().n_folds == 5
 
 
+def test_default_cv_mode():
+    assert _cfg().cv_mode == "kfold"
+
+
 def test_default_min_cells():
     assert _cfg().min_cells == 250
 
@@ -76,9 +80,9 @@ def test_xgboost_sub_config_has_defaults():
 
 
 def _write_cli_fixture(tmp_path: Path) -> "tuple[Path, Path, Path]":
-    """Sized per test_ovwt.py's own rationale: the vendored double-
-    stratified split_indices_stratified() needs ~8-13 cells per (barcode,
-    is_wt) stratum to survive reliably at n_folds=3."""
+    """Sized per test_ovwt.py's module-docstring rationale: ~15 cells per
+    barcode at n_folds=3, so each fold's inner train/calibration split
+    carries a real signal."""
     n_control = 10
     wt_n = 15
     variant_n = 15
@@ -165,3 +169,28 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path) -> None:
 
 def test_main_is_hydra_entry_point() -> None:
     assert callable(main)
+
+
+def test_main_passes_cv_mode_through_via_cli(tmp_path: Path) -> None:
+    """cv_mode/n_folds reach the shared ovwt_batchwise: barcode holdout with
+    n_folds=null gives one fold per M1K barcode, plus the per-fold AUROCs."""
+    cp_features_path, filtered_keys_path, normalizer_path = _write_cli_fixture(tmp_path)
+    output_dir = tmp_path / "out"
+
+    result = _run_ovwt_cp_features(
+        tmp_path,
+        f"output_dir={output_dir}",
+        f"cp_features_file={cp_features_path}",
+        f"filtered_keys_file={filtered_keys_path}",
+        f"normalizer_file={normalizer_path}",
+        "cv_mode=barcode_holdout",
+        "n_folds=null",
+        "min_cells=1",
+    )
+    assert result.returncode == 0, result.stderr
+
+    with open(output_dir / "models.pkl", "rb") as f:
+        models = pickle.load(f)
+    assert len(models["M1K"]) == 2
+    results = pl.read_parquet(output_dir / "results.parquet")
+    assert {"auroc_folds", "auroc_median_fold"} <= set(results.columns)

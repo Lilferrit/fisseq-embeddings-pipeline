@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import polars as pl
 import xgboost as xgb
@@ -105,17 +107,87 @@ def test_get_dmatrix_multiclass_encodes_sorted_classes():
 # ---------------------------------------------------------------------------
 
 
-def test_split_indices_stratified_80_10_10_and_disjoint():
-    labels = np.array(["a"] * 50 + ["b"] * 50)
-    train_idx, test_idx, val_idx = split_indices_stratified(labels, random_state=0)
-
+def test_split_indices_stratified_sizes():
+    labels = np.array(["A"] * 50 + ["B"] * 50)
+    train_idx, holdout_idx = split_indices_stratified(labels, random_state=0)
     assert len(train_idx) == 80
-    assert len(test_idx) == 10
-    assert len(val_idx) == 10
-    assert set(train_idx) | set(test_idx) | set(val_idx) == set(range(100))
-    assert not (set(train_idx) & set(test_idx))
-    assert not (set(train_idx) & set(val_idx))
-    assert not (set(test_idx) & set(val_idx))
+    assert len(holdout_idx) == 20
+
+
+def test_split_indices_stratified_no_overlap():
+    labels = np.array(["A"] * 50 + ["B"] * 50)
+    train_idx, holdout_idx = split_indices_stratified(labels, random_state=0)
+    assert set(train_idx).isdisjoint(set(holdout_idx))
+
+
+def test_split_indices_stratified_union_is_all():
+    n = 100
+    labels = np.array(["A"] * 50 + ["B"] * 50)
+    train_idx, holdout_idx = split_indices_stratified(labels, random_state=0)
+    assert set(train_idx) | set(holdout_idx) == set(range(n))
+
+
+def test_split_indices_stratified_preserves_class_ratio():
+    labels = np.array(["A"] * 50 + ["B"] * 50)
+    train_idx, holdout_idx = split_indices_stratified(labels, random_state=0)
+    for idx in (train_idx, holdout_idx):
+        split_labels = labels[idx]
+        assert (split_labels == "A").sum() == (split_labels == "B").sum()
+
+
+def test_split_indices_stratified_respects_test_size():
+    labels = np.array(["A"] * 50 + ["B"] * 50)
+    train_idx, holdout_idx = split_indices_stratified(
+        labels, random_state=0, test_size=0.5
+    )
+    assert len(train_idx) == 50
+    assert len(holdout_idx) == 50
+
+
+def test_split_indices_stratified_singleton_stratum_does_not_raise():
+    """The production failure: a lone member of its stratum used to raise."""
+    labels = np.array(["A"] * 50 + ["B"] * 49 + ["solo"])
+    train_idx, holdout_idx = split_indices_stratified(labels, random_state=0)
+    assert len(train_idx) + len(holdout_idx) == len(labels)
+
+
+def test_split_indices_stratified_singleton_goes_to_train():
+    labels = np.array(["A"] * 50 + ["B"] * 49 + ["solo"])
+    solo = len(labels) - 1
+    train_idx, holdout_idx = split_indices_stratified(labels, random_state=0)
+    assert solo in set(train_idx)
+    assert solo not in set(holdout_idx)
+
+
+def test_split_indices_stratified_discards_no_rows_with_singletons():
+    labels = np.array(["A"] * 40 + ["B"] * 40 + ["solo1", "solo2", "solo3"])
+    train_idx, holdout_idx = split_indices_stratified(labels, random_state=0)
+    assert set(train_idx) | set(holdout_idx) == set(range(len(labels)))
+    assert set(train_idx).isdisjoint(set(holdout_idx))
+
+
+def test_split_indices_stratified_warns_on_singleton_stratum(caplog):
+    labels = np.array(["A"] * 40 + ["B"] * 40 + ["solo1", "solo2"])
+    with caplog.at_level(logging.WARNING):
+        split_indices_stratified(labels, random_state=0)
+    assert len(caplog.records) == 1
+    message = caplog.records[0].getMessage()
+    assert "2 row(s)" in message
+    assert "2 singleton" in message
+
+
+def test_split_indices_stratified_no_warning_when_all_strata_populated(caplog):
+    labels = np.array(["A"] * 50 + ["B"] * 50)
+    with caplog.at_level(logging.WARNING):
+        split_indices_stratified(labels, random_state=0)
+    assert caplog.records == []
+
+
+def test_split_indices_stratified_two_member_stratum_survives():
+    """A 2-member stratum splitting 1/1 broke the old nested second split."""
+    labels = np.array(["A"] * 49 + ["B"] * 49 + ["pair", "pair"])
+    train_idx, holdout_idx = split_indices_stratified(labels, random_state=0)
+    assert set(train_idx) | set(holdout_idx) == set(range(len(labels)))
 
 
 # ---------------------------------------------------------------------------

@@ -32,20 +32,26 @@ def _results_df(
     labels: list[str],
     auroc_pooled: list[float],
     auroc_median_barcode: list[float],
+    with_folds: bool = True,
 ) -> pl.DataFrame:
     """One experiment's OVWT_BATCHWISE results.parquet -- includes
     synonymous-labeled rows (OVWT scores every non-WT variant, synonymous
-    ones included, against WT)."""
+    ones included, against WT). ``auroc_median_fold`` reuses the barcode
+    value, and ``with_folds=False`` omits the ``auroc_folds`` list column."""
     n = len(labels)
-    return pl.DataFrame(
-        {
-            LABEL_COLUMN: labels,
-            "auroc_pooled": auroc_pooled,
-            "auroc_median_barcode": auroc_median_barcode,
-            "meta_n_barcodes": [1] * n,
-            "meta_n_cells": [10] * n,
-        }
-    )
+    cols = {
+        LABEL_COLUMN: labels,
+        "auroc_pooled": auroc_pooled,
+        "auroc_median_barcode": auroc_median_barcode,
+    }
+    if with_folds:
+        cols["auroc_folds"] = pl.Series(
+            [[a, None, a] for a in auroc_median_barcode], dtype=pl.List(pl.Float64)
+        )
+    cols["auroc_median_fold"] = auroc_median_barcode
+    cols["meta_n_barcodes"] = [1] * n
+    cols["meta_n_cells"] = [10] * n
+    return pl.DataFrame(cols)
 
 
 # ---------------------------------------------------------------------------
@@ -65,8 +71,32 @@ def test_global_variant_distinguishability_output_columns() -> None:
         LABEL_COLUMN,
         "meta_median_auroc_pooled",
         "meta_median_auroc_median_barcode",
+        "meta_median_auroc_median_fold",
         "meta_num_experiments",
     }
+
+
+def test_global_variant_distinguishability_without_fold_list() -> None:
+    """A results file with no auroc_folds column is still accepted."""
+    df = _results_df(
+        ["A1A", "A2A", "M1K"], [0.5, 0.6, 0.9], [0.5, 0.55, 0.85], with_folds=False
+    )
+    result = global_variant_distinguishability([df], LABEL_COLUMN)
+    assert "meta_median_auroc_median_fold" in result.columns
+    assert len(result) == 3
+
+
+def test_global_variant_distinguishability_median_fold_is_zscored() -> None:
+    """auroc_median_fold goes through the same synonymous z-score as the
+    other two columns, and the auroc_folds list column never reaches the
+    Normalizer (it would otherwise be swept in as a "feature")."""
+    df = _results_df(
+        ["A1A", "A2A", "A3A", "M1K"], [0.5, 0.55, 0.6, 0.95], [0.5, 0.55, 0.6, 0.93]
+    )
+    result = global_variant_distinguishability([df], LABEL_COLUMN)
+    m1k = result.filter(pl.col(LABEL_COLUMN) == "M1K").row(0, named=True)
+    # Synonymous mean 0.55 -> M1K sits well above it once z-scored.
+    assert m1k["meta_median_auroc_median_fold"] > 1.0
 
 
 def test_global_variant_distinguishability_synonymous_lands_near_zero() -> None:
@@ -201,6 +231,7 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path) -> None:
         LABEL_COLUMN,
         "meta_median_auroc_pooled",
         "meta_median_auroc_median_barcode",
+        "meta_median_auroc_median_fold",
         "meta_num_experiments",
     }
     m1k = global_scores.filter(pl.col(LABEL_COLUMN) == "M1K").row(0, named=True)

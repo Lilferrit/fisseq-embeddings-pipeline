@@ -150,7 +150,7 @@ Global Variant CP Distinguish-ability Scores (once, across all experiments)
    experiment.
 9. **Global distinguish-ability pooling is two steps, not one**:
    `GLOBAL_VARIANT_DISTINGUISHABILITY` first z-scores each experiment's
-   `auroc_pooled`/`auroc_median_barcode` against that same experiment's
+   `auroc_pooled`/`auroc_median_barcode`/`auroc_median_fold` against that same experiment's
    own synonymous variants, *then* medians the z-scored values across
    experiments -- rather than medianing raw AUROC directly.
 10. **No pipeline stage copies another stage's data wholesale -- outputs

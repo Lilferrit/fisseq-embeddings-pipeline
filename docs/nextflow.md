@@ -29,7 +29,9 @@ Hydra override string, already rendered, plus the host paths
 
 A missing `pipeline_dir` or `cell_dino_checkpoint`, an empty `experiments`
 list, an unknown or overlapping aggregator name, fewer than two bootstrap
-replicates, or a `starcall_profile` without a `starcall_job_image` all fail
+replicates, an `ovwt_cv_mode` outside `kfold`/`barcode_holdout` (or an
+`ovwt_n_folds` below 2, or `null` outside `barcode_holdout`), or a
+`starcall_profile` without a `starcall_job_image` all fail
 there, with a specific `ERROR: ...` message in the task's error output,
 before any other task is scheduled. `PLAN_EXPERIMENTS` is the one process
 without `errorStrategy 'ignore'`: a bad params file stops the run.
@@ -533,7 +535,7 @@ changed.
     filtered_aggregate.parquet            # blocklist applied -- the per-experiment deliverable
     aggregate_with_passthrough.parquet    # + passthrough columns; TERMINAL, nothing in-pipeline reads it
   ovwt_batchwise/<batch>/
-    results.parquet                       # auroc_pooled, auroc_median_barcode
+    results.parquet                       # auroc_pooled, auroc_median_barcode, auroc_folds, auroc_median_fold
     cell_scores.parquet                   # per-cell out-of-fold scores, one row per cell per variant scored against
     models.pkl                            # dict[variant] -> list[(model, calibrator)], one pair per CV fold
   global/

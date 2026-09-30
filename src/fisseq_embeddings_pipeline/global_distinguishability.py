@@ -1,7 +1,7 @@
 """GLOBAL_VARIANT_DISTINGUISHABILITY.
 
-Two steps, not one: per-experiment, z-score auroc_pooled/auroc_median_barcode
-against that experiment's own synonymous variants (variant_classification +
+Two steps, not one: per-experiment, z-score auroc_pooled/auroc_median_barcode/
+auroc_median_fold against that experiment's own synonymous variants (variant_classification +
 Normalizer, vendored unchanged, same machinery filter.py uses), *then*
 cross-experiment median the z-scored values -- not a direct median of raw
 AUROC. Raw AUROC isn't comparable across experiments (different cell
@@ -14,6 +14,10 @@ pooling across experiments.
 ``.utils.normalizer`` rather than duplicated -- see filter.py's own
 module docstring, which already documents this module as one of the two
 importers.
+
+OVWT_BATCHWISE's per-fold ``auroc_folds`` list column is the one results
+column not carried through: it is not a scalar feature, so it is dropped
+before normalizing (``auroc_median_fold`` is its per-experiment summary).
 """
 
 import dataclasses
@@ -36,7 +40,7 @@ def global_variant_distinguishability(
     batch_score_dfs: List[pl.DataFrame], label_column: str
 ) -> pl.DataFrame:
     """
-    Per-experiment synonymous z-score of both AUROC columns, then
+    Per-experiment synonymous z-score of the scalar AUROC columns, then
     cross-experiment median.
 
     Reuses the exact fit-on-synonymous-rows machinery FILTER_EMBEDDINGS
@@ -46,16 +50,18 @@ def global_variant_distinguishability(
     OVWT_BATCHWISE results.parquet (one row per variant, not one row per
     cell). Normalizer.apply() needs no changes either: it operates on
     FEATURE_SELECTOR (exclude meta_*), which already matches
-    auroc_pooled/auroc_median_barcode and excludes meta_n_barcodes/
-    meta_n_cells with zero modification -- provided label_column itself
-    carries the conventional meta_ prefix (true for every default/example
-    in this pipeline).
+    auroc_pooled/auroc_median_barcode/auroc_median_fold and excludes
+    meta_n_barcodes/meta_n_cells with zero modification -- provided
+    label_column itself carries the conventional meta_ prefix (true for
+    every default/example in this pipeline). The per-fold auroc_folds list
+    column is dropped first, since it is not a scalar feature.
 
     Parameters
     ----------
     batch_score_dfs : list[pl.DataFrame]
         Each experiment's OVWT_BATCHWISE results.parquet --
-        ``label_column``, ``auroc_pooled``, ``auroc_median_barcode``, plus
+        ``label_column``, ``auroc_pooled``, ``auroc_median_barcode``,
+        ``auroc_median_fold``, plus
         ``meta_n_barcodes``/``meta_n_cells``. Must be non-empty.
     label_column : str
         Name of the column identifying variant labels.
@@ -64,7 +70,8 @@ def global_variant_distinguishability(
     -------
     pl.DataFrame
         One row per variant, with ``meta_median_auroc_pooled``,
-        ``meta_median_auroc_median_barcode`` (cross-experiment medians of
+        ``meta_median_auroc_median_barcode``,
+        ``meta_median_auroc_median_fold`` (cross-experiment medians of
         the per-experiment z-scored values), and ``meta_num_experiments``
         (how many experiments' z-scored value for that variant were
         non-null and therefore contributed to the median -- see the
@@ -80,6 +87,8 @@ def global_variant_distinguishability(
 
     zscored_dfs = []
     for df in batch_score_dfs:
+        # A List column would be swept into the Normalizer's feature set.
+        df = df.drop("auroc_folds", strict=False)
         classified = variant_classification(df.lazy(), label_column)
         normalizer = Normalizer.from_lazyframe(classified, fit_only_on_control=True)
         zscored_dfs.append(normalizer.apply(classified).collect())
@@ -87,7 +96,12 @@ def global_variant_distinguishability(
     return (
         pl.concat(
             [
-                df.select(label_column, "auroc_pooled", "auroc_median_barcode")
+                df.select(
+                    label_column,
+                    "auroc_pooled",
+                    "auroc_median_barcode",
+                    "auroc_median_fold",
+                )
                 for df in zscored_dfs
             ]
         )
@@ -97,6 +111,7 @@ def global_variant_distinguishability(
             pl.col("auroc_median_barcode")
             .median()
             .alias("meta_median_auroc_median_barcode"),
+            pl.col("auroc_median_fold").median().alias("meta_median_auroc_median_fold"),
             pl.col("auroc_pooled").count().alias("meta_num_experiments"),
         )
     )

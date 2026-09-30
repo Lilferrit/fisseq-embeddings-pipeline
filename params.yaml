@@ -323,6 +323,23 @@ aggregate_methods_cp_features: ["median"]
 # scoring-methodology hyperparameters, not tied to feature type, so there
 # is no parallel "_cp_features" set for them.
 ovwt_wt_label: "WT"
+# Fold scheme, "kfold" or "barcode_holdout".
+#   kfold           -- ovwt_n_folds folds, stratified jointly on
+#                      (meta_barcode, is_wt); every fold's model has seen every
+#                      barcode.
+#   barcode_holdout -- whole barcodes are held out of training a fold at a
+#                      time, so no model is ever trained on a barcode it later
+#                      scores and the AUROCs measure generalization to an
+#                      unseen barcode. Wildtype cells are still split across
+#                      the folds. A variant with only one barcode is skipped
+#                      (nothing left to train on).
+ovwt_cv_mode: "kfold"
+# Folds per variant. Under "kfold" this is the fold count outright. Under
+# "barcode_holdout" it caps the folds: the variant's barcodes are packed into
+# at most this many cell-count-balanced groups, one group held out per fold, so
+# a variant with fewer barcodes than this simply gets one fold per barcode.
+# null = one fold per barcode always (pure leave-one-barcode-out); it is an
+# error under "kfold", which has no barcode count to fall back on. Must be >= 2.
 ovwt_n_folds: 5
 ovwt_calibrate: true
 ovwt_min_cells: 250

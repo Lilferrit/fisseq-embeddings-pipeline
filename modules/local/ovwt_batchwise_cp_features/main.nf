@@ -27,6 +27,7 @@ process OVWT_BATCHWISE_CP_FEATURES {
         normalizer_file=${normalizer_parquet} \\
         label_column=${params.filter_label_column} \\
         wt_label=${params.ovwt_wt_label} \\
+        cv_mode=${params.ovwt_cv_mode} \\
         n_folds=${params.ovwt_n_folds} \\
         calibrate=${params.ovwt_calibrate} \\
         min_cells=${params.ovwt_min_cells} \\

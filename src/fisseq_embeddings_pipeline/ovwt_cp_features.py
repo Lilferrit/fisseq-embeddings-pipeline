@@ -8,7 +8,7 @@ directly, passing ``FEATURE_SELECTOR`` (CellProfiler-shaped: exclude
 see ovwt.py's module docstring for why this requires no fork of the
 k-fold/XGBoost scoring logic.
 
-OVWT hyperparameters (``wt_label``, ``n_folds``, ``calibrate``,
+OVWT hyperparameters (``wt_label``, ``cv_mode``, ``n_folds``, ``calibrate``,
 ``min_cells``, ``downsample_wt``, ``xgboost``) are about scoring
 methodology, not feature type -- this stage's config mirrors
 ``OvwtEmbeddingConfig`` field-for-field (see the
@@ -29,7 +29,7 @@ from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
 from .filter import load_filtered_embeddings
-from .ovwt import ovwt_batchwise
+from .ovwt import CV_MODE_KFOLD, log_cv_plan, ovwt_batchwise
 from .utils.constants import FEATURE_SELECTOR
 from .utils.log import setup_logging
 from .utils.normalizer import Normalizer
@@ -56,8 +56,14 @@ class OvwtCpFeaturesConfig(AppConfig):
         Name of the variant label column. Defaults to ``"meta_aa_changes"``.
     wt_label : str
         Label value identifying wildtype cells. Defaults to ``"WT"``.
-    n_folds : int
-        Number of cross-validation folds per variant. Defaults to ``5``.
+    cv_mode : str
+        Cross-validation scheme, ``"kfold"`` or ``"barcode_holdout"``.
+        Defaults to ``"kfold"``. See
+        :class:`~fisseq_embeddings_pipeline.ovwt.OvwtEmbeddingConfig`.
+    n_folds : int or None
+        Fold count under ``"kfold"``; cap on the barcode-group count under
+        ``"barcode_holdout"``, where ``None`` means one fold per barcode.
+        Defaults to ``5``.
     calibrate : bool
         If ``True``, fit a per-fold sigmoid (Platt) probability calibrator.
         Defaults to ``True``.
@@ -77,7 +83,8 @@ class OvwtCpFeaturesConfig(AppConfig):
     normalizer_file: str = MISSING
     label_column: str = "meta_aa_changes"
     wt_label: str = "WT"
-    n_folds: int = 5
+    cv_mode: str = CV_MODE_KFOLD
+    n_folds: Optional[int] = 5
     calibrate: bool = True
     min_cells: Optional[int] = 250
     downsample_wt: bool = True
@@ -121,6 +128,7 @@ def main(cfg: DictConfig) -> None:
             cp_features_file=cp_features.parquet \\
             filtered_keys_file=filtered_keys.parquet \\
             normalizer_file=normalizer.parquet \\
+            cv_mode=kfold \\
             n_folds=5 \\
             calibrate=true \\
             min_cells=250 \\
@@ -145,11 +153,7 @@ def main(cfg: DictConfig) -> None:
     logging.info("Reconstructing QC-passed, synonymous-corrected features")
     filtered_lf = load_filtered_embeddings(cp_features_lf, filtered_keys_lf, normalizer)
 
-    logging.info(
-        "Running %d-fold one-vs-wildtype scoring (calibrate=%s)",
-        ovwt_cfg.n_folds,
-        ovwt_cfg.calibrate,
-    )
+    log_cv_plan(ovwt_cfg)
     results_df, cell_scores_df, models = ovwt_batchwise(
         filtered_lf, ovwt_cfg, feature_selector=FEATURE_SELECTOR
     )
