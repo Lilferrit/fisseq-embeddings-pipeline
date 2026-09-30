@@ -2609,7 +2609,9 @@ Hydra override string, already rendered, plus the host paths
 <code>BUILD_CELL_IMAGES</code> needs bound (see <a href="#bind-mounts">Bind mounts</a>).</p>
 <p>A missing <code>pipeline_dir</code> or <code>cell_dino_checkpoint</code>, an empty <code>experiments</code>
 list, an unknown or overlapping aggregator name, fewer than two bootstrap
-replicates, or a <code>starcall_profile</code> without a <code>starcall_job_image</code> all fail
+replicates, an <code>ovwt_cv_mode</code> outside <code>kfold</code>/<code>barcode_holdout</code> (or an
+<code>ovwt_n_folds</code> below 2, or <code>null</code> outside <code>barcode_holdout</code>), or a
+<code>starcall_profile</code> without a <code>starcall_job_image</code> all fail
 there, with a specific <code>ERROR: ...</code> message in the task's error output,
 before any other task is scheduled. <code>PLAN_EXPERIMENTS</code> is the one process
 without <code>errorStrategy 'ignore'</code>: a bad params file stops the run.</p>
@@ -3073,7 +3075,7 @@ changed.</p>
 <a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>    filtered_aggregate.parquet            # blocklist applied -- the per-experiment deliverable
 <a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>    aggregate_with_passthrough.parquet    # + passthrough columns; TERMINAL, nothing in-pipeline reads it
 <a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>  ovwt_batchwise/&lt;batch&gt;/
-<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>    results.parquet                       # auroc_pooled, auroc_median_barcode
+<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>    results.parquet                       # auroc_pooled, auroc_median_barcode, auroc_folds, auroc_median_fold
 <a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>    cell_scores.parquet                   # per-cell out-of-fold scores, one row per cell per variant scored against
 <a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a>    models.pkl                            # dict[variant] -&gt; list[(model, calibrator)], one pair per CV fold
 <a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a>  global/

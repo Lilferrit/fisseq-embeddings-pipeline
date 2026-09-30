@@ -902,6 +902,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#cross-validation-schemes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-validation schemes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#config-fields" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2195,6 +2206,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#cross-validation-schemes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-validation schemes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#config-fields" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2261,16 +2283,22 @@ embedding table and, per experiment, for every non-wildtype variant,
 <em>k</em>-fold cross-validates a binary XGBoost classifier against wildtype
 cells on the synonymous-corrected embedding dimensions -- producing an
 out-of-fold (OOF) score for <strong>every cell</strong> in the variant's vs.-WT subset,
-then reducing those OOF scores to two distinguish-ability numbers per
+then reducing those OOF scores to several distinguish-ability numbers per
 variant.</p>
 <p>Adapted from <code>fisseq-data-pipeline</code>'s <code>ovwt.py</code>, replacing its single
-80/10/10 train/val/test split with <code>n_folds</code>-fold cross-validation
-stratified jointly on <code>(meta_barcode, is_wt)</code> (so both barcode composition
-and the WT/variant balance are preserved fold-to-fold). Every cell gets
-exactly one out-of-fold score. Each fold optionally fits its own
-probability calibrator (<code>calibrate</code>, sigmoid scaling fit on a slice held
-out of that fold's training data) before scoring its test slice.</p>
-<p>Two output scores per variant, both computed from the pooled OOF scores:</p>
+80/10/10 train/val/test split with cross-validation (see
+<a href="#cross-validation-schemes">Cross-validation schemes</a>). Every cell gets
+exactly one out-of-fold score. Within each fold, the fit rows are split
+80/20 into train and calibration halves, stratified on the same
+<code>(meta_barcode, is_wt)</code> key. A stratum with a single member inside a fold
+goes to the train half, with a warning, instead of making the split
+raise. The calibration half is XGBoost's early-stopping set and, when
+<code>calibrate</code> is on, the fit set for that fold's sigmoid probability
+calibrator.</p>
+<p><code>fisseq-data-pipeline</code> later ported this k-fold scheme back and extended
+it: the two-way inner split, <code>cv_mode</code>, per-fold AUROCs and progress
+logging (its PRs #75-#77 and #80). This stage mirrors those changes.</p>
+<p>Per-variant output scores:</p>
 <ul>
 <li><code>auroc_pooled</code> -- AUROC over every cell in the variant's vs.-WT subset.</li>
 <li><code>auroc_median_barcode</code> -- for each of the variant's own barcodes
@@ -2279,6 +2307,47 @@ out of that fold's training data) before scoring its test slice.</p>
   values. Surfaces whether a variant's apparent distinguishability is
   broad-based across its barcodes or driven by one or two outlier
   barcodes -- invisible in a single pooled number.</li>
+<li><code>auroc_folds</code> / <code>auroc_median_fold</code> -- each fold's test slice scored by
+  that fold's own model: a list with one entry per fold, <code>null</code> where a
+  fold's test slice holds a single class, plus the median of the defined
+  entries. The first two scores pool OOF scores from different fold models
+  into one ROC curve, and those models' scores don't share a scale, which
+  can inflate the result. A per-fold AUROC only ever ranks one model's
+  scores against each other.</li>
+</ul>
+<h2 id="cross-validation-schemes">Cross-validation schemes<a class="headerlink" href="#cross-validation-schemes" title="Permanent link">&para;</a></h2>
+<p><code>cv_mode</code> selects how folds are cut:</p>
+<ul>
+<li><code>kfold</code> (default) -- <code>n_folds</code> folds from <code>StratifiedKFold</code>, stratified
+  jointly on <code>(meta_barcode, is_wt)</code>. Any <code>(barcode, is_wt)</code> stratum with
+  fewer than 10 cells joins a shared <code>rare|wt</code>/<code>rare|variant</code> bucket.
+  Every fold's model has seen every barcode, so the AUROCs measure
+  separability <em>within</em> the barcodes the classifier was trained on.</li>
+<li><code>barcode_holdout</code> -- each fold holds a whole variant barcode, or a
+  group of them, out of training, so no model ever scores a barcode it
+  was trained on. <code>n_folds</code> caps the fold count:<ul>
+<li><code>null</code> gives one fold per barcode (pure leave-one-barcode-out).</li>
+<li>An integer packs the barcodes into that many groups, balanced by
+  cell count (greedy, largest barcode first, deterministic).</li>
+<li>A value at or above the barcode count falls back to one fold per
+  barcode.</li>
+</ul>
+</li>
+</ul>
+<p>Wildtype cells are still split across the folds, so every cell keeps
+  exactly one OOF score and every output column keeps its meaning. What
+  the scores measure changes: whether a variant's signal <em>generalizes to
+  an unseen barcode</em>. A barcode-specific technical artifact inflates the
+  k-fold number without showing up, but it is penalized here. A variant
+  with only one barcode can't be scored in this mode and is skipped with a
+  warning.</p>
+<p>The stage logs its progress as it runs:</p>
+<ul>
+<li>a <code>[i/N]</code> header per variant</li>
+<li>one line per fold: held-out barcodes, train/calib/test sizes, and that
+  fold's AUROC (<code>n/a</code> for a single-class fold)</li>
+<li>one line per barcode</li>
+<li>a closing summary per variant</li>
 </ul>
 <h2 id="config-fields">Config fields<a class="headerlink" href="#config-fields" title="Permanent link">&para;</a></h2>
 <p>Extends the <a href="#common-config-fields">common config fields</a> below.</p>
@@ -2317,9 +2386,14 @@ out of that fold's training data) before scoring its test slice.</p>
 <td>Label value identifying wildtype cells.</td>
 </tr>
 <tr>
+<td><code>cv_mode</code></td>
+<td><code>"kfold"</code></td>
+<td>Cross-validation scheme: <code>"kfold"</code> or <code>"barcode_holdout"</code> -- see <a href="./#cross-validation-schemes">Cross-validation schemes</a>.</td>
+</tr>
+<tr>
 <td><code>n_folds</code></td>
 <td><code>5</code></td>
-<td>Number of cross-validation folds per variant.</td>
+<td>Fold count under <code>kfold</code>; a cap on the fold count under <code>barcode_holdout</code>, where <code>null</code> means one fold per barcode. <code>null</code> is an error under <code>kfold</code>; values below 2 always are.</td>
 </tr>
 <tr>
 <td><code>calibrate</code></td>
@@ -2347,7 +2421,8 @@ out of that fold's training data) before scoring its test slice.</p>
 <p>Written to <code>output_dir</code>:</p>
 <ul>
 <li><code>results.parquet</code> -- <code>meta_aa_changes</code>, <code>auroc_pooled</code>,
-  <code>auroc_median_barcode</code>, <code>meta_n_barcodes</code>, <code>meta_n_cells</code>.</li>
+  <code>auroc_median_barcode</code>, <code>auroc_folds</code> (<code>List(Float64)</code>),
+  <code>auroc_median_fold</code>, <code>meta_n_barcodes</code>, <code>meta_n_cells</code>.</li>
 <li><code>cell_scores.parquet</code> -- per-cell OOF scores: <code>meta_*</code> columns plus
   <code>score</code> and <code>meta_variant_scored_against</code>, one row per cell per variant
   it was scored against.</li>
@@ -2360,8 +2435,9 @@ out of that fold's training data) before scoring its test slice.</p>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">embeddings_file</span><span class="o">=</span>embeddings.parquet<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">filtered_keys_file</span><span class="o">=</span>filtered_keys.parquet<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">normalizer_file</span><span class="o">=</span>normalizer.parquet<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">n_folds</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nv">calibrate</span><span class="o">=</span><span class="nb">true</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">cv_mode</span><span class="o">=</span>kfold<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nv">n_folds</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nv">calibrate</span><span class="o">=</span><span class="nb">true</span>
 </code></pre></div>
 <h2 id="common-config-fields">Common config fields<a class="headerlink" href="#common-config-fields" title="Permanent link">&para;</a></h2>
 <p>Every CLI tool's config extends <code>AppConfig</code>, which supplies:</p>

@@ -2261,7 +2261,7 @@
 wildtype XGBoost scoring described on the <a href="../ovwt/">OVWT</a> page, called
 with <code>feature_selector=FEATURE_SELECTOR</code> instead of <code>OVWT_BATCHWISE</code>'s
 default <code>EMBEDDING_SELECTOR</code>. No other behavior differs.</p>
-<p>OVWT's hyperparameters (<code>wt_label</code>, <code>n_folds</code>, <code>calibrate</code>, <code>min_cells</code>,
+<p>OVWT's hyperparameters (<code>wt_label</code>, <code>cv_mode</code>, <code>n_folds</code>, <code>calibrate</code>, <code>min_cells</code>,
 <code>downsample_wt</code>, <code>xgboost</code>) are about scoring methodology, not feature
 type -- <code>params.yaml</code>'s <code>ovwt_*</code> params are reused, unchanged, by both
 <code>OVWT_BATCHWISE</code> and this stage; there is no parallel <code>ovwt_*_cp_features</code>
@@ -2303,9 +2303,14 @@ parameter set.</p>
 <td>Label value identifying wildtype cells.</td>
 </tr>
 <tr>
+<td><code>cv_mode</code></td>
+<td><code>"kfold"</code></td>
+<td>Cross-validation scheme: <code>"kfold"</code> or <code>"barcode_holdout"</code> -- see <a href="../ovwt/#cross-validation-schemes">Cross-validation schemes</a>.</td>
+</tr>
+<tr>
 <td><code>n_folds</code></td>
 <td><code>5</code></td>
-<td>Number of cross-validation folds per variant.</td>
+<td>Fold count under <code>kfold</code>; a cap on the fold count under <code>barcode_holdout</code>, where <code>null</code> means one fold per barcode. <code>null</code> is an error under <code>kfold</code>; values below 2 always are.</td>
 </tr>
 <tr>
 <td><code>calibrate</code></td>

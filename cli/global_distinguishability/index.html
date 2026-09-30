@@ -2258,7 +2258,8 @@
 <h1 id="global-variant-distinguish-ability-scores-global_variant_distinguishability">Global Variant Distinguish-ability Scores (<code>GLOBAL_VARIANT_DISTINGUISHABILITY</code>)<a class="headerlink" href="#global-variant-distinguish-ability-scores-global_variant_distinguishability" title="Permanent link">&para;</a></h1>
 <p><code>python -m fisseq_embeddings_pipeline.global_distinguishability</code> (Nextflow process <code>GLOBAL_VARIANT_DISTINGUISHABILITY</code>) is two steps, not one:
 per-experiment, z-score both of that experiment's per-variant
-distinguish-ability scores (<code>auroc_pooled</code>, <code>auroc_median_barcode</code>)
+distinguish-ability scores (<code>auroc_pooled</code>, <code>auroc_median_barcode</code>,
+<code>auroc_median_fold</code>)
 against its own synonymous variants, <em>then</em> take the cross-experiment
 median of the z-scored values -- no PCA.</p>
 <p>Raw AUROC is not comparable across experiments (different cell counts,
@@ -2300,7 +2301,10 @@ rather than corrupting it.</p>
 </table>
 <h2 id="output-file">Output file<a class="headerlink" href="#output-file" title="Permanent link">&para;</a></h2>
 <p><code>global_scores.parquet</code> -- <code>meta_aa_changes</code>, <code>meta_median_auroc_pooled</code>,
-<code>meta_median_auroc_median_barcode</code>, <code>meta_num_experiments</code>.</p>
+<code>meta_median_auroc_median_barcode</code>, <code>meta_median_auroc_median_fold</code>,
+<code>meta_num_experiments</code>. The per-fold <code>auroc_folds</code> list is not carried
+through -- it is dropped before normalizing, since it is not a scalar;
+<code>auroc_median_fold</code> is its per-experiment summary.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.global_distinguishability<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="nv">output_dir</span><span class="o">=</span>./out<span class="w"> </span><span class="se">\</span>
