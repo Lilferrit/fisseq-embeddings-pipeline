@@ -3,7 +3,8 @@
 Thin Hydra entry point reusing global_distinguishability.py's
 :func:`~fisseq_embeddings_pipeline.global_distinguishability.global_variant_distinguishability`
 directly -- no changes needed to that function, since it only ever touches
-``auroc_pooled``/``auroc_median_barcode`` columns, never the underlying
+the scalar AUROC columns (``auroc_pooled``/``auroc_median_barcode``/
+``auroc_median_fold``), never the underlying
 feature space (see that module's docstring). Same per-experiment
 synonymous z-score, then cross-experiment median, as
 GLOBAL_VARIANT_DISTINGUISHABILITY, applied to OVWT_BATCHWISE_CP_FEATURES'

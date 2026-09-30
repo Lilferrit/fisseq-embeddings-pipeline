@@ -115,6 +115,7 @@ global default. `window` routes to `BUILD_DATASET` only;
 | `reproducibility_min_correlation` | `0.5` | `BLOCKLIST` |
 | `reproducibility_global_min_batches_ok` | `null` | `GLOBAL_BLOCKLIST` |
 | `ovwt_wt_label` | `"WT"` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
+| `ovwt_cv_mode` | `"kfold"` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
 | `ovwt_n_folds` | `5` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
 | `ovwt_calibrate` | `true` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |
 | `ovwt_min_cells` | `250` | `OVWT_BATCHWISE`, `OVWT_BATCHWISE_CP_FEATURES` |

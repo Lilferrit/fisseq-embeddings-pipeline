@@ -678,7 +678,12 @@ def test_aggregate_and_ovwt_outputs_exist(pipeline_outputs):
     )
     assert agg.height >= 1
     results = pl.read_parquet(exp_dir / "ovwt_batchwise" / "batch1" / "results.parquet")
-    assert {"auroc_pooled", "auroc_median_barcode"}.issubset(results.columns)
+    assert {
+        "auroc_pooled",
+        "auroc_median_barcode",
+        "auroc_folds",
+        "auroc_median_fold",
+    }.issubset(results.columns)
 
 
 # ---------------------------------------------------------------------------
@@ -966,9 +971,10 @@ def test_global_stage_outputs_exist(pipeline_outputs):
         "pca_reduced.parquet",
     ):
         assert (global_embeddings_dir / name).exists(), name
-    assert (
+    global_scores = pl.read_parquet(
         exp_dir / "global" / "distinguishability" / "global_scores.parquet"
-    ).exists()
+    )
+    assert "meta_median_auroc_median_fold" in global_scores.columns
 
 
 # ---------------------------------------------------------------------------
@@ -1012,7 +1018,12 @@ def test_aggregate_and_ovwt_cp_features_outputs_exist(pipeline_outputs):
     results = pl.read_parquet(
         exp_dir / "ovwt_batchwise_cp_features" / "batch1" / "results.parquet"
     )
-    assert {"auroc_pooled", "auroc_median_barcode"}.issubset(results.columns)
+    assert {
+        "auroc_pooled",
+        "auroc_median_barcode",
+        "auroc_folds",
+        "auroc_median_fold",
+    }.issubset(results.columns)
 
 
 def test_global_cp_features_stage_outputs_exist(pipeline_outputs):
@@ -1079,7 +1090,7 @@ def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs
     per-variant AUROC scores exactly reproducible across independent runs
     -- not merely structurally identical (same columns, same row count),
     the actual numeric scores must match, since it's the numbers
-    (auroc_pooled/auroc_median_barcode) downstream analyses actually
+    (auroc_pooled/auroc_median_barcode/auroc_median_fold) downstream analyses actually
     compare across pipeline versions/reruns."""
     first, second = (r["ovwt"] for r in reproducibility_outputs)
     first = first.sort("meta_aa_changes")
@@ -1088,7 +1099,7 @@ def test_rerunning_with_same_seed_reproduces_ovwt_scores(reproducibility_outputs
     assert first["meta_aa_changes"].to_list() == second["meta_aa_changes"].to_list()
     assert first["meta_n_barcodes"].to_list() == second["meta_n_barcodes"].to_list()
     assert first["meta_n_cells"].to_list() == second["meta_n_cells"].to_list()
-    for col in ("auroc_pooled", "auroc_median_barcode"):
+    for col in ("auroc_pooled", "auroc_median_barcode", "auroc_median_fold"):
         np.testing.assert_allclose(
             first[col].to_numpy(), second[col].to_numpy(), err_msg=col
         )

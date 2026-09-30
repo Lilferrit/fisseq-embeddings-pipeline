@@ -41,6 +41,8 @@ def _config(**overrides):
         "reproducibility_bootstrap_reps": 10,
         "reproducibility_min_correlation": 0.5,
         "reproducibility_global_min_batches_ok": None,
+        "ovwt_cv_mode": "kfold",
+        "ovwt_n_folds": 5,
     }
     config.update(overrides)
     return config
@@ -139,6 +141,49 @@ def test_invalid_global_min_batches_ok_raises(n):
 def test_null_global_min_batches_ok_is_accepted():
     """null means unanimity -- the default."""
     validate_config(_config(reproducibility_global_min_batches_ok=None))
+
+
+# ── validate_config: OVWT cross-validation ─────────────────────────────────
+
+
+@pytest.mark.parametrize("mode", ["leave_one_barcode_out", "KFOLD", "", None])
+def test_unknown_ovwt_cv_mode_raises(mode):
+    """The pre-rename "leave_one_barcode_out" is rejected, not silently
+    treated as k-fold."""
+    with pytest.raises(ValueError, match="ovwt_cv_mode"):
+        validate_config(_config(ovwt_cv_mode=mode))
+
+
+@pytest.mark.parametrize("mode", ["kfold", "barcode_holdout"])
+def test_ovwt_cv_modes_are_accepted(mode):
+    validate_config(_config(ovwt_cv_mode=mode, ovwt_n_folds=3))
+
+
+@pytest.mark.parametrize("n", [None, "null", ""])
+def test_null_ovwt_n_folds_requires_barcode_holdout(n):
+    """null means one fold per barcode -- k-fold has no barcode count to
+    fall back on."""
+    with pytest.raises(ValueError, match="only valid with ovwt_cv_mode"):
+        validate_config(_config(ovwt_cv_mode="kfold", ovwt_n_folds=n))
+    validate_config(_config(ovwt_cv_mode="barcode_holdout", ovwt_n_folds=n))
+
+
+@pytest.mark.parametrize("n", [1, 0, -3, "1"])
+def test_ovwt_n_folds_below_two_raises(n):
+    for mode in ("kfold", "barcode_holdout"):
+        with pytest.raises(ValueError, match="at least 2"):
+            validate_config(_config(ovwt_cv_mode=mode, ovwt_n_folds=n))
+
+
+@pytest.mark.parametrize("n", ["five", 2.5, True])
+def test_non_integer_ovwt_n_folds_raises(n):
+    with pytest.raises(ValueError, match="integer or null"):
+        validate_config(_config(ovwt_n_folds=n))
+
+
+def test_string_ovwt_n_folds_from_cli_is_accepted():
+    """A command-line override arrives as a string."""
+    validate_config(_config(ovwt_n_folds="4"))
 
 
 def test_missing_pipeline_dir_raises():

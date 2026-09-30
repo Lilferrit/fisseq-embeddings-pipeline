@@ -6,7 +6,7 @@ wildtype XGBoost scoring described on the [OVWT](ovwt.md) page, called
 with `feature_selector=FEATURE_SELECTOR` instead of `OVWT_BATCHWISE`'s
 default `EMBEDDING_SELECTOR`. No other behavior differs.
 
-OVWT's hyperparameters (`wt_label`, `n_folds`, `calibrate`, `min_cells`,
+OVWT's hyperparameters (`wt_label`, `cv_mode`, `n_folds`, `calibrate`, `min_cells`,
 `downsample_wt`, `xgboost`) are about scoring methodology, not feature
 type -- `params.yaml`'s `ovwt_*` params are reused, unchanged, by both
 `OVWT_BATCHWISE` and this stage; there is no parallel `ovwt_*_cp_features`
@@ -23,7 +23,8 @@ Extends the [common config fields](#common-config-fields) below.
 | `normalizer_file` | **required** | Path to `FILTER_CP_FEATURES`' `normalizer.parquet`. |
 | `label_column` | `"meta_aa_changes"` | Name of the variant label column. |
 | `wt_label` | `"WT"` | Label value identifying wildtype cells. |
-| `n_folds` | `5` | Number of cross-validation folds per variant. |
+| `cv_mode` | `"kfold"` | Cross-validation scheme: `"kfold"` or `"barcode_holdout"` -- see [Cross-validation schemes](ovwt.md#cross-validation-schemes). |
+| `n_folds` | `5` | Fold count under `kfold`; a cap on the fold count under `barcode_holdout`, where `null` means one fold per barcode. `null` is an error under `kfold`; values below 2 always are. |
 | `calibrate` | `true` | Fit a per-fold sigmoid probability calibrator. |
 | `min_cells` | `250` | Minimum cells a variant must have to be scored (wildtype always kept). `null` disables this filter. |
 | `downsample_wt` | `true` | Downsample wildtype cells (barcode-proportionally) to the size of the largest remaining variant group. |

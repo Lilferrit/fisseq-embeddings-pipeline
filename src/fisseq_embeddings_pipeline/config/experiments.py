@@ -93,8 +93,8 @@ def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
         any entry's ``cp_features`` is not a boolean, if two entries
         share a ``batch_stem``, if ``aggregate_methods`` /
         ``aggregate_methods_passthrough`` name an unknown aggregator or
-        overlap each other, or if ``reproducibility_bootstrap_reps`` is
-        below 2.
+        overlap each other, if ``reproducibility_bootstrap_reps`` is
+        below 2, or if ``ovwt_cv_mode`` / ``ovwt_n_folds`` are invalid.
     """
     if config.get("pipeline_dir") is None:
         raise ValueError("pipeline_dir is required (--pipeline_dir ...).")
@@ -135,6 +135,7 @@ def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
 
     _validate_aggregate_methods(config)
     _validate_reproducibility(config)
+    _validate_ovwt(config)
     _validate_starcall_profile(config)
 
     return [dict(entry) for entry in experiments]
@@ -231,6 +232,49 @@ def _validate_reproducibility(config: Mapping[str, Any]) -> None:
             "reproducibility_global_min_batches_ok must be null or an integer "
             f">= 1, got {min_batches!r}."
         )
+
+
+def _validate_ovwt(config: Mapping[str, Any]) -> None:
+    """
+    Check ``ovwt_cv_mode`` and ``ovwt_n_folds``, mirroring
+    :func:`fisseq_embeddings_pipeline.ovwt.ovwt_batchwise`'s own guards.
+
+    Both OVWT tasks carry ``errorStrategy 'ignore'``, so a bad value caught
+    only inside ``ovwt_batchwise`` would silently drop every experiment's
+    scores; checking here fails the run before any task is submitted. The
+    Python counterpart of the ``ovwtCvModes()``/``ovwtNFolds()`` checks
+    fisseq-data-pipeline does in Groovy -- reading ``CV_MODES`` directly, so
+    there is no second copy to drift.
+
+    ``ovwt_n_folds`` may arrive as a string from a command-line override
+    (``--ovwt_n_folds null``), so ``"null"``/blank and digit strings are
+    understood as well as real ``None``/integers.
+    """
+    from ..ovwt import CV_MODE_BARCODE_HOLDOUT, CV_MODES
+
+    cv_mode = config.get("ovwt_cv_mode")
+    if cv_mode not in CV_MODES:
+        raise ValueError(
+            f"ovwt_cv_mode must be one of {', '.join(CV_MODES)}, got {cv_mode!r}."
+        )
+
+    raw = config.get("ovwt_n_folds")
+    if raw is None or (isinstance(raw, str) and raw.strip() in ("", "null")):
+        n_folds = None
+    elif isinstance(raw, int) and not isinstance(raw, bool):
+        n_folds = raw
+    elif isinstance(raw, str) and raw.strip().lstrip("-").isdigit():
+        n_folds = int(raw)
+    else:
+        raise ValueError(f"ovwt_n_folds must be an integer or null, got {raw!r}.")
+
+    if n_folds is None and cv_mode != CV_MODE_BARCODE_HOLDOUT:
+        raise ValueError(
+            "ovwt_n_folds = null (one fold per barcode) is only valid with "
+            f"ovwt_cv_mode = {CV_MODE_BARCODE_HOLDOUT!r}, not {cv_mode!r}."
+        )
+    if n_folds is not None and n_folds < 2:
+        raise ValueError(f"ovwt_n_folds must be at least 2, got {n_folds}.")
 
 
 def _validate_starcall_profile(config: Mapping[str, Any]) -> None:

@@ -2,7 +2,8 @@
 
 `python -m fisseq_embeddings_pipeline.global_distinguishability` (Nextflow process `GLOBAL_VARIANT_DISTINGUISHABILITY`) is two steps, not one:
 per-experiment, z-score both of that experiment's per-variant
-distinguish-ability scores (`auroc_pooled`, `auroc_median_barcode`)
+distinguish-ability scores (`auroc_pooled`, `auroc_median_barcode`,
+`auroc_median_fold`)
 against its own synonymous variants, *then* take the cross-experiment
 median of the z-scored values -- no PCA.
 
@@ -34,7 +35,10 @@ Extends the [common config fields](#common-config-fields) below.
 ## Output file
 
 `global_scores.parquet` -- `meta_aa_changes`, `meta_median_auroc_pooled`,
-`meta_median_auroc_median_barcode`, `meta_num_experiments`.
+`meta_median_auroc_median_barcode`, `meta_median_auroc_median_fold`,
+`meta_num_experiments`. The per-fold `auroc_folds` list is not carried
+through -- it is dropped before normalizing, since it is not a scalar;
+`auroc_median_fold` is its per-experiment summary.
 
 ## Example
 
