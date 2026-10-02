@@ -6,12 +6,19 @@ per-experiment `metadata.parquet`. No images, no feature columns, no
 `starcall-workflow` tree access.
 
 This stage exists to make `QC_FILTER` the point where the cellDINO and
-CellProfiler tracks fan out, rather than `BUILD_DATASET`. Before it, QC's
-input was `BUILD_DATASET`'s own `metadata.parquet`, written inside that
-stage's WebDataset shard-writing loop -- which made the expensive,
-image-reading dataset build a hard dependency of the CellProfiler track
-too, since `FILTER_CP_FEATURES` consumes the same QC output. See
+CellProfiler tracks fan out, off a cheap table projection rather than the
+image-reading cellDINO track. Before it, QC's input was the (since
+removed) `BUILD_DATASET` stage's own `metadata.parquet`, written inside
+its WebDataset shard-writing loop -- which made the expensive dataset
+build a hard dependency of the CellProfiler track too, since
+`FILTER_CP_FEATURES` consumes the same QC output. See
 [Nextflow Workflow: Track independence](../nextflow.md#track-independence).
+
+`EMBED_CELLS` reads this same `metadata.parquet` too: a cell shard's
+`meta.json` carries only the cell's location, and every other `meta_*`
+column is joined on from here (see [Cell Embeddings](embed.md)) -- so a
+cell's `meta_*` values are identical in QC's input and in
+`embeddings.parquet`.
 
 `QC_FILTER` can't simply read `cell_table.parquet` itself: its
 `filter_columns` does rename the barcode/edit-distance/amino-acid-changes
@@ -38,6 +45,11 @@ Extends the [common config fields](#common-config-fields) below.
 | `aa_changes_col_name` | `"aaChanges"` | Column name for amino-acid change labels in `cell_table.parquet`. |
 | `edit_distance_col_name` | `"editDistance"` | Column name for edit distances in `cell_table.parquet`. |
 
+The three `*_col_name` fields reach this stage from an `experiments:`
+entry the same way they reach `BUILD_CP_FEATURES` (the plan's
+`cell_table_args`), so both tracks read the cell table with the same
+column names.
+
 ## Output file
 
 Written to `output_dir`:
@@ -46,9 +58,9 @@ Written to `output_dir`:
   `meta_batch`, `meta_well`, `meta_tile`, `meta_cell_index`,
   `meta_barcode`, `meta_aa_changes`, `meta_edit_distance`.
 
-Note this covers *every* row of `cell_table.parquet`, where
-`BUILD_DATASET`'s own `metadata.parquet` only ever held cells that made it
-into a shard. `filtered_cells.parquet` can therefore cover strictly more
+Note this covers *every* row of `cell_table.parquet`, where the removed
+`BUILD_DATASET` stage's own `metadata.parquet` only ever held cells that
+made it into a shard. `filtered_cells.parquet` can therefore cover strictly more
 cells than it used to; every downstream consumer inner-joins it back on
 `filter.py`'s `JOIN_KEYS`, so the extra rows drop out where they don't
 apply.

@@ -6,15 +6,20 @@ Projects BUILD_CELL_IMAGES' ``cell_table.parquet`` down to the seven
 starcall-workflow tree access.
 
 This stage exists to make QC_FILTER the pipeline's shared fan-out point
-instead of BUILD_DATASET. Before it, ``qcfilter.py``'s ``cell_files``
-input was BUILD_DATASET's own ``metadata.parquet``, written inside that
-stage's WebDataset shard-writing loop (``dataset.py``'s
-``write_dataset_shards``) -- which made the expensive, image-reading
-cellDINO dataset build a hard dependency of the CellProfiler track,
-whose ``FILTER_CP_FEATURES`` consumes the very same QC output. Both
-tracks now hang off QC independently, and QC itself depends only on the
-cell table. It also means QC thresholds can be retuned (and the whole QC
-report regenerated) without touching the shard build at all.
+instead of the image-reading cellDINO track. Before it, ``qcfilter.py``'s
+``cell_files`` input was the (since removed) BUILD_DATASET stage's own
+``metadata.parquet``, written inside its WebDataset shard-writing loop --
+which made the expensive dataset build a hard dependency of the
+CellProfiler track, whose ``FILTER_CP_FEATURES`` consumes the very same QC
+output. Both tracks now hang off QC independently, and QC itself depends
+only on the cell table. It also means QC thresholds can be retuned (and
+the whole QC report regenerated) without touching the shards at all.
+
+EMBED_CELLS reads this same ``metadata.parquet`` too: a shard's
+``meta.json`` carries only each cell's location (``tile_shard.py``), and
+``embed.attach_metadata`` joins the rest of its ``meta_*`` columns back on
+from here -- so a cell's ``meta_*`` values are identical in QC's input and
+in ``embeddings.parquet``.
 
 Structurally the analogue of ``fisseq-data-pipeline``'s own ``INPUT``
 stage (``src/fisseq_data_pipeline/input.py``, ``the `input` rule``):
@@ -31,13 +36,10 @@ CellProfiler-looking) columns -- so the cell table's unprefixed ``well``/
 stage applies is shared with ``cp_features.py`` via
 ``utils/cell_table.py`` so those key columns can't drift between the two.
 
-Note this stage sees every row of ``cell_table.parquet``, whereas
-BUILD_DATASET's ``metadata.parquet`` only ever held cells that made it
-into a shard (``dataset.py`` skips empty tiles and needs each tile's crop
-stacks to be readable). ``filtered_cells.parquet`` can therefore cover
-strictly more cells than it used to; every downstream consumer joins it
-back on ``JOIN_KEYS`` with an inner join, so the extra rows drop out
-where they don't apply.
+Note this stage sees every row of ``cell_table.parquet``, whether or not
+that cell's tile made it into a shard. Every downstream consumer joins
+``filtered_cells.parquet`` back on ``JOIN_KEYS`` with an inner join, so
+any extra rows drop out where they don't apply.
 """
 
 import dataclasses
@@ -74,11 +76,12 @@ class CellMetadataConfig(AppConfig):
     batch_stem : str
         This experiment's identifier, written into every row as
         ``meta_batch`` -- one run covers exactly one experiment, matching
-        BUILD_DATASET's and BUILD_CP_FEATURES' convention.
+        BUILD_CP_FEATURES' convention.
     barcode_col_name : str
         Name of the barcode column in cell_table.parquet. Defaults to
-        ``"upBarcode"`` -- same default as ``BuildDatasetConfig`` and
-        ``CpFeaturesConfig``, since all three read the same table.
+        ``"upBarcode"`` -- same default as ``CpFeaturesConfig``, since both
+        read the same table (and get the same per-experiment overrides --
+        ``config/experiments.py``'s ``cell_table_overrides``).
     aa_changes_col_name : str
         Name of the amino-acid changes column in cell_table.parquet.
         Defaults to ``"aaChanges"``.

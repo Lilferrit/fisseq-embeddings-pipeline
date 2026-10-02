@@ -175,6 +175,7 @@ def _enumerate(tmp_path: Path, **overrides):
         grid_size=None,
         segmentation_type="cells",
         use_corrected=False,
+        window=224,
         sequencing_reads_params="",
         cp_features=False,
         cellprofiler_cycle="",
@@ -191,9 +192,10 @@ def test_build_enumeration_lists_expected_targets_without_cp_features(tmp_path: 
     result = _enumerate(tmp_path)
 
     tile_dir = f"{tmp_path}/well1_grid4/tile0x0y"
+    # The shard, not the whole-tile image/mask it's cut from: those stay
+    # temp() upstream, so snakemake can delete them.
     assert set(result["targets"]) == {
-        f"{tile_dir}/raw_pt.tif",
-        f"{tile_dir}/cells_mask.tif",
+        f"{tile_dir}/cells_raw_shard_224.tar",
         f"{tile_dir}/cells.csv",
         f"{seq_dir}/well1_grid4/tile0x0y/cells_reads.csv",
     }
@@ -202,28 +204,31 @@ def test_build_enumeration_lists_expected_targets_without_cp_features(tmp_path: 
     assert row["cellprofiler_csv"] == ""
     assert row["segmentation_csv"] == f"{tile_dir}/cells.csv"
     assert row["reads_csv"] == f"{seq_dir}/well1_grid4/tile0x0y/cells_reads.csv"
-    assert row["image_tif"] == f"{tile_dir}/raw_pt.tif"
-    assert row["mask_tif"] == f"{tile_dir}/cells_mask.tif"
+    assert row["shard_tar"] == f"{tile_dir}/cells_raw_shard_224.tar"
     assert set(row) == set(mod._MANIFEST_FIELDNAMES)
 
 
-def test_build_enumeration_targets_corrected_image_when_use_corrected(tmp_path: Path):
-    """Mirrors starcall-workflow's own get_phenotyping_pt."""
+def test_build_enumeration_names_shard_by_image_and_window(tmp_path: Path):
+    """use_corrected (mirroring starcall-workflow's own get_phenotyping_pt)
+    and window are in the shard's filename, so changing either requests a
+    new shard instead of reusing a stale one."""
     _make_tile_dir(tmp_path, "well1", 4, 0, 0)
 
-    result = _enumerate(tmp_path, use_corrected=True)
+    result = _enumerate(tmp_path, use_corrected=True, window=180)
 
-    tile_dir = f"{tmp_path}/well1_grid4/tile0x0y"
-    assert f"{tile_dir}/corrected_pt.tif" in result["targets"]
-    assert f"{tile_dir}/raw_pt.tif" not in result["targets"]
-    assert result["manifest_rows"][0]["image_tif"] == f"{tile_dir}/corrected_pt.tif"
+    shard = f"{tmp_path}/well1_grid4/tile0x0y/cells_corrected_shard_180.tar"
+    assert shard in result["targets"]
+    assert result["manifest_rows"][0]["shard_tar"] == shard
 
 
 def test_build_enumeration_with_explicit_grid_needs_no_existing_tiles(tmp_path: Path):
     result = _enumerate(tmp_path, grid_size=1)
 
     assert [r["tile"] for r in result["manifest_rows"]] == ["tile00x00y"]
-    assert f"{tmp_path}/well1_grid1/tile00x00y/cells_mask.tif" in result["targets"]
+    assert (
+        f"{tmp_path}/well1_grid1/tile00x00y/cells_raw_shard_224.tar"
+        in result["targets"]
+    )
 
 
 def test_build_enumeration_includes_cellprofiler_target_when_enabled(tmp_path: Path):

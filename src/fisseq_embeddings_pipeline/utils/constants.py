@@ -11,12 +11,9 @@ this pipeline's zero-padded ``emb_%04d`` embedding-dimension columns the
 same way ``FEATURE_SELECTOR`` matches CellProfiler's upper-case-plus-
 underscore columns in the source repo.
 
-Another addition: ``TILE_DIR_RE``, the one piece of the
-BUILD_CELL_IMAGES/BUILD_DATASET tile-naming convention (``tile<x>x<y>y``)
-both ``dataset.py`` and ``build_cell_images_enumerate.py`` need to stay in
-sync on -- shared here (rather than left as two independent
-``re.compile()`` copies, as it was before the two stages lived in the same
-package) so the one thing that must not drift can't.
+Another addition: ``TILE_DIR_RE``, starcall-workflow's tile-directory
+naming convention (``tile<x>x<y>y``), which
+``build_cell_images_enumerate.py`` discovers tiles by.
 """
 
 import re

@@ -1,12 +1,19 @@
 """EMBED_CELLS.
 
 Hydra entry point (`python -m fisseq_embeddings_pipeline.embed`), backing
-the Snakemake rule embed_cells (workflow/rules/embeddings.smk, the
-pipeline's only GPU-bound stage). Streams every cell in a BUILD_DATASET
-WebDataset through a pretrained Cell-DINO checkpoint (Meta's dinov2) and
-writes one row per cell to embeddings.parquet. Not gated by QC_FILTER: this
-GPU pass runs once per experiment regardless of how many times QC
-thresholds get retuned afterward.
+the pipeline's only GPU-bound stage. Streams every cell in an experiment's
+per-tile WebDataset shards (written by the nested snakemake's
+``make_cell_shard`` rule -- see ``tile_shard.py`` -- and listed in
+BUILD_CELL_IMAGES' ``tiles.parquet``) through a pretrained Cell-DINO
+checkpoint (Meta's dinov2) and writes one row per cell to
+embeddings.parquet. Not gated by QC_FILTER: this GPU pass runs once per
+experiment regardless of how many times QC thresholds get retuned
+afterward.
+
+A shard's ``meta.json`` carries only the cell's location; every other
+``meta_*`` column is joined on from BUILD_CELL_METADATA's
+``metadata.parquet`` (:func:`attach_metadata`), so ``embeddings.parquet``
+has the same seven ``meta_*`` columns QC_FILTER saw.
 
 `load_cell_dino()` builds the backbone via dinov2's architecture factory
 functions directly (`vision_transformer.vit_large(...)`, dict-dispatched by
@@ -61,6 +68,13 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING, DictConfig, OmegaConf
 
 from .config import AppConfig
+from .utils.cell_table import (
+    CELL_METADATA_SCHEMA,
+    META_CELL_INDEX_COL,
+    META_TILE_COL,
+    META_WELL_COL,
+)
+from .utils.constants import META_BATCH_COL
 from .utils.log import setup_logging
 from .vendor.dinov2.models.vision_transformer import (
     vit_base,
@@ -96,11 +110,18 @@ class EmbedCellsConfig(AppConfig):
 
     Attributes
     ----------
-    shard_pattern : str
-        Path/brace pattern for this experiment's BUILD_DATASET shards, e.g.
+    tiles_path : str or None
+        BUILD_CELL_IMAGES' ``tiles.parquet``: every row's ``shard_tar`` is
+        one of this experiment's shards. Exactly one of ``tiles_path`` and
+        ``shard_pattern`` must be set; the pipeline uses this one.
+    shard_pattern : str or None
+        Path/brace pattern for a set of shards instead, e.g.
         ``"dataset-{000000..000042}.tar"``. A bare glob (``"dataset-*.tar"``)
         also works -- ``load_embedding_dataloader`` expands it itself (see
         the module docstring; real ``webdataset`` doesn't do this for you).
+    metadata_path : str
+        BUILD_CELL_METADATA's ``metadata.parquet`` for the same experiment,
+        joined onto each embedded cell -- see :func:`attach_metadata`.
     checkpoint_path : str
         Path to the Cell-DINO checkpoint (``.pth``). The real, verified-
         compatible checkpoint this repo has on disk is
@@ -118,7 +139,7 @@ class EmbedCellsConfig(AppConfig):
     patch_size : int
         ViT patch size. Defaults to ``16``.
     crop_size : int
-        Expected crop size -- must match BUILD_DATASET's ``window``.
+        Expected crop size -- must match the shards' ``window``.
         Defaults to ``224``. See :func:`load_cell_dino`'s docstring: this
         is only a fallback for model construction (used when the
         checkpoint's own ``pos_embed`` can't be inspected), not something
@@ -126,20 +147,20 @@ class EmbedCellsConfig(AppConfig):
     channels : list[int]
         Which of the crop's channel indices to feed into the model, in
         this order -- lets a crop carry more channels (e.g. multiple
-        imaging cycles, flattened cycle-major per dataset.py) than the
+        imaging cycles, flattened cycle-major per tile_shard.py) than the
         model should actually see, or reorders/subsets them. Defaults to
         ``[0, 1, 2, 3]`` (the first imaging cycle's four phenotyping
-        channels, per BUILD_DATASET/starcall-workflow's own 4-channel
+        channels, per starcall-workflow's own 4-channel
         default -- see docs/configuration.md).
     apply_mask : bool
         Whether ``mask.npy``-based background zeroing is applied before
         embedding -- to every selected channel, or to none of them. A
         single flag rather than one per channel because there is only ever
         one mask to apply: every cell in this pipeline's data model has
-        exactly one shared segmentation mask (BUILD_DATASET writes a
+        exactly one shared segmentation mask (each shard carries a
         single ``mask.npy`` per cell, not one per channel, cut from
         starcall's single-plane segmentation mask -- see
-        ``dataset.crop_cell``). Defaults to ``True``.
+        ``tile_shard.crop_cell``). Defaults to ``True``.
     channel_pool : str
         How per-channel CLS embeddings are pooled into one per-cell
         embedding: ``"mean"`` or ``"max"``. Only consulted when the loaded
@@ -154,7 +175,9 @@ class EmbedCellsConfig(AppConfig):
         ``webdataset``/``DataLoader`` worker processes. Defaults to ``4``.
     """
 
-    shard_pattern: str = MISSING
+    tiles_path: Optional[str] = None
+    shard_pattern: Optional[str] = None
+    metadata_path: str = MISSING
     checkpoint_path: str = MISSING
     arch: str = "vit_large"
     patch_size: int = 16
@@ -167,25 +190,58 @@ class EmbedCellsConfig(AppConfig):
     num_workers: int = 4
 
 
+def shard_urls(cfg: EmbedCellsConfig) -> "str | List[str]":
+    """This run's shards: ``tiles_path``'s ``shard_tar`` column, or
+    ``shard_pattern`` (a brace pattern passed through, a glob expanded).
+
+    Raises
+    ------
+    ValueError
+        Unless exactly one of ``tiles_path``/``shard_pattern`` is set; if a
+        non-brace ``shard_pattern`` matches no files; or if ``tiles_path``
+        lists a shard that doesn't exist (a tile whose ``make_cell_shard``
+        job never ran would otherwise just silently lose its cells).
+    """
+    if (cfg.tiles_path is None) == (cfg.shard_pattern is None):
+        raise ValueError("Set exactly one of tiles_path and shard_pattern.")
+    if cfg.tiles_path is not None:
+        urls = pl.read_parquet(cfg.tiles_path)["shard_tar"].to_list()
+        missing = [u for u in urls if not pathlib.Path(u).is_file()]
+        if missing:
+            raise ValueError(
+                f"{len(missing)} shard(s) listed in {cfg.tiles_path!r} don't "
+                f"exist, e.g. {missing[0]!r}"
+            )
+        return urls
+    if "{" in cfg.shard_pattern:
+        return cfg.shard_pattern
+    urls = sorted(glob.glob(cfg.shard_pattern))
+    if not urls:
+        raise ValueError(
+            f"shard_pattern={cfg.shard_pattern!r} matched no files "
+            "(not a brace pattern, and glob.glob found nothing)"
+        )
+    return urls
+
+
 def load_embedding_dataloader(cfg: EmbedCellsConfig) -> "torch.utils.data.DataLoader":
-    """Stream ``(key, crop, mask, meta)`` batches from BUILD_DATASET's shards.
+    """Stream ``(key, crop, mask, meta)`` batches from this run's shards.
 
     ``webdataset.WebDataset(...).decode().to_tuple(...)`` is the standard
-    reader side of the shards ``write_dataset_shards()`` (dataset.py)
+    reader side of the shards ``write_tile_shard()`` (tile_shard.py)
     writes; batching via ``.batched()``/``DataLoader(batch_size=None)``
     keeps shard-order batches (webdataset's usual pattern) rather than a
     random-access ``Dataset``, which a tar-shard format doesn't support
     efficiently. ``mask.npy`` is always fetched -- whether it's applied is
     decided in :func:`embed_batch` via ``cfg.apply_mask``, not here.
 
-    A non-brace ``shard_pattern`` (no ``{``) is expanded via ``glob.glob``
-    first -- see the module docstring for why: ``webdataset``'s own URL
-    expansion only understands brace patterns, not bare globs.
+    Which shards are read is :func:`shard_urls`'s call.
 
     Parameters
     ----------
     cfg : EmbedCellsConfig
-        Supplies ``shard_pattern``, ``batch_size``, ``num_workers``.
+        Supplies ``tiles_path``/``shard_pattern``, ``batch_size``,
+        ``num_workers``.
 
     Returns
     -------
@@ -195,22 +251,8 @@ def load_embedding_dataloader(cfg: EmbedCellsConfig) -> "torch.utils.data.DataLo
         (``(B, C, H, W)`` ``uint16`` / ``(B, H, W)`` ``uint8``), ``metas``
         is a ``list[dict]``.
 
-    Raises
-    ------
-    ValueError
-        If ``shard_pattern`` has no brace expression and its glob expansion
-        matches no files.
     """
-    if "{" in cfg.shard_pattern:
-        urls = cfg.shard_pattern
-    else:
-        urls = sorted(glob.glob(cfg.shard_pattern))
-        if not urls:
-            raise ValueError(
-                f"shard_pattern={cfg.shard_pattern!r} matched no files "
-                "(not a brace pattern, and glob.glob found nothing)"
-            )
-
+    urls = shard_urls(cfg)
     dataset = (
         wds.WebDataset(urls, shardshuffle=False)
         .decode()
@@ -422,7 +464,7 @@ def embed_batch(
 
     First selects/reorders ``cfg.channels`` out of the crop's full channel
     axis (a crop may carry more channels than the model should see -- e.g.
-    multiple imaging cycles, per dataset.py's cycle-major flattening), then
+    multiple imaging cycles, per tile_shard.py's cycle-major flattening), then
     optionally applies the shared cell mask to all of them
     (``cfg.apply_mask``), then branches on the loaded model's
     *actual* ``patch_embed.in_chans`` (not a config flag) --
@@ -513,6 +555,41 @@ def embed_batch(
     raise ValueError(f"Unknown channel_pool {cfg.channel_pool!r}")
 
 
+#: A cell's location -- all a shard's ``meta.json`` carries, and what
+#: :func:`attach_metadata` joins ``metadata.parquet`` on.
+_LOCATION_COLS = [META_WELL_COL, META_TILE_COL, META_CELL_INDEX_COL]
+
+
+def attach_metadata(embeddings: pl.DataFrame, metadata: pl.DataFrame) -> pl.DataFrame:
+    """Join every cell's ``meta_*`` columns onto its embedding.
+
+    ``embeddings`` has the shard's location columns plus ``emb_*``;
+    ``metadata`` is BUILD_CELL_METADATA's ``metadata.parquet``
+    (``CELL_METADATA_SCHEMA``). The result is ``CELL_METADATA_SCHEMA``'s
+    columns, then ``emb_*``, in ``embeddings``' row order.
+
+    Raises
+    ------
+    ValueError
+        If any embedded cell has no row in ``metadata`` -- the shards and
+        ``cell_table.parquet`` are built from the same segmentation tables,
+        so a miss means they came from different runs.
+    """
+    emb_cols = [c for c in embeddings.columns if c not in _LOCATION_COLS]
+    joined = embeddings.join(
+        metadata, on=_LOCATION_COLS, how="left", coalesce=True, maintain_order="left"
+    )
+    unmatched = joined.filter(pl.col(META_BATCH_COL).is_null())
+    if unmatched.height:
+        example = unmatched.select(_LOCATION_COLS).row(0)
+        raise ValueError(
+            f"{unmatched.height} embedded cell(s) have no row in metadata.parquet, "
+            f"e.g. (well, tile, cell_index) = {example} -- were the shards and "
+            "cell_table.parquet built from the same starcall run?"
+        )
+    return joined.select(*CELL_METADATA_SCHEMA, *emb_cols)
+
+
 _cs = ConfigStore.instance()
 _cs.store(name="embed_main", node=EmbedCellsConfig)
 
@@ -528,10 +605,11 @@ def main(cfg: DictConfig) -> None:
     2. Build the dataloader (:func:`load_embedding_dataloader`) and model
        (:func:`load_cell_dino`).
     3. For each batch, embed via :func:`embed_batch` and accumulate one row
-       per cell: passthrough ``meta.json`` fields plus zero-padded
+       per cell: the shard's location fields plus zero-padded
        ``emb_0000``..``emb_{D-1}`` columns (``EMBEDDING_SELECTOR``,
        ``utils/constants.py``, matches these).
-    4. Write ``embeddings.parquet``.
+    4. Join the remaining ``meta_*`` columns on from ``metadata_path``
+       (:func:`attach_metadata`) and write ``embeddings.parquet``.
 
     Configuration
     -------------
@@ -539,7 +617,8 @@ def main(cfg: DictConfig) -> None:
 
         python -m fisseq_embeddings_pipeline.embed \\
             output_dir=./out \\
-            'shard_pattern=./dataset-*.tar' \\
+            tiles_path=./tiles.parquet \\
+            metadata_path=./metadata.parquet \\
             checkpoint_path=/data/channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth \\
             device=cpu \\
             'channels=[0,1,2,3]' \\
@@ -555,7 +634,7 @@ def main(cfg: DictConfig) -> None:
 
     logging.info(
         "Embedding cells from %s (arch=%s, checkpoint=%s, device=%s)",
-        embed_cfg.shard_pattern,
+        embed_cfg.tiles_path or embed_cfg.shard_pattern,
         embed_cfg.arch,
         embed_cfg.checkpoint_path,
         embed_cfg.device,
@@ -574,8 +653,13 @@ def main(cfg: DictConfig) -> None:
             rows.append({**meta, **dict(zip(emb_cols, emb_row.tolist()))})
         n_cells += len(keys)
 
+    metadata = pl.read_parquet(embed_cfg.metadata_path)
+    if rows:
+        out = attach_metadata(pl.DataFrame(rows), metadata)
+    else:
+        out = pl.DataFrame(schema=CELL_METADATA_SCHEMA)
     logging.info("Writing embeddings.parquet (%d cells)", n_cells)
-    pl.DataFrame(rows).write_parquet(output_dir / "embeddings.parquet")
+    out.write_parquet(output_dir / "embeddings.parquet")
     logging.info("Done")
 
 

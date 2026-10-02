@@ -13,16 +13,17 @@ The routing contract:
 - ``BUILD_CELL_IMAGES`` is the only stage that touches starcall-workflow's
   tree, so every starcall-facing key (:data:`CELL_IMAGES_FIELDS`) routes
   to it and to nothing else.
-- ``BUILD_DATASET`` and ``BUILD_CP_FEATURES`` each get whatever keys are
-  left after excluding the starcall-facing set plus ``batch_stem`` and
-  ``cp_features`` (and, for ``BUILD_CP_FEATURES``, ``window``). ``cell_images_dir`` is
-  injected by the workflow from ``BUILD_CELL_IMAGES``' own output, never
-  set by the user.
+- ``BUILD_CELL_METADATA`` and ``BUILD_CP_FEATURES`` both get whatever
+  keys are left after excluding the starcall-facing set plus
+  ``batch_stem`` and ``cp_features`` (the ``*_col_name`` overrides both
+  read ``cell_table.parquet`` with). ``cell_table``/``cell_images_dir``
+  are injected by the workflow from ``BUILD_CELL_IMAGES``' own output,
+  never set by the user.
 - ``window``, ``cellprofiler_pipeline`` and ``cellprofiler_cycle`` each
   have a pipeline-wide default in ``params.yaml``; an entry that doesn't
   set its own value inherits it. An entry's own value always wins.
-  ``window`` is ``BUILD_DATASET``'s alone: it's the crop size that stage
-  cuts each cell at.
+  ``window`` is the crop size each tile's shard is cut at, so it routes to
+  ``BUILD_CELL_IMAGES`` -- it names the shard target.
 """
 
 import argparse
@@ -31,9 +32,9 @@ import sys
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 #: Keys routed to ``BUILD_CELL_IMAGES`` only -- the starcall-workflow-facing
-#: fields plus the three ``cp_features``-related ones it folds into
-#: ``cell_table.parquet``. Mirrors ``cell_images_field_includes`` in the
-#: deleted ``config/experiments.py``.
+#: fields, the crop ``window`` its per-tile shard targets are named by, and
+#: the three ``cp_features``-related ones it folds into
+#: ``cell_table.parquet``.
 CELL_IMAGES_FIELDS = frozenset(
     {
         "starcall_workflow_dir",
@@ -44,6 +45,7 @@ CELL_IMAGES_FIELDS = frozenset(
         "grid_size",
         "segmentation_type",
         "use_corrected",
+        "window",
         "sequencing_reads_params",
         "cp_features",
         "cellprofiler_pipeline",
@@ -51,19 +53,14 @@ CELL_IMAGES_FIELDS = frozenset(
     }
 )
 
-#: Keys never passed through to ``BUILD_DATASET``/``BUILD_CP_FEATURES`` as
-#: Hydra overrides: ``batch_stem`` is passed explicitly and ``cp_features``
-#: is a track selector rather than a stage field.
+#: Keys never passed through to ``BUILD_CELL_METADATA``/``BUILD_CP_FEATURES``
+#: as Hydra overrides: ``batch_stem`` is passed explicitly and
+#: ``cp_features`` is a track selector rather than a stage field.
 _NON_STAGE_FIELDS = frozenset({"batch_stem", "cp_features"})
 
-#: Keys only ``BUILD_DATASET`` reads -- ``window`` is the crop size it cuts
-#: each cell at, which ``CpFeaturesConfig`` has no field for.
-_DATASET_ONLY_FIELDS = frozenset({"window"})
-
 #: Global ``params.yaml`` defaults an ``experiments:`` entry inherits when it
-#: doesn't set the key itself, per stage. See the module docstring.
-_CELL_IMAGES_FALLBACKS = ("cellprofiler_pipeline", "cellprofiler_cycle")
-_DATASET_FALLBACKS = ("window",)
+#: doesn't set the key itself. See the module docstring.
+_CELL_IMAGES_FALLBACKS = ("window", "cellprofiler_pipeline", "cellprofiler_cycle")
 
 
 def validate_config(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
@@ -306,39 +303,26 @@ def cell_images_overrides(
     """
     The ``BUILD_CELL_IMAGES``-bound Hydra overrides for one experiment.
 
-    :data:`CELL_IMAGES_FIELDS` only, with the ``cellprofiler_pipeline``/
-    ``cellprofiler_cycle`` global fallbacks applied.
+    :data:`CELL_IMAGES_FIELDS` only, with the ``window``/
+    ``cellprofiler_pipeline``/``cellprofiler_cycle`` global fallbacks
+    applied.
     """
     overrides = {k: v for k, v in entry.items() if k in CELL_IMAGES_FIELDS}
     return _with_fallbacks(overrides, config, _CELL_IMAGES_FALLBACKS)
 
 
-def dataset_overrides(
-    entry: Mapping[str, Any], config: Mapping[str, Any]
-) -> Dict[str, Any]:
+def cell_table_overrides(entry: Mapping[str, Any]) -> Dict[str, Any]:
     """
-    The ``BUILD_DATASET``-bound Hydra overrides for one experiment.
+    The Hydra overrides for one experiment's two ``cell_table.parquet``
+    readers, ``BUILD_CELL_METADATA`` and ``BUILD_CP_FEATURES``.
 
     Everything the starcall-facing set and :data:`_NON_STAGE_FIELDS` don't
-    claim, with the ``window`` global fallback applied. ``cell_images_dir``
-    is injected by the workflow, not here.
+    claim -- in practice the ``*_col_name`` overrides. Both stages get the
+    same set, so a cell's ``meta_*`` values agree across the two tracks.
+    ``cell_table``/``cell_images_dir`` are injected by the workflow, not
+    here.
     """
     excluded = CELL_IMAGES_FIELDS | _NON_STAGE_FIELDS
-    overrides = {k: v for k, v in entry.items() if k not in excluded}
-    return _with_fallbacks(overrides, config, _DATASET_FALLBACKS)
-
-
-def cp_features_overrides(
-    entry: Mapping[str, Any], config: Mapping[str, Any]
-) -> Dict[str, Any]:
-    """
-    The ``BUILD_CP_FEATURES``-bound Hydra overrides for one experiment.
-
-    Same exclusion set as :func:`dataset_overrides` plus ``window`` --
-    ``CpFeaturesConfig`` has no ``window`` field (it reads
-    ``cell_table.parquet``'s already-materialized CellProfiler columns).
-    """
-    excluded = CELL_IMAGES_FIELDS | _NON_STAGE_FIELDS | _DATASET_ONLY_FIELDS
     return {k: v for k, v in entry.items() if k not in excluded}
 
 
@@ -392,8 +376,8 @@ def plan_experiments(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
         One dict per experiment, in ``experiments:`` order: ``batch_stem``,
         ``cp_features`` (bool), ``starcall_workflow_dir``, ``bind_paths``
         (see :func:`_starcall_bind_paths`), and ``cell_images_args``/
-        ``dataset_args``/``cp_features_args`` -- Hydra override strings for
-        BUILD_CELL_IMAGES' enumerate phase, BUILD_DATASET and
+        ``cell_table_args`` -- Hydra override strings for
+        BUILD_CELL_IMAGES' enumerate phase, and for BUILD_CELL_METADATA and
         BUILD_CP_FEATURES.
     """
     plans = []
@@ -407,10 +391,7 @@ def plan_experiments(config: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 "cell_images_args": hydra_overrides(
                     cell_images_overrides(entry, config)
                 ),
-                "dataset_args": hydra_overrides(dataset_overrides(entry, config)),
-                "cp_features_args": hydra_overrides(
-                    cp_features_overrides(entry, config)
-                ),
+                "cell_table_args": hydra_overrides(cell_table_overrides(entry)),
             }
         )
     return plans

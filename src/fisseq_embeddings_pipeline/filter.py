@@ -38,7 +38,7 @@ from .utils.log import setup_logging
 from .utils.normalizer import Normalizer
 from .utils.variant import classify_variant
 
-# The composite key BUILD_DATASET's WebDataset sample keys are built from --
+# The composite key each tile shard's WebDataset sample keys are built from --
 # the only column set that's both experiment-unique and present, under
 # identical names, in both EMBED_CELLS' embeddings.parquet and QC_FILTER's
 # filtered_cells.parquet. meta_cell_index alone repeats across tiles (it's a

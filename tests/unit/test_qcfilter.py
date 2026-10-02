@@ -599,7 +599,7 @@ def test_qc_filter_config_omits_downsample_fields():
 
 
 # ---------------------------------------------------------------------------
-# main() -- CLI end-to-end (subprocess, mirroring test_dataset.py's pattern)
+# main() -- CLI end-to-end (subprocess, mirroring test_tile_shard.py's pattern)
 # ---------------------------------------------------------------------------
 
 
@@ -623,7 +623,7 @@ def _run_qcfilter(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
         [sys.executable, "-m", "fisseq_embeddings_pipeline.qcfilter", *args],
         capture_output=True,
         text=True,
-        # See test_dataset.py's identical comment: keeps Hydra's own
+        # See test_tile_shard.py's identical comment: keeps Hydra's own
         # outputs/<date>/<time>/ dir out of the repo tree.
         cwd=tmp_path,
     )

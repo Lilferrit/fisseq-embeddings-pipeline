@@ -15,14 +15,14 @@ container_image: "fisseq-embeddings-pipeline:latest"
 cell_dino_checkpoint: null
 experiments: []
 
-# ── Per-experiment configs (BUILD_CELL_IMAGES / BUILD_DATASET / BUILD_CP_FEATURES) ──
+# ── Per-experiment configs (BUILD_CELL_IMAGES / BUILD_CELL_METADATA / BUILD_CP_FEATURES) ──
 # Each experiment map in `experiments:` below supplies fields for up to
 # three stages:
 #
 # - BUILD_CELL_IMAGES (starcall-workflow-facing, always runs):
 #   starcall_workflow_dir, phenotyping_dir, segmentation_dir,
 #   sequencing_dir, wells, grid_size, segmentation_type, use_corrected,
-#   sequencing_reads_params. This is the ONLY stage that touches
+#   window, sequencing_reads_params. This is the ONLY stage that touches
 #   starcall-workflow's tree or invokes Snakemake -- see
 #   docs/architecture.md's Data contracts section. `starcall_workflow_dir`
 #   is per-experiment (not a shared global path) since Snakemake keeps
@@ -32,7 +32,11 @@ experiments: []
 #   experiment's root directory (e.g. `starcall_workflow_dir:
 #   /data/experiment1`, not `/data/experiment1/starcall-workflow`) --
 #   `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` default under
-#   whatever you point it at.
+#   whatever you point it at. It supplies only that experiment's
+#   config.yaml and data trees, not starcall's code: the nested run
+#   executes snakemake/Snakefile, which includes the starcall-workflow
+#   commit the image is built at (docs/architecture.md decision 24), so
+#   no starcall checkout needs to live in it.
 #   `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` are all OPTIONAL
 #   -- each is auto-resolved when omitted: if `starcall_workflow_dir` has
 #   its own `config.yaml` (or `default-config.yaml`), that project's own
@@ -45,14 +49,12 @@ experiments: []
 #   `starcall_workflow_dir` at all for your lab (e.g. `sequencing_dir` on
 #   separate storage) -- an explicit value always wins over both. See
 #   docs/architecture.md and the example below.
-# - BuildDatasetConfig (BUILD_DATASET): window, shard_maxcount,
-#   barcode_col_name/aa_changes_col_name/edit_distance_col_name.
-#   `cell_images_dir` is injected automatically from BUILD_CELL_IMAGES'
-#   own output -- never set it yourself.
-# - CpFeaturesConfig (BUILD_CP_FEATURES, only for `cp_features: true`
-#   entries): barcode_col_name/aa_changes_col_name/edit_distance_col_name
-#   (same three fields, shared with BuildDatasetConfig since both read the
-#   same cell_table.parquet). `cell_images_dir` is injected the same way.
+# - CellMetadataConfig (BUILD_CELL_METADATA) and CpFeaturesConfig
+#   (BUILD_CP_FEATURES, only for `cp_features: true` entries):
+#   barcode_col_name/aa_changes_col_name/edit_distance_col_name, routed to
+#   both since both read the same cell_table.parquet. Their input is
+#   injected automatically from BUILD_CELL_IMAGES' own output -- never set
+#   it yourself.
 #
 # `batch_stem` is required on every map (there's no filename to derive it
 # from), must be unique across the list, and any field a map omits falls
@@ -112,14 +114,13 @@ experiments: []
 #     # cp_features omitted -- cellDINO-only for this experiment
 
 # ── Shared per-experiment defaults (window / cellprofiler_pipeline / cellprofiler_cycle) ──
-# `window` (BuildDatasetConfig: the crop size each cell is cut at) and
+# `window` (BUILD_CELL_IMAGES: the crop size each tile's shard is cut at) and
 # `cellprofiler_pipeline`/`cellprofiler_cycle` (CpFeaturesConfig-facing,
 # consumed by BUILD_CELL_IMAGES) are logically per-experiment fields (see
 # "Per-experiment configs" above), but in practice are almost always the
 # same value across every experiment in a run -- one crop size per
 # Cell-DINO checkpoint, one CellProfiler pipeline per run. Set the shared
-# value once here; `config/experiments.py` fills it in (via two
-# independent fallback blocks, one per stage) for any `experiments:` entry
+# value once here; `config/experiments.py` fills it in for any `experiments:` entry
 # that doesn't set its own value for that key, and an entry that *does* set
 # its own value always wins over the global default here.
 window: 224                    # crop size in pixels -- must match cell_dino_crop_size below
@@ -177,7 +178,7 @@ edit_distance_threshold: 1
 #
 # Deliberately NOT exposed here:
 #   - barcode_col_name / aa_changes_col_name / edit_distance_col_name:
-#     these name BUILD_DATASET's fixed "meta_barcode"/"meta_aa_changes"/
+#     these name BUILD_CELL_METADATA's fixed "meta_barcode"/"meta_aa_changes"/
 #     "meta_edit_distance" output columns -- structural, not something a
 #     per-run override should ever change.
 #   - n_variants / variant_downsample_classes / variant_downsample_mode /
@@ -201,7 +202,7 @@ edit_distance_threshold: 1
 # is gitignored.
 cell_dino_arch: "vit_large"
 cell_dino_patch_size: 16
-cell_dino_crop_size: 224        # must match BUILD_DATASET's per-experiment `window`
+cell_dino_crop_size: 224        # must match the per-experiment `window` the shards are cut at
 cell_dino_channels: [0, 1, 2, 3]                          # which crop channel indices to embed, in order
 cell_dino_apply_mask: true    # apply the shared per-cell mask to EVERY selected channel (one mask per cell, no channel axis)
 cell_dino_channel_pool: "mean"  # mean | max | cls_concat

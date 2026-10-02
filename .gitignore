@@ -55,3 +55,7 @@ testing_data/*
 # by hand without output_dir pointing elsewhere. Never a pipeline result --
 # every task passes an explicit output_dir under pipeline_dir.
 outputs/
+
+# Optional local starcall-workflow clone, for running snakemake/Snakefile
+# outside the image (the image clones its own pinned commit).
+/starcall-workflow/

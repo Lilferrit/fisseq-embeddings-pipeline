@@ -1,5 +1,5 @@
 // QC_FILTER, vendored close to verbatim from fisseq-data-pipeline's
-// qcfilter.py/modules/local/qc_filter/main.nf. Reads BUILD_DATASET's
+// qcfilter.py/modules/local/qc_filter/main.nf. Reads BUILD_CELL_METADATA's
 // metadata.parquet only, never the WebDataset shards.
 //
 // Note `QcFilterConfig`'s actual field names are `bc_threshold` /
@@ -12,7 +12,7 @@
 // stages all key off) so overriding it changes every stage's label column
 // together. `QcFilterConfig`'s `barcode_col_name`/`aa_changes_col_name`/
 // `edit_distance_col_name` are deliberately left unwired -- they name
-// BUILD_DATASET's fixed `meta_barcode`/`meta_aa_changes`/`meta_edit_distance`
+// BUILD_CELL_METADATA's fixed `meta_barcode`/`meta_aa_changes`/`meta_edit_distance`
 // output columns, not something a per-run override should ever need to
 // change. The `n_variants`/`variant_downsample_classes`/
 // `variant_downsample_mode`/`variant_allow_list_file` opt-in downsampling

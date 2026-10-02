@@ -51,7 +51,9 @@ suite and CI do; there is no `ops` env there, so `BUILD_CELL_IMAGES`' nested
 starcall run needs a `snakemake` of your own on `PATH`).
 
 Every process, including `BUILD_CELL_IMAGES`, uses the same single image,
-built from the repo-root `Dockerfile`:
+built from the repo-root `Dockerfile`, which also clones `starcall-workflow`
+at a pinned commit (`STARCALL_WORKFLOW_COMMIT`; see
+[Architecture](architecture.md) decision 24):
 
 ```bash
 docker build -t fisseq-embeddings-pipeline:latest .
@@ -68,6 +70,9 @@ as a nested run, whose dependency stack (tensorflow/stardist/cellpose) is
 kept isolated from this repo's own torch/Cell-DINO/polars stack via a
 second, dedicated conda env (`ops`) baked into this same image, rather
 than a separate container -- see the `Dockerfile`'s own comments for how.
+The Snakefile it runs is `snakemake/Snakefile`, which includes the pinned
+starcall commit's own and adds this pipeline's per-tile `make_cell_shard` rule
+(see [Cell Shards](cli/tile_shard.md)).
 Real starcall execution inside that env is covered by the opt-in
 `pytest tests/integration --container` tests, on a tiny real-data
 fixture (see `testing_data/README.md`).

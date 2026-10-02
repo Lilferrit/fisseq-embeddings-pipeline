@@ -46,9 +46,12 @@ minutes rather than the hour-plus the old full-size fixture needed:
   list; only a real cluster can check `apptainer` itself re-entering the
   `.sif` on a node.
 
-The starcall-workflow `origin/devel` checkout the tests run against is
-cloned once into `_starcall_workflow_checkout/` (or reused from
-`lmna_t3/_starcall_workflow_checkout/` if an older run left one there).
+No starcall-workflow checkout is cloned for these tests: the starcall code
+they run is the commit the image clones (the `Dockerfile`'s
+`STARCALL_WORKFLOW_COMMIT`). Each test's
+`starcall_workflow_dir` is just the fixture's `config.yaml` plus a copy of
+`starcall_input/` as `input/`. A `_starcall_workflow_checkout/` left here by
+an older run is no longer read and can be deleted.
 
 ## `lmna_t3/`
 

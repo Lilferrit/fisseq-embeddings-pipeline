@@ -21,7 +21,7 @@ filters above run. Every other class passes through untouched. If
 
 Vendored close to verbatim from `fisseq-data-pipeline`'s `qcfilter.py` --
 the only structural difference is that this pipeline's only real
-`cell_files` input is `BUILD_DATASET`'s `metadata.parquet`, which already
+`cell_files` input is `BUILD_CELL_METADATA`'s `metadata.parquet`, which already
 writes columns under their canonical `meta_*` names, so
 `barcode_col_name`/`aa_changes_col_name`/`edit_distance_col_name` default
 to those names instead of the upstream raw-CSV names. The
@@ -34,7 +34,7 @@ Extends the [common config fields](#common-config-fields) below.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| `cell_files` | **required** | Path or list of paths to cell files (CSV or Parquet) -- in practice, `BUILD_DATASET`'s `metadata.parquet`. |
+| `cell_files` | **required** | Path or list of paths to cell files (CSV or Parquet) -- in practice, `BUILD_CELL_METADATA`'s `metadata.parquet`. |
 | `bc_threshold` | `10` | Minimum cells required per barcode. |
 | `variant_bc_threshold` | `4` | Minimum distinct barcodes required per variant. |
 | `edit_distance_threshold` | `1` | Maximum allowed edit distance. |

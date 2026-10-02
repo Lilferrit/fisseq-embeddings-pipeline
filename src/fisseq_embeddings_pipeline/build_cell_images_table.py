@@ -15,19 +15,16 @@ RangeIndex per tile, see `combine_cell_reads`/`merge_final_tables` below)
 and, if `cp_features`, the tile's CellProfiler CSV (by row position,
 renamed `cp_<name>`), into one `output` (`cell_table.parquet`) covering the
 whole experiment -- the ONE complete, self-sufficient cell table
-BUILD_DATASET/BUILD_CP_FEATURES need; neither reads starcall-workflow's
+BUILD_CELL_METADATA/BUILD_CP_FEATURES need; neither reads starcall-workflow's
 tree directly.
 
 Reads CSVs via pandas (matching starcall-workflow's own
 ``to_csv()``/``read_csv(index_col=0)`` convention), but writes the final
 table via polars, matching this repo's own parquet-writing convention
 (AGENTS.md: polars for tabular data) for the artifact everything downstream
-actually reads. This is now the ONLY pandas in the pipeline: `dataset.py`
-used to round-trip `cell_table.parquet` through ``.to_pandas()`` purely to
-get ``.iloc[]`` row access, which AGENTS.md's carve-out never covered (it
-reads no CSVs) and which silently produced ``"nan"`` strings for missing
-genotype values -- it now projects with polars via
-``utils/cell_table.py`` like every other stage.
+actually reads. These CSV reads are the ONLY pandas in the pipeline
+(``tile_shard.py`` reuses :func:`read_segmentation_table` rather than
+reading the same CSV its own way).
 
 Until this stage's Docker image merged starcall-workflow's own `ops` conda
 env into this repo's main image (see the root `Dockerfile`), this logic
@@ -91,6 +88,28 @@ def _read_indexed_csv(path: str) -> pd.DataFrame:
     return pd.read_csv(path, index_col=0)
 
 
+def read_segmentation_table(segmentation_csv: str) -> pd.DataFrame:
+    """One tile's segmentation-side cell table, with its two cell indices.
+
+    ``tile_cell_index`` is the CSV's own row index (what becomes
+    ``meta_cell_index``); ``crop_index`` is the 0-based on-disk row
+    position, so the cell's label in ``{segmentation_type}_mask.tif`` is
+    ``crop_index + 1`` -- starcall-workflow's own
+    ``enumerate(cell_table.index)`` convention. ``crop_index`` is computed
+    independently of ``tile_cell_index``'s values, even though
+    starcall-workflow's ``drop_duplicate_cells`` rule happens to make them
+    equal today (a fresh per-tile ``RangeIndex(1, 1+N)`` every tile).
+
+    Shared with ``tile_shard.py``, which crops each cell by that label, so
+    the two can't disagree on which row is which cell.
+    """
+    seg = _read_indexed_csv(segmentation_csv)
+    seg.index.name = "tile_cell_index"
+    seg = seg.reset_index()
+    seg["crop_index"] = range(len(seg))
+    return seg
+
+
 def build_tile_table(
     segmentation_csv: str,
     reads_csv: str,
@@ -103,14 +122,11 @@ def build_tile_table(
     Parameters
     ----------
     segmentation_csv : str
-        This tile's ``{segmentation_type}.csv`` (phenotyping_dir-rooted --
-        see `the `build_cell_images` rule`'s Phase 1 comment on why
-        phenotyping_dir specifically, matching ``dataset.py``'s own
-        existing, proven-working read path). Provides ``bbox_x1/y1/x2/y2``,
-        ``orig_index``, ``mask8``, and this tile's own row index (renamed
-        ``tile_cell_index`` below -- this is the value
-        ``fisseq_embeddings_pipeline.dataset``'s ``write_dataset_shards``
-        currently calls ``cell_index``/writes as ``meta_cell_index``).
+        This tile's ``{segmentation_type}.csv`` (phenotyping_dir-rooted,
+        the same file ``make_cell_shard`` crops from). Provides
+        ``bbox_x1/y1/x2/y2``, ``orig_index``, ``mask8``, and this tile's
+        own row index (``tile_cell_index``, written as
+        ``meta_cell_index`` -- see :func:`read_segmentation_table`).
     reads_csv : str
         This tile's ``{segmentation_type}_reads{params}.csv``
         (sequencing_dir). Provides ``editDistance`` and whatever
@@ -130,10 +146,7 @@ def build_tile_table(
     pd.DataFrame
         One row per cell, in the segmentation CSV's own on-disk row order
         -- this order is load-bearing: ``crop_index`` (0-based) is derived
-        from it, and ``dataset.py``'s ``write_dataset_shards`` uses it for
-        mask-label matching (``label = crop_index + 1``), exactly
-        mirroring starcall-workflow's own ``enumerate(cell_table.index)``
-        convention (see ``dataset.py``'s ``_crop_cell`` docstring).
+        from it (see :func:`read_segmentation_table`).
 
     Raises
     ------
@@ -144,14 +157,7 @@ def build_tile_table(
         ``cellprofiler_csv`` is given and its row count doesn't match the
         segmentation table's (row-position join).
     """
-    seg = _read_indexed_csv(segmentation_csv)
-    seg.index.name = "tile_cell_index"
-    seg = seg.reset_index()
-    # 0-based row position in the segmentation CSV's own on-disk order --
-    # computed independently of tile_cell_index's actual values, even
-    # though starcall-workflow's drop_duplicate_cells rule happens to make
-    # them equal today (a fresh per-tile RangeIndex(1, 1+N) every tile).
-    seg["crop_index"] = range(len(seg))
+    seg = read_segmentation_table(segmentation_csv)
 
     reads = _read_indexed_csv(reads_csv)
     reads.index.name = "tile_cell_index"
@@ -233,20 +239,19 @@ def build_cell_table(tiles: List[Dict[str, Any]]) -> pl.DataFrame:
 TILES_SCHEMA: Dict[str, pl.DataType] = {
     "well": pl.String,
     "tile": pl.String,
-    "image_tif": pl.String,
-    "mask_tif": pl.String,
+    "shard_tar": pl.String,
 }
 
 
 def build_tiles_table(tiles: List[Dict[str, Any]]) -> pl.DataFrame:
-    """One row per tile: where starcall-workflow left its whole-tile
-    phenotype image and segmentation mask.
+    """One row per tile: where the nested snakemake's ``make_cell_shard``
+    rule (``snakemake/Snakefile``) left that tile's WebDataset shard,
+    under phenotyping_dir.
 
-    BUILD_DATASET crops every cell out of these itself (see
-    ``dataset.py``'s ``crop_cell``). They're kept in a sidecar rather than
-    as ``cell_table.parquet`` columns so a tile-level fact isn't repeated
-    on every one of that tile's cell rows, and so ``cell_table.parquet``
-    stays purely per-cell.
+    EMBED_CELLS reads its shards from this list. It's a sidecar rather
+    than a ``cell_table.parquet`` column so a tile-level fact isn't
+    repeated on every one of that tile's cell rows, and so
+    ``cell_table.parquet`` stays purely per-cell.
     """
     return pl.DataFrame(
         [{key: tile_info[key] for key in TILES_SCHEMA} for tile_info in tiles],

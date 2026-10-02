@@ -12,8 +12,7 @@ import pytest
 from fisseq_embeddings_pipeline.config.experiments import (
     CELL_IMAGES_FIELDS,
     cell_images_overrides,
-    cp_features_overrides,
-    dataset_overrides,
+    cell_table_overrides,
     hydra_overrides,
     main,
     plan_experiments,
@@ -236,45 +235,32 @@ def test_cell_images_overrides_keeps_only_starcall_facing_keys():
         "batch_stem": "expt1",
         "starcall_workflow_dir": "/data/e1",
         "wells": ["w1"],
-        "shard_maxcount": 500,  # BUILD_DATASET's, not BUILD_CELL_IMAGES'
+        "barcode_col_name": "bc",  # a cell_table.parquet reader's, not starcall's
     }
     overrides = cell_images_overrides(entry, {})
     assert overrides == {"starcall_workflow_dir": "/data/e1", "wells": ["w1"]}
     assert set(overrides) <= CELL_IMAGES_FIELDS
 
 
-def test_dataset_overrides_drops_starcall_and_non_stage_keys():
+def test_cell_table_overrides_drops_starcall_and_non_stage_keys():
     entry = {
         "batch_stem": "expt1",
         "cp_features": True,
         "starcall_workflow_dir": "/data/e1",
         "wells": ["w1"],
-        "shard_maxcount": 500,
+        "window": 180,
         "barcode_col_name": "bc",
     }
-    assert dataset_overrides(entry, {}) == {
-        "shard_maxcount": 500,
-        "barcode_col_name": "bc",
-    }
+    assert cell_table_overrides(entry) == {"barcode_col_name": "bc"}
 
 
-def test_cp_features_overrides_matches_dataset_minus_window():
-    entry = {"batch_stem": "expt1", "barcode_col_name": "bc"}
-    config = {"window": 224}
-    assert cp_features_overrides(entry, config) == {"barcode_col_name": "bc"}
-    # window IS filled for BUILD_DATASET, but CpFeaturesConfig has no such field
-    assert dataset_overrides(entry, config) == {"barcode_col_name": "bc", "window": 224}
-    # ...even when the entry sets its own.
-    entry["window"] = 180
-    assert "window" not in cp_features_overrides(entry, config)
-
-
-def test_window_routes_to_dataset_not_cell_images():
-    """BUILD_DATASET does the cropping now; BUILD_CELL_IMAGES only asks
-    starcall for whole-tile outputs and has no window field."""
+def test_window_routes_to_cell_images():
+    """window names each tile's shard target, so BUILD_CELL_IMAGES gets it
+    -- with the global default as a fallback."""
+    assert cell_images_overrides({"batch_stem": "e"}, {"window": 224})["window"] == 224
     entry = {"batch_stem": "expt1", "window": 180}
-    assert "window" not in cell_images_overrides(entry, {"window": 224})
-    assert dataset_overrides(entry, {"window": 224})["window"] == 180
+    assert cell_images_overrides(entry, {"window": 224})["window"] == 180
+    assert "window" not in cell_table_overrides(entry)
 
 
 # ── global fallbacks ───────────────────────────────────────────────────────
@@ -284,6 +270,7 @@ def test_global_defaults_fill_unset_keys():
     config = {"window": 224, "cellprofiler_pipeline": "pipe", "cellprofiler_cycle": ""}
     overrides = cell_images_overrides({"batch_stem": "expt1"}, config)
     assert overrides == {
+        "window": 224,
         "cellprofiler_pipeline": "pipe",
         "cellprofiler_cycle": "",
     }
@@ -292,8 +279,8 @@ def test_global_defaults_fill_unset_keys():
 def test_entry_value_wins_over_global_default():
     config = {"window": 224, "cellprofiler_pipeline": "global_pipe"}
     entry = {"batch_stem": "expt1", "window": 180, "cellprofiler_cycle": "3"}
-    assert dataset_overrides(entry, config)["window"] == 180
     overrides = cell_images_overrides(entry, {**config, "cellprofiler_cycle": ""})
+    assert overrides["window"] == 180
     assert overrides["cellprofiler_cycle"] == "3"
     assert overrides["cellprofiler_pipeline"] == "global_pipe"
 
@@ -350,7 +337,7 @@ def test_plan_experiments_renders_each_stage_override():
                 "sequencing_dir": "/seq/e1",
                 "wells": ["w1", "w2"],
                 "cp_features": True,
-                "shard_maxcount": 500,
+                "barcode_col_name": "bc",
             },
             {"batch_stem": "expt2", "starcall_workflow_dir": "/data/e2"},
         ],
@@ -365,9 +352,9 @@ def test_plan_experiments_renders_each_stage_override():
     assert "'wells=[w1,w2]'" in first["cell_images_args"]
     assert "cp_features=true" in first["cell_images_args"]
     assert "cellprofiler_pipeline=pipe" in first["cell_images_args"]
-    assert "window" not in first["cell_images_args"]
-    assert first["dataset_args"] == "shard_maxcount=500 window=224"
-    assert first["cp_features_args"] == "shard_maxcount=500"
+    assert "window=224" in first["cell_images_args"]
+    assert first["cell_table_args"] == "barcode_col_name=bc"
+    assert plans[1]["cell_table_args"] == ""
 
 
 def test_main_writes_plans_and_reports_validation_errors(tmp_path, capsys):

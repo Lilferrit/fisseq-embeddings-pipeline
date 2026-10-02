@@ -27,6 +27,7 @@ import webdataset as wds
 
 from fisseq_embeddings_pipeline.embed import (
     EmbedCellsConfig,
+    attach_metadata,
     embed_batch,
     load_cell_dino,
     load_embedding_dataloader,
@@ -44,6 +45,7 @@ def _base_cfg(tmp_path: Path, **overrides) -> EmbedCellsConfig:
     cfg = EmbedCellsConfig(
         output_dir=str(tmp_path),
         shard_pattern="unused",
+        metadata_path="unused",
         checkpoint_path="unused",
         crop_size=CROP,
     )
@@ -69,8 +71,8 @@ def _write_shard(
             )
             mask = np.zeros((crop_size, crop_size), dtype=np.uint8)
             mask[: crop_size // 2, :] = 1  # top half "belongs to" the cell
+            # What tile_shard.py writes: the cell's location only.
             meta = {
-                "meta_batch": "batch1",
                 "meta_well": "well1",
                 "meta_tile": "tile0x0y",
                 "meta_cell_index": i,
@@ -108,7 +110,7 @@ def test_load_embedding_dataloader_expands_glob_and_streams_batches(tmp_path: Pa
     assert crops.dtype == torch.uint16
     assert masks.shape == (2, CROP, CROP)
     assert masks.dtype == torch.uint8
-    assert metas[0]["meta_batch"] == "batch1"
+    assert metas[0]["meta_cell_index"] == 0
     assert keys[0] == "cell0"
 
 
@@ -128,6 +130,121 @@ def test_load_embedding_dataloader_raises_on_unmatched_glob(tmp_path: Path):
 
     with pytest.raises(ValueError, match="matched no files"):
         load_embedding_dataloader(cfg)
+
+
+def _write_tiles(tmp_path: Path, shards: list[Path]) -> Path:
+    """BUILD_CELL_IMAGES' tiles.parquet, one row per shard."""
+    path = tmp_path / "tiles.parquet"
+    pl.DataFrame(
+        {
+            "well": ["well1"] * len(shards),
+            "tile": [f"tile{i}x0y" for i in range(len(shards))],
+            "shard_tar": [str(p) for p in shards],
+        }
+    ).write_parquet(path)
+    return path
+
+
+def test_load_embedding_dataloader_reads_shards_from_tiles_parquet(tmp_path: Path):
+    """One shard per tile, empty tiles included -- an empty tile's shard
+    is a valid tar with no samples, and mustn't stop the others."""
+    shard_dir = _write_shard(tmp_path, n_cells=3, maxcount=1)
+    empty = shard_dir / "empty.tar"
+    with wds.TarWriter(str(empty)):
+        pass
+    shards = [empty, *sorted(shard_dir.glob("dataset-*.tar"))]
+    cfg = _base_cfg(
+        tmp_path,
+        shard_pattern=None,
+        tiles_path=str(_write_tiles(tmp_path, shards)),
+        batch_size=10,
+        num_workers=0,
+    )
+
+    keys = [k for batch_keys, *_ in load_embedding_dataloader(cfg) for k in batch_keys]
+
+    assert keys == ["cell0", "cell1", "cell2"]
+
+
+def test_load_embedding_dataloader_raises_on_missing_listed_shard(tmp_path: Path):
+    cfg = _base_cfg(
+        tmp_path,
+        shard_pattern=None,
+        tiles_path=str(_write_tiles(tmp_path, [tmp_path / "gone.tar"])),
+    )
+
+    with pytest.raises(ValueError, match="don't exist"):
+        load_embedding_dataloader(cfg)
+
+
+@pytest.mark.parametrize("both", [True, False])
+def test_load_embedding_dataloader_needs_exactly_one_shard_source(
+    tmp_path: Path, both: bool
+):
+    cfg = _base_cfg(
+        tmp_path,
+        shard_pattern="x-*.tar" if both else None,
+        tiles_path="tiles.parquet" if both else None,
+    )
+
+    with pytest.raises(ValueError, match="exactly one"):
+        load_embedding_dataloader(cfg)
+
+
+# ---------------------------------------------------------------------------
+# attach_metadata
+# ---------------------------------------------------------------------------
+
+
+def _metadata(cell_indices: list[int]) -> pl.DataFrame:
+    """BUILD_CELL_METADATA's metadata.parquet shape."""
+    n = len(cell_indices)
+    return pl.DataFrame(
+        {
+            "meta_batch": ["batch1"] * n,
+            "meta_well": ["well1"] * n,
+            "meta_tile": ["tile0x0y"] * n,
+            "meta_cell_index": cell_indices,
+            "meta_barcode": [f"bc{i}" for i in cell_indices],
+            "meta_aa_changes": [None if i == 2 else "WT" for i in cell_indices],
+            "meta_edit_distance": [0] * n,
+        },
+        schema_overrides={"meta_aa_changes": pl.String},
+    )
+
+
+def test_attach_metadata_keeps_embedding_order_and_metadata_columns():
+    embeddings = pl.DataFrame(
+        {
+            "meta_well": ["well1"] * 3,
+            "meta_tile": ["tile0x0y"] * 3,
+            "meta_cell_index": [2, 0, 1],
+            "emb_0000": [0.2, 0.0, 0.1],
+        }
+    )
+
+    out = attach_metadata(embeddings, _metadata([0, 1, 2, 3]))
+
+    assert out.columns == [*_metadata([]).columns, "emb_0000"]
+    assert out["meta_cell_index"].to_list() == [2, 0, 1]
+    assert out["emb_0000"].to_list() == [0.2, 0.0, 0.1]
+    assert out["meta_barcode"].to_list() == ["bc2", "bc0", "bc1"]
+    # A missing genotype value stays null -- see architecture decision 19.
+    assert out["meta_aa_changes"].to_list() == [None, "WT", "WT"]
+
+
+def test_attach_metadata_raises_on_cell_missing_from_metadata():
+    embeddings = pl.DataFrame(
+        {
+            "meta_well": ["well1"],
+            "meta_tile": ["tile0x0y"],
+            "meta_cell_index": [9],
+            "emb_0000": [0.0],
+        }
+    )
+
+    with pytest.raises(ValueError, match="no row in metadata.parquet"):
+        attach_metadata(embeddings, _metadata([0, 1]))
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +573,7 @@ def test_embed_batch_apply_mask_is_all_or_nothing_across_channels():
 def test_embed_batch_selects_and_reorders_configured_channels():
     """cfg.channels picks out (and can reorder) a subset of the crop's
     full channel axis -- e.g. a crop with more channels than the model
-    should see (multiple imaging cycles, per dataset.py's cycle-major
+    should see (multiple imaging cycles, per tile_shard.py's cycle-major
     flattening)."""
     model = _MeanPixelStub(embed_dim=1)
     # 4 channels, each a distinct uniform value -- channel_pool="mean"
@@ -605,6 +722,9 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path):
     checkpoint_path = tmp_path / "checkpoint.pth"
     torch.save({"teacher": reference.state_dict()}, checkpoint_path)
     output_dir = tmp_path / "out"
+    tiles_path = _write_tiles(tmp_path, sorted(shard_dir.glob("dataset-*.tar")))
+    metadata_path = tmp_path / "metadata.parquet"
+    _metadata([0, 1, 2, 3]).write_parquet(metadata_path)
 
     result = subprocess.run(
         [
@@ -612,7 +732,8 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path):
             "-m",
             "fisseq_embeddings_pipeline.embed",
             f"output_dir={output_dir}",
-            f"shard_pattern={shard_dir}/dataset-*.tar",
+            f"tiles_path={tiles_path}",
+            f"metadata_path={metadata_path}",
             f"checkpoint_path={checkpoint_path}",
             "arch=vit_small",
             f"crop_size={CROP}",
@@ -625,7 +746,7 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path):
         text=True,
         # Hydra's own working-directory management writes outputs/<date>/
         # <time>/ under the process cwd -- run from tmp_path, matching
-        # test_dataset.py's own CLI smoke test.
+        # test_tile_shard.py's own CLI smoke test.
         cwd=tmp_path,
     )
 
@@ -635,6 +756,7 @@ def test_main_runs_end_to_end_via_cli(tmp_path: Path):
     assert "emb_0000" in out.columns
     assert "emb_0383" in out.columns  # vit_small embed_dim=384
     assert out["meta_batch"].unique().to_list() == ["batch1"]
+    assert out["meta_barcode"].to_list() == ["bc0", "bc1", "bc2", "bc3"]
 
 
 def test_main_is_hydra_entry_point():

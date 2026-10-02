@@ -13,10 +13,12 @@ window: 224   # must match your Cell-DINO checkpoint's crop size -- global
 
 experiments:
   - batch_stem: experiment1
-    starcall_workflow_dir: /data/experiment1   # a starcall-workflow checkout to run against --
+    starcall_workflow_dir: /data/experiment1   # starcall's working directory for this
+                                                # experiment: its config.yaml and data
+                                                # trees (starcall's code comes from the
+                                                # image's pinned commit, not from here).
                                                 # IS this experiment's root, no separate
-                                                # folder needed (nothing requires it to be
-                                                # named "starcall-workflow")
+                                                # folder needed
     # phenotyping_dir/segmentation_dir/sequencing_dir omitted -- each is
     # auto-resolved: starcall_workflow_dir's own config.yaml (or
     # default-config.yaml) is consulted first if present, else it falls
@@ -35,9 +37,9 @@ experiments:
 These starcall-workflow-facing fields all belong to `BUILD_CELL_IMAGES`,
 the one stage that touches `starcall-workflow`'s tree -- see
 [`BUILD_CELL_IMAGES`' section of the Architecture doc](architecture.md#cell-images-build_cell_images-output-from-starcall-workflow)
-for every field it accepts, and
-[`BUILD_DATASET`'s stage reference](cli/dataset.md) for `BuildDatasetConfig`'s
-own remaining fields (`window`, `shard_maxcount`, ...).
+for every field it accepts, including `window` (the crop size each tile's
+shard is cut at -- see [Cell Shards](cli/tile_shard.md)). The remaining
+`*_col_name` fields go to `BUILD_CELL_METADATA` and `BUILD_CP_FEATURES`.
 
 ## 2. Get a Cell-DINO checkpoint
 

@@ -1,0 +1,60 @@
+""" starcall-workflow's own Snakefile, plus the one rule this pipeline adds.
+
+BUILD_CELL_IMAGES (modules/local/build_cell_images/main.nf) runs this file
+with --directory <starcall_workflow_dir>: starcall's rules come from the
+image's ../starcall-workflow clone (the root Dockerfile's pinned
+STARCALL_WORKFLOW_COMMIT), unmodified, and the experiment directory
+supplies only its config.yaml and data trees. Outside the image, clone
+starcall-workflow next to this directory to use it.
+
+make_cell_shard cuts every cell of one tile straight into a WebDataset
+shard, so cropping runs as one snakemake job per tile (fanned out by a
+starcall_profile on a cluster) and the whole-tile image and mask stay
+plain temp() intermediates upstream -- requested by nothing but this rule,
+snakemake deletes them once every consumer is done. See
+docs/architecture.md decision 17.
+"""
+
+include: "../starcall-workflow/workflow/Snakefile"
+
+
+rule make_cell_shard:
+    """ One tile's cells as a WebDataset shard. {image} picks the raw or
+    background-corrected whole-tile image (use_corrected) in the filename
+    itself, so switching it requests a different shard rather than reusing
+    a stale one; {window} likewise.
+
+    A shell rule, not run:, so the body runs in this pipeline's own Python
+    (config['fisseq_python'], the same image's 3.13 venv) rather than
+    inside the ops env's 3.10 snakemake interpreter.
+    """
+    input:
+        image = phenotyping_dir + '{path}/{image}_pt.tif',
+        mask = phenotyping_dir + '{path}/{segmentation_type}_mask.tif',
+        cell_table = phenotyping_dir + '{path}/{segmentation_type}.csv',
+    output:
+        shard = phenotyping_dir + '{path}/{segmentation_type}_{image}_shard_{window}.tar',
+    log:
+        phenotyping_dir + '{path}/{segmentation_type}_{image}_shard_{window}.log',
+    wildcard_constraints:
+        path = r'[^/]+_grid\d+/tile\d+x\d+y',
+        segmentation_type = r'[^/]+',
+        image = 'raw|corrected',
+        window = r'\d+',
+    params:
+        python = config.get('fisseq_python', 'python'),
+        well = lambda wildcards: wildcards.path.split('/')[0].rsplit('_grid', 1)[0],
+        tile = lambda wildcards: wildcards.path.split('/')[1],
+    resources:
+        mem_mb = lambda wildcards, input: input.size_mb * 2.5 + 2000
+    shell:
+        # Hydra's run dir and this stage's own log file go to a scratch
+        # directory: the job's cwd is the experiment directory, which must
+        # not collect an outputs/ tree per tile.
+        'tmp="$(mktemp -d)"; trap \'rm -rf "$tmp"\' EXIT; '
+        '{params.python} -m fisseq_embeddings_pipeline.tile_shard '
+        'output_dir="$tmp" hydra.run.dir="$tmp" hydra.output_subdir=null '
+        'image_tif={input.image:q} mask_tif={input.mask:q} '
+        'segmentation_csv={input.cell_table:q} '
+        'well={params.well:q} tile={params.tile:q} window={wildcards.window} '
+        'output_tar={output.shard:q} > {log:q} 2>&1'
