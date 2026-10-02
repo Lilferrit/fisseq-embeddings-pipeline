@@ -9,7 +9,7 @@
       
       
       
-        <link rel="prev" href="../build_cell_images_enumerate/">
+        <link rel="prev" href="../tile_shard/">
       
       
         <link rel="next" href="../cell_metadata/">
@@ -643,6 +643,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -773,34 +801,6 @@
     
   
     Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
   
 
     
@@ -1468,6 +1468,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/build_cell_images_table/" class="md-nav__link">
         
   
@@ -1504,34 +1532,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2261,17 +2261,19 @@ third of <code>BUILD_CELL_IMAGES</code>' three phases (Nextflow process
 <code>BUILD_CELL_IMAGES</code>), run after that process's nested starcall <code>snakemake</code>
 invocation (phase 2 -- the one step needing the <code>ops</code> conda env baked into
 the root <code>Dockerfile</code>) has materialized every tile's
-segmentation/reads/CellProfiler CSVs and whole-tile image/mask.</p>
+segmentation/reads/CellProfiler CSVs and WebDataset shard.</p>
 <p>It reads <code>manifest</code> (written by phase 1,
 <a href="../build_cell_images_enumerate/"><code>build_cell_images_enumerate</code></a>), joins
 each tile's segmentation-side <code>{segtype}.csv</code> to <code>sequencing_dir</code>'s
 <code>{segtype}_reads{params}.csv</code> (by index value) and, if <code>cp_features</code>, the
 tile's CellProfiler CSV (by row position, renamed <code>cp_&lt;name&gt;</code>), into one
 <code>output</code> (<code>cell_table.parquet</code>) covering the whole experiment -- the ONE
-complete, self-sufficient cell table <code>BUILD_DATASET</code>/<code>BUILD_CP_FEATURES</code>
+complete, self-sufficient cell table <code>BUILD_CELL_METADATA</code>/<code>BUILD_CP_FEATURES</code>
 need; neither reads <code>starcall-workflow</code>'s tree directly. It also writes
-<code>tiles_output</code> (<code>tiles.parquet</code>): one row per tile naming the whole-tile
-image and mask <code>BUILD_DATASET</code> crops each cell from. See
+<code>tiles_output</code> (<code>tiles.parquet</code>): one row per tile naming the shard
+<code>EMBED_CELLS</code> reads that tile's cells from. The segmentation CSV is read
+with <code>read_segmentation_table</code>, which <a href="../tile_shard/">Cell Shards</a> shares,
+so <code>crop_index</code> here and the mask label a shard was cut by can't drift. See
 <a href="../../architecture/#cell-images-build_cell_images-output-from-starcall-workflow">Architecture</a>
 for the full data-contract rationale.</p>
 <h2 id="config-fields">Config fields<a class="headerlink" href="#config-fields" title="Permanent link">&para;</a></h2>
@@ -2298,7 +2300,7 @@ for the full data-contract rationale.</p>
 <tr>
 <td><code>tiles_output</code></td>
 <td><code>"tiles.parquet"</code></td>
-<td>Per-tile image table filename (under <code>output_dir</code>).</td>
+<td>Per-tile shard table filename (under <code>output_dir</code>).</td>
 </tr>
 </tbody>
 </table>
@@ -2311,8 +2313,8 @@ for the full data-contract rationale.</p>
   columns legitimately vary per experiment. Carries <code>crop_index</code> (the
   cell's 0-based row position in its tile's segmentation CSV, i.e. mask
   label <code>crop_index + 1</code>) and <code>bbox_x1/y1/x2/y2</code>.</li>
-<li><code>tiles.parquet</code> -- <code>well</code>, <code>tile</code>, <code>image_tif</code>, <code>mask_tif</code>: one row per
-  tile, the paths copied from the manifest (real paths under
+<li><code>tiles.parquet</code> -- <code>well</code>, <code>tile</code>, <code>shard_tar</code>: one row per tile, the
+  shard path copied from the manifest (a real path under
   <code>phenotyping_dir</code>; nothing is copied or linked).</li>
 </ul>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>

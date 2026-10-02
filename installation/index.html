@@ -749,6 +749,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cli/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cli/build_cell_images_table/" class="md-nav__link">
         
   
@@ -785,34 +813,6 @@
     
   
     Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cli/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
   
 
     
@@ -1480,6 +1480,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/build_cell_images_table/" class="md-nav__link">
         
   
@@ -1516,34 +1544,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2322,7 +2322,9 @@ runs every task against the <code>uv</code>-managed venv from above (what the te
 suite and CI do; there is no <code>ops</code> env there, so <code>BUILD_CELL_IMAGES</code>' nested
 starcall run needs a <code>snakemake</code> of your own on <code>PATH</code>).</p>
 <p>Every process, including <code>BUILD_CELL_IMAGES</code>, uses the same single image,
-built from the repo-root <code>Dockerfile</code>:</p>
+built from the repo-root <code>Dockerfile</code>, which also clones <code>starcall-workflow</code>
+at a pinned commit (<code>STARCALL_WORKFLOW_COMMIT</code>; see
+<a href="../architecture/">Architecture</a> decision 24):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>fisseq-embeddings-pipeline:latest<span class="w"> </span>.
 </code></pre></div>
 <p>Point <code>params.yaml</code>'s <code>container_image</code> (or a <code>--container_image</code>
@@ -2335,6 +2337,9 @@ as a nested run, whose dependency stack (tensorflow/stardist/cellpose) is
 kept isolated from this repo's own torch/Cell-DINO/polars stack via a
 second, dedicated conda env (<code>ops</code>) baked into this same image, rather
 than a separate container -- see the <code>Dockerfile</code>'s own comments for how.
+The Snakefile it runs is <code>snakemake/Snakefile</code>, which includes the pinned
+starcall commit's own and adds this pipeline's per-tile <code>make_cell_shard</code> rule
+(see <a href="../cli/tile_shard/">Cell Shards</a>).
 Real starcall execution inside that env is covered by the opt-in
 <code>pytest tests/integration --container</code> tests, on a tiny real-data
 fixture (see <code>testing_data/README.md</code>).</p>

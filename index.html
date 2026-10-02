@@ -719,6 +719,34 @@
   
   
     <li class="md-nav__item">
+      <a href="cli/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="cli/build_cell_images_table/" class="md-nav__link">
         
   
@@ -755,34 +783,6 @@
     
   
     Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="cli/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
   
 
     
@@ -1450,6 +1450,34 @@
   
   
     <li class="md-nav__item">
+      <a href="api/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="api/build_cell_images_table/" class="md-nav__link">
         
   
@@ -1486,34 +1514,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="api/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2239,18 +2239,20 @@ the same cells, for direct comparison against the embedding-space results.</p>
 with a pretrained Cell-DINO vision transformer and measures how each
 variant's cell population differs from wildtype (WT) controls in that
 learned embedding space, both per experiment and pooled across experiments.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>starcall-workflow's raw tree -&gt; Cell Images (BUILD_CELL_IMAGES)
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    -&gt; Cell Dataset (WebDataset) -&gt; Cell Embeddings (Cell-DINO)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>starcall-workflow's raw tree -&gt; Cell Images (BUILD_CELL_IMAGES, incl. per-tile
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    WebDataset shards) -&gt; Cell Embeddings (Cell-DINO)
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    -&gt; Filter Embeddings (QC-passed + synonymous-corrected)
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    -&gt; Aggregation -&gt; Experiment Aggregates -&gt; Global Variant Embeddings (PCA)
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    -&gt; OVWT Distinguish-ability Scores -&gt; Experiment Scores -&gt; Global Variant
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>       Distinguish-ability Scores
 </code></pre></div>
 <p><code>BUILD_CELL_IMAGES</code> is the only stage that reads <code>starcall-workflow</code>'s
-tree or runs its snakemake -- it forces each tile's phenotype image, mask,
-and genotype columns to exist and joins them into one self-sufficient
-<code>cell_table.parquet</code> per experiment; <code>BUILD_DATASET</code> then crops each cell
-straight out of those whole-tile images (see <a href="architecture/">Architecture</a>).</p>
+tree or runs its snakemake (starcall's own Snakefile, at the commit the
+image pins, plus this pipeline's <code>make_cell_shard</code>
+rule). It has every tile's cells cropped straight into a per-tile
+WebDataset shard as an ordinary snakemake job, and joins each tile's
+segmentation and genotype tables into one self-sufficient
+<code>cell_table.parquet</code> per experiment (see <a href="architecture/">Architecture</a>).</p>
 <p>A variant's identity is preserved throughout by its label column
 (<code>meta_aa_changes</code>); "synonymous" variants (same amino acid before/after)
 serve as the in-experiment control population.</p>

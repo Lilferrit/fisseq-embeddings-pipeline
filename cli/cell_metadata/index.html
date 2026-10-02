@@ -12,7 +12,7 @@
         <link rel="prev" href="../build_cell_images_table/">
       
       
-        <link rel="next" href="../dataset/">
+        <link rel="next" href="../qcfilter/">
       
       
         
@@ -646,6 +646,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../build_cell_images_table/" class="md-nav__link">
         
   
@@ -781,34 +809,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1468,6 +1468,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/build_cell_images_table/" class="md-nav__link">
         
   
@@ -1504,34 +1532,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2261,12 +2261,18 @@ down to the seven <code>meta_*</code> columns <code>QC_FILTER</code> reads, as o
 per-experiment <code>metadata.parquet</code>. No images, no feature columns, no
 <code>starcall-workflow</code> tree access.</p>
 <p>This stage exists to make <code>QC_FILTER</code> the point where the cellDINO and
-CellProfiler tracks fan out, rather than <code>BUILD_DATASET</code>. Before it, QC's
-input was <code>BUILD_DATASET</code>'s own <code>metadata.parquet</code>, written inside that
-stage's WebDataset shard-writing loop -- which made the expensive,
-image-reading dataset build a hard dependency of the CellProfiler track
-too, since <code>FILTER_CP_FEATURES</code> consumes the same QC output. See
+CellProfiler tracks fan out, off a cheap table projection rather than the
+image-reading cellDINO track. Before it, QC's input was the (since
+removed) <code>BUILD_DATASET</code> stage's own <code>metadata.parquet</code>, written inside
+its WebDataset shard-writing loop -- which made the expensive dataset
+build a hard dependency of the CellProfiler track too, since
+<code>FILTER_CP_FEATURES</code> consumes the same QC output. See
 <a href="../../nextflow/#track-independence">Nextflow Workflow: Track independence</a>.</p>
+<p><code>EMBED_CELLS</code> reads this same <code>metadata.parquet</code> too: a cell shard's
+<code>meta.json</code> carries only the cell's location, and every other <code>meta_*</code>
+column is joined on from here (see <a href="../embed/">Cell Embeddings</a>) -- so a
+cell's <code>meta_*</code> values are identical in QC's input and in
+<code>embeddings.parquet</code>.</p>
 <p><code>QC_FILTER</code> can't simply read <code>cell_table.parquet</code> itself: its
 <code>filter_columns</code> does rename the barcode/edit-distance/amino-acid-changes
 columns to their canonical <code>meta_*</code> names, but its closing <code>select</code> keeps
@@ -2316,6 +2322,10 @@ parquet <code>QC_FILTER</code> consumes.</p>
 </tr>
 </tbody>
 </table>
+<p>The three <code>*_col_name</code> fields reach this stage from an <code>experiments:</code>
+entry the same way they reach <code>BUILD_CP_FEATURES</code> (the plan's
+<code>cell_table_args</code>), so both tracks read the cell table with the same
+column names.</p>
 <h2 id="output-file">Output file<a class="headerlink" href="#output-file" title="Permanent link">&para;</a></h2>
 <p>Written to <code>output_dir</code>:</p>
 <ul>
@@ -2323,9 +2333,9 @@ parquet <code>QC_FILTER</code> consumes.</p>
   <code>meta_batch</code>, <code>meta_well</code>, <code>meta_tile</code>, <code>meta_cell_index</code>,
   <code>meta_barcode</code>, <code>meta_aa_changes</code>, <code>meta_edit_distance</code>.</li>
 </ul>
-<p>Note this covers <em>every</em> row of <code>cell_table.parquet</code>, where
-<code>BUILD_DATASET</code>'s own <code>metadata.parquet</code> only ever held cells that made it
-into a shard. <code>filtered_cells.parquet</code> can therefore cover strictly more
+<p>Note this covers <em>every</em> row of <code>cell_table.parquet</code>, where the removed
+<code>BUILD_DATASET</code> stage's own <code>metadata.parquet</code> only ever held cells that
+made it into a shard. <code>filtered_cells.parquet</code> can therefore cover strictly more
 cells than it used to; every downstream consumer inner-joins it back on
 <code>filter.py</code>'s <code>JOIN_KEYS</code>, so the extra rows drop out where they don't
 apply.</p>

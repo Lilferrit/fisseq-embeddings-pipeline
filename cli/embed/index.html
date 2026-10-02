@@ -646,6 +646,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../build_cell_images_table/" class="md-nav__link">
         
   
@@ -682,34 +710,6 @@
     
   
     Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
   
 
     
@@ -1468,6 +1468,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/build_cell_images_table/" class="md-nav__link">
         
   
@@ -1504,34 +1532,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2258,10 +2258,20 @@
 <h1 id="cell-embeddings-embed_cells">Cell Embeddings (<code>EMBED_CELLS</code>)<a class="headerlink" href="#cell-embeddings-embed_cells" title="Permanent link">&para;</a></h1>
 <p><code>python -m fisseq_embeddings_pipeline.embed</code> (Nextflow process
 <code>EMBED_CELLS</code>, the pipeline's only GPU-bound stage) streams every cell in
-a <code>BUILD_DATASET</code> WebDataset through a pretrained Cell-DINO checkpoint
-(Meta's <code>dinov2</code>) and writes one row per cell to <code>embeddings.parquet</code>. Not
-gated by <code>QC_FILTER</code> -- this GPU pass runs once per experiment regardless
-of how many times QC thresholds get retuned afterward.</p>
+an experiment's per-tile WebDataset shards (cut by <code>BUILD_CELL_IMAGES</code>'
+nested <code>make_cell_shard</code> rule -- see <a href="../tile_shard/">Cell Shards</a>) through
+a pretrained Cell-DINO checkpoint (Meta's <code>dinov2</code>) and writes one row per
+cell to <code>embeddings.parquet</code>. Not gated by <code>QC_FILTER</code> -- this GPU pass
+runs once per experiment regardless of how many times QC thresholds get
+retuned afterward.</p>
+<p>The shards are read in place, under <code>phenotyping_dir</code>, from the paths
+<code>BUILD_CELL_IMAGES</code>' <code>tiles.parquet</code> lists (nextflow.config binds that
+directory into this task's container). A shard's <code>meta.json</code> carries only
+the cell's location, so every other <code>meta_*</code> column is joined on from
+<code>BUILD_CELL_METADATA</code>'s <code>metadata.parquet</code> (<code>attach_metadata</code>): left join
+on <code>(meta_well, meta_tile, meta_cell_index)</code>, raising if any embedded cell
+has no row there -- the shards and <code>cell_table.parquet</code> are built from the
+same segmentation tables, so a miss means they came from different runs.</p>
 <p>See <a href="../../architecture/#embed_cells-cell-dino-inference-internals">Architecture</a>
 for how the checkpoint's architecture is inferred from its own state dict
 rather than assumed, and what real checkpoint shapes have been verified.</p>
@@ -2277,9 +2287,19 @@ rather than assumed, and what real checkpoint shapes have been verified.</p>
 </thead>
 <tbody>
 <tr>
+<td><code>tiles_path</code></td>
+<td><code>null</code></td>
+<td><code>BUILD_CELL_IMAGES</code>' <code>tiles.parquet</code>: every row's <code>shard_tar</code> is one of this experiment's shards; a listed shard that doesn't exist raises. What the pipeline sets. Exactly one of <code>tiles_path</code> / <code>shard_pattern</code> must be set.</td>
+</tr>
+<tr>
 <td><code>shard_pattern</code></td>
+<td><code>null</code></td>
+<td>A path/brace pattern for a set of shards instead, e.g. <code>"dataset-{000000..000042}.tar"</code>. A bare glob (<code>"dataset-*.tar"</code>) also works.</td>
+</tr>
+<tr>
+<td><code>metadata_path</code></td>
 <td><strong>required</strong></td>
-<td>Path/brace pattern for this experiment's <code>BUILD_DATASET</code> shards, e.g. <code>"dataset-{000000..000042}.tar"</code>. A bare glob (<code>"dataset-*.tar"</code>) also works.</td>
+<td><code>BUILD_CELL_METADATA</code>'s <code>metadata.parquet</code> for the same experiment, joined onto each embedded cell.</td>
 </tr>
 <tr>
 <td><code>checkpoint_path</code></td>
@@ -2299,7 +2319,7 @@ rather than assumed, and what real checkpoint shapes have been verified.</p>
 <tr>
 <td><code>crop_size</code></td>
 <td><code>224</code></td>
-<td>Expected crop size -- must match <code>BUILD_DATASET</code>'s <code>window</code>. Only a fallback for model construction; doesn't constrain what crop size can actually be embedded.</td>
+<td>Expected crop size -- must match the shards' <code>window</code>. Only a fallback for model construction; doesn't constrain what crop size can actually be embedded.</td>
 </tr>
 <tr>
 <td><code>channels</code></td>
@@ -2335,20 +2355,22 @@ rather than assumed, and what real checkpoint shapes have been verified.</p>
 </table>
 <h2 id="output-file">Output file<a class="headerlink" href="#output-file" title="Permanent link">&para;</a></h2>
 <p><code>embeddings.parquet</code> -- one row per <code>(meta_well, meta_tile,
-meta_cell_index)</code> key streamed off the dataloader, carrying that sample's
-<code>meta.json</code> fields plus <code>emb_0000</code>..<code>emb_{D-1}</code> (<code>D</code> = the loaded
+meta_cell_index)</code> key streamed off the dataloader, in shard order: the
+seven <code>meta_*</code> columns <code>QC_FILTER</code> sees (<code>CELL_METADATA_SCHEMA</code>), then
+<code>emb_0000</code>..<code>emb_{D-1}</code> (<code>D</code> = the loaded
 checkpoint's actual embed dim -- e.g. 1024 for ViT-L/16, 384 for
 ViT-S/8). Column-naming convention: zero-padded <code>emb_%04d</code>, matched
 downstream by <code>EMBEDDING_SELECTOR = cs.matches(r"^emb_\d+$")</code>.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.embed<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="nv">output_dir</span><span class="o">=</span>./out<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="s1">'shard_pattern=./dataset-*.tar'</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">checkpoint_path</span><span class="o">=</span>/path/to/checkpoint.pth<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">device</span><span class="o">=</span>cpu<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="s1">'channels=[0,1,2,3]'</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nv">apply_mask</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">tiles_path</span><span class="o">=</span>/pipeline/cell_images/experiment1/tiles.parquet<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">metadata_path</span><span class="o">=</span>/pipeline/cell_metadata/experiment1/metadata.parquet<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">checkpoint_path</span><span class="o">=</span>/path/to/checkpoint.pth<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">device</span><span class="o">=</span>cpu<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="s1">'channels=[0,1,2,3]'</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nv">apply_mask</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
 </code></pre></div>
 <h2 id="common-config-fields">Common config fields<a class="headerlink" href="#common-config-fields" title="Permanent link">&para;</a></h2>
 <p>Every CLI tool's config extends <code>AppConfig</code>, which supplies:</p>

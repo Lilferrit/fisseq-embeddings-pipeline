@@ -9,7 +9,7 @@
       
       
       
-        <link rel="prev" href="../dataset/">
+        <link rel="prev" href="../cell_metadata/">
       
       
         <link rel="next" href="../embed/">
@@ -641,6 +641,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/build_cell_images_table/" class="md-nav__link">
         
   
@@ -677,34 +705,6 @@
     
   
     Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
   
 
     
@@ -1377,6 +1377,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../build_cell_images_table/" class="md-nav__link">
         
   
@@ -1413,34 +1441,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2436,7 +2436,7 @@ machinery:</p>
    to <code>"meta_barcode"</code>/<code>"meta_aa_changes"</code>/<code>"meta_edit_distance"</code> instead of
    the upstream raw-CSV names (<code>"upBarcode"</code>/<code>"aaChanges"</code>/<code>"editDistance"</code>),
    since <code>metadata.parquet</code> already writes those columns under their
-   canonical <code>meta_*</code> names (see dataset.py's write_dataset_shards) -- this
+   canonical <code>meta_*</code> names (see utils/cell_table.py's projection) -- this
    pipeline's only real <code>cell_files</code> input is never the raw, unrenamed cell
    table. <code>filter_columns</code>'s rename-then-select logic is otherwise
    unaffected: renaming a column to its own existing name is a harmless
@@ -2519,7 +2519,7 @@ random_seed.</p>
             <td>
               <div class="doc-md-description">
                 <p>Path or list of paths to cell data files (CSV or Parquet) -- in
-practice, BUILD_DATASET's metadata.parquet.</p>
+practice, BUILD_CELL_METADATA's metadata.parquet.</p>
               </div>
             </td>
           </tr>
@@ -2766,7 +2766,7 @@ warning, since the two fields are set independently. Defaults to
 <a id="__codelineno-0-73" name="__codelineno-0-73"></a><span class="sd">    ----------</span>
 <a id="__codelineno-0-74" name="__codelineno-0-74"></a><span class="sd">    cell_files : Any</span>
 <a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="sd">        Path or list of paths to cell data files (CSV or Parquet) -- in</span>
-<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="sd">        practice, BUILD_DATASET's metadata.parquet.</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="sd">        practice, BUILD_CELL_METADATA's metadata.parquet.</span>
 <a id="__codelineno-0-77" name="__codelineno-0-77"></a><span class="sd">    bc_threshold : int</span>
 <a id="__codelineno-0-78" name="__codelineno-0-78"></a><span class="sd">        Minimum number of cells required for a barcode to pass QC.</span>
 <a id="__codelineno-0-79" name="__codelineno-0-79"></a><span class="sd">        Defaults to ``10``.</span>

@@ -9,10 +9,10 @@
       
       
       
-        <link rel="prev" href="../cell_metadata/">
+        <link rel="prev" href="../build_cell_images_enumerate/">
       
       
-        <link rel="next" href="../qcfilter/">
+        <link rel="next" href="../build_cell_images_table/">
       
       
         
@@ -23,7 +23,7 @@
     
     
       
-        <title>Cell Dataset (BUILD_DATASET) - Fisseq Embeddings Pipeline</title>
+        <title>Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES) - Fisseq Embeddings Pipeline</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#cell-dataset-build_dataset" class="md-skip">
+        <a href="#cell-shards-make_cell_shard" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Cell Dataset (BUILD_DATASET)
+              Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
             
           </span>
         </div>
@@ -643,6 +643,147 @@
                 
   
   
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cropping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cropping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-config-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common config fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
   
   
     <li class="md-nav__item">
@@ -690,136 +831,6 @@
   
 
       </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#cropping" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cropping
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#config-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Config fields
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#output-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Output files
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Example
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#common-config-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common config fields
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1479,6 +1490,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/build_cell_images_table/" class="md-nav__link">
         
   
@@ -1515,34 +1554,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2206,6 +2217,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cropping" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2228,10 +2250,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#output-files" class="md-nav__link">
+  <a href="#output" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Output files
+        Output
       
     </span>
   </a>
@@ -2277,25 +2299,57 @@
 
 
 
-<h1 id="cell-dataset-build_dataset">Cell Dataset (<code>BUILD_DATASET</code>)<a class="headerlink" href="#cell-dataset-build_dataset" title="Permanent link">&para;</a></h1>
-<p><code>python -m fisseq_embeddings_pipeline.dataset</code> (Nextflow process <code>BUILD_DATASET</code>) crops every cell out of
-<code>starcall-workflow</code>'s whole-tile phenotype images and packs the crops into
-a single <strong>WebDataset</strong> -- a sharded <code>.tar</code> archive holding every cell in
-the experiment, unfiltered -- that <code>EMBED_CELLS</code> streams from directly.</p>
-<p>Building it (and running <code>EMBED_CELLS</code> over it) is deliberately decoupled
-from <code>QC_FILTER</code>: QC thresholds get tuned and re-run often, and the whole
-point of making embedding a separate, unconditional branch off Cell
-Dataset is so that changing a QC threshold never re-triggers the
-expensive GPU embedding pass -- you pay for embedding every cell once, up
-front.</p>
+<h1 id="cell-shards-make_cell_shard">Cell Shards (<code>make_cell_shard</code>)<a class="headerlink" href="#cell-shards-make_cell_shard" title="Permanent link">&para;</a></h1>
+<p><code>python -m fisseq_embeddings_pipeline.tile_shard</code> crops every cell of
+<strong>one tile</strong> out of <code>starcall-workflow</code>'s whole-tile phenotype image and
+writes them into that tile's <strong>WebDataset</strong> shard (a <code>.tar</code>, one sample per
+cell, unfiltered), which <code>EMBED_CELLS</code> streams from.</p>
+<p>It is not a Nextflow process. It's the body of <code>rule make_cell_shard</code>,
+which this repo adds on top of starcall's own Snakefile
+(<code>snakemake/Snakefile</code>), so it runs inside <code>BUILD_CELL_IMAGES</code>' nested
+snakemake, once per tile, as phase 2 of that stage. <code>BUILD_CELL_IMAGES</code>
+requests every tile's shard as a target. As a result, cropping fans out one
+job per tile under a <code>starcall_profile</code>, and snakemake's own mtime check
+caches each shard, so a tile already cut isn't cut again. See
+<a href="../../architecture/">Architecture</a> decisions 17 and 24.</p>
+<p>Building the shards (and running <code>EMBED_CELLS</code> over them) is deliberately
+decoupled from <code>QC_FILTER</code>. QC thresholds get tuned and re-run often. Keeping
+embedding as a separate, unconditional branch means changing a QC threshold
+never re-triggers the expensive GPU embedding pass. You pay for embedding
+every cell once, up front.</p>
+<h2 id="the-rule">The rule<a class="headerlink" href="#the-rule" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>input:   {phenotyping_dir}{well}_grid{N}/tile{x}x{y}y/{raw|corrected}_pt.tif
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>         {phenotyping_dir}{well}_grid{N}/tile{x}x{y}y/{segmentation_type}_mask.tif
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>         {phenotyping_dir}{well}_grid{N}/tile{x}x{y}y/{segmentation_type}.csv
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>output:  {phenotyping_dir}{well}_grid{N}/tile{x}x{y}y/{segmentation_type}_{raw|corrected}_shard_{window}.tar
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>log:     the same path, .log
+</code></pre></div>
+<p><code>raw</code> vs <code>corrected</code> (from the experiment's <code>use_corrected</code>) and <code>window</code>
+are both part of the shard's filename. Changing either requests a
+different shard instead of reusing a stale one.</p>
+<p>It's a <code>shell:</code> rule, not <code>run:</code>, so the body runs in this pipeline's own
+Python 3.13 venv (<code>config['fisseq_python']</code>, which <code>BUILD_CELL_IMAGES</code> sets
+to its own <code>$(command -v python)</code>) rather than in the <code>ops</code> env's 3.10
+snakemake interpreter. Every child job re-enters the same image, so that
+path is valid on a cluster node too. Hydra's run directory and this
+module's own log file go to a scratch <code>mktemp -d</code> directory, so the job's
+working directory (the experiment directory) doesn't collect a Hydra
+<code>outputs/</code> tree per tile. The console log lands in the rule's <code>log:</code> file.</p>
+<p>The whole-tile image is a <code>temp()</code> output upstream (<code>rule stitch_tile_pt</code>)
+and is no longer requested as a target itself. Once the shard is cut,
+snakemake deletes it. The tile mask is <code>temp()</code> only when
+<code>stitch_tile_segmentation</code> builds it (<code>relabel_segmentation</code>/
+<code>stitch_tile_from_well_segmentation</code> write a plain output), so it may
+stay.</p>
 <h2 id="cropping">Cropping<a class="headerlink" href="#cropping" title="Permanent link">&para;</a></h2>
-<p>The tile list comes from <code>BUILD_CELL_IMAGES</code>' <code>tiles.parquet</code> (one row
-per tile: <code>well</code>, <code>tile</code>, <code>image_tif</code>, <code>mask_tif</code>), sorted by well and
-then numerically by tile coordinates. For each tile, <code>write_dataset_shards</code>
-reads the whole-tile image (<code>raw_pt.tif</code>/<code>corrected_pt.tif</code>, starcall's
-<code>(cycles, channels, H, W)</code> flattened to <code>(C, H, W)</code>) and label mask
-(<code>&lt;segmentation_type&gt;_mask.tif</code>, <code>(H, W)</code>) once, then cuts every one of
-that tile's cells out with <code>crop_cell</code>:</p>
+<p><code>write_tile_shard</code> reads the tile's segmentation table with
+<code>build_cell_images_table.read_segmentation_table</code>, the same reader
+<code>BUILD_CELL_IMAGES</code>' table phase uses, so the two can't disagree on which
+row is which cell. Each row has a <code>tile_cell_index</code> (the CSV's own index)
+and a <code>crop_index</code> (its 0-based on-disk row position). The module then reads
+the whole-tile image (starcall's <code>(cycles, channels, H, W)</code> flattened to
+<code>(C, H, W)</code>) and the label mask (<code>(H, W)</code>) once, and cuts every cell out
+with <code>crop_cell</code>:</p>
 <ul>
 <li>the crop is <code>window</code> x <code>window</code>, centred on the bbox midpoint
   (<code>((bbox_x1 + bbox_x2) // 2, (bbox_y1 + bbox_y2) // 2)</code>, with <code>bbox_x*</code>
@@ -2305,18 +2359,16 @@ that tile's cells out with <code>crop_cell</code>:</p>
   table is mask label <em>i+1</em>), stored as uint8, so neighbouring cells
   inside the window are masked out.</li>
 </ul>
-<p>This is starcall-workflow's own <code>make_cell_images</code> crop, with the centre
-fixed: upstream reads <code>xpos</code>/<code>ypos</code> columns its cell table doesn't have --
-see <a href="../../architecture/">Architecture</a> decision 17. A tile with no rows in
-<code>cell_table.parquet</code> is skipped before its files are opened; a mask whose
-shape doesn't match its image raises.</p>
-<p><code>BUILD_DATASET</code> does no well/grid-size discovery and never touches the
-rest of <code>starcall-workflow</code>'s tree -- under Docker/Apptainer, only the
-experiment's <code>phenotyping_dir</code> is bound into its container, so the paths
-in <code>tiles.parquet</code> resolve (see
-<a href="../../nextflow/#bind-mounts">Nextflow Workflow</a>).</p>
+<p>This is starcall-workflow's own <code>make_cell_images</code> crop with the centre
+fixed: upstream reads <code>xpos</code>/<code>ypos</code> columns its cell table doesn't have.
+See <a href="../../architecture/">Architecture</a> decision 17. A tile with no cells
+still gets a valid, empty tar (snakemake needs the output to exist), and
+its image and mask are never opened. A mask whose shape doesn't match its
+image raises.</p>
 <h2 id="config-fields">Config fields<a class="headerlink" href="#config-fields" title="Permanent link">&para;</a></h2>
-<p>Extends the <a href="#common-config-fields">common config fields</a> below.</p>
+<p>Extends the <a href="#common-config-fields">common config fields</a> below.
+<code>output_dir</code> holds only this run's log; the shard itself goes to
+<code>output_tar</code>.</p>
 <table>
 <thead>
 <tr>
@@ -2327,67 +2379,69 @@ in <code>tiles.parquet</code> resolve (see
 </thead>
 <tbody>
 <tr>
-<td><code>cell_images_dir</code></td>
+<td><code>image_tif</code></td>
 <td><strong>required</strong></td>
-<td>Directory holding <code>BUILD_CELL_IMAGES</code>' <code>cell_table.parquet</code> and <code>tiles.parquet</code>. The process stages both into its work directory and passes <code>cell_images_dir=.</code>; set it explicitly only when invoking this module's CLI directly against a <code>BUILD_CELL_IMAGES</code> output you already have.</td>
+<td>The tile's whole-tile phenotype image, <code>(cycles, channels, H, W)</code>.</td>
+</tr>
+<tr>
+<td><code>mask_tif</code></td>
+<td><strong>required</strong></td>
+<td>The tile's <code>(H, W)</code> segmentation label mask.</td>
+</tr>
+<tr>
+<td><code>segmentation_csv</code></td>
+<td><strong>required</strong></td>
+<td>The tile's <code>{segmentation_type}.csv</code>.</td>
+</tr>
+<tr>
+<td><code>well</code>, <code>tile</code></td>
+<td><strong>required</strong></td>
+<td>This tile's identifiers, written into each sample's key and <code>meta.json</code>.</td>
 </tr>
 <tr>
 <td><code>window</code></td>
 <td><strong>required</strong></td>
-<td>Side length, in pixels, of each cell's square crop. Must match the loaded Cell-DINO checkpoint's expected input (<code>cell_dino_crop_size</code>). When run via <code>BUILD_DATASET</code>, an <code>experiments:</code> entry omitting this falls back to <code>params.yaml</code>'s pipeline-wide <code>window</code> default (see <a href="../../configuration/">Configuration</a>); required here only when invoking this module's CLI directly.</td>
+<td>Side length, in pixels, of each cell's square crop. Must match the loaded Cell-DINO checkpoint's expected input (<code>cell_dino_crop_size</code>). Comes from the shard target's filename, which <code>BUILD_CELL_IMAGES</code> names from the experiment's <code>window</code> (falling back to <code>params.yaml</code>'s global default; see <a href="../../configuration/">Configuration</a>).</td>
 </tr>
 <tr>
-<td><code>batch_stem</code></td>
+<td><code>output_tar</code></td>
 <td><strong>required</strong></td>
-<td>This experiment's identifier, written into every sample's <code>meta.json</code> as <code>meta_batch</code>.</td>
-</tr>
-<tr>
-<td><code>shard_maxcount</code></td>
-<td><code>2000</code></td>
-<td>Max samples per WebDataset shard. See <a href="../../configuration/#build_dataset-shard-sizing">shard sizing</a>.</td>
-</tr>
-<tr>
-<td><code>barcode_col_name</code></td>
-<td><code>"upBarcode"</code></td>
-<td>Column name for cell barcodes in <code>cell_table.parquet</code>.</td>
-</tr>
-<tr>
-<td><code>aa_changes_col_name</code></td>
-<td><code>"aaChanges"</code></td>
-<td>Column name for amino-acid change labels in <code>cell_table.parquet</code>.</td>
-</tr>
-<tr>
-<td><code>edit_distance_col_name</code></td>
-<td><code>"editDistance"</code></td>
-<td>Column name for edit distances in <code>cell_table.parquet</code>.</td>
+<td>Path of the shard to write.</td>
 </tr>
 </tbody>
 </table>
-<p><code>phenotyping_dir</code>/<code>wells</code>/<code>grid_size</code>/<code>segmentation_type</code>/<code>use_corrected</code>
-are not fields on this stage -- they're <code>BUILD_CELL_IMAGES</code>-only
-(starcall-workflow-discovery concerns); <code>tiles.parquet</code> already names
-the exact image and mask to read.</p>
-<h2 id="output-files">Output files<a class="headerlink" href="#output-files" title="Permanent link">&para;</a></h2>
-<p>Written to <code>output_dir</code>:</p>
+<h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
+<p>One <code>.tar</code> per tile. Each sample is keyed <code>"{well}_{tile}_{tile_cell_index}"</code>
+and carries:</p>
 <ul>
-<li><code>dataset-{shard:06d}.tar</code> (one or more shards) -- one sample per cell,
-  key <code>"{well}_{tile}_{cell_index}"</code>, carrying <code>crop.npy</code>
-  (<code>(num_phenotyping_cycles × num_channels, window, window)</code>), <code>mask.npy</code>
-  (<code>(window, window)</code> uint8 foreground mask), and <code>meta.json</code> (<code>meta_batch</code>,
-  <code>meta_well</code>, <code>meta_tile</code>, <code>meta_cell_index</code>, <code>meta_barcode</code>,
-  <code>meta_aa_changes</code>, <code>meta_edit_distance</code>).</li>
-<li><code>metadata.parquet</code> -- the same per-cell <code>meta_*</code> fields as a plain
-  table, no images: the record of which cells actually made it into the
-  shards. Published for the record; nothing in-pipeline consumes it
-  (<code>QC_FILTER</code> reads <code>BUILD_CELL_METADATA</code>'s instead).</li>
+<li><code>crop.npy</code>: <code>(num_phenotyping_cycles × num_channels, window, window)</code>,
+  in the image's dtype;</li>
+<li><code>mask.npy</code>: <code>(window, window)</code> uint8 foreground mask;</li>
+<li><code>meta.json</code>: <code>meta_well</code>, <code>meta_tile</code>, <code>meta_cell_index</code> only.</li>
 </ul>
+<p><code>meta.json</code> carries just the cell's location on purpose. The genotype
+columns live in a different starcall tree (<code>sequencing_dir</code>) under
+per-experiment column names, and <code>meta_batch</code> is a pipeline-level name.
+Baking either into a file snakemake caches would leave it stale whenever
+they change, and would copy what <code>BUILD_CELL_METADATA</code>'s
+<code>metadata.parquet</code> already holds. <code>EMBED_CELLS</code> joins that table back on
+(see <a href="../embed/">Cell Embeddings</a>).</p>
+<p>At the defaults (4 uint16 channels, <code>window</code> 224) a sample is about
+440 KB (<code>crop.npy</code> ≈ 392 KB, <code>mask.npy</code> ≈ 49 KB, plus <code>meta.json</code> and tar
+headers), so a tile's shard is roughly 440 KB × its cell count; channel
+count (<code>num_phenotyping_cycles × num_channels</code>), dtype and <code>window</code> scale
+it.</p>
+<p><code>BUILD_CELL_IMAGES</code>' <code>tiles.parquet</code> lists every tile's shard path
+(<code>shard_tar</code>). The shards are read in place and never copied into
+<code>pipeline_dir</code>.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.dataset<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="nv">output_dir</span><span class="o">=</span>./out<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nv">cell_images_dir</span><span class="o">=</span>/pipeline/cell_images/experiment1<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nv">window</span><span class="o">=</span><span class="m">224</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nv">batch_stem</span><span class="o">=</span>experiment1<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nv">random_seed</span><span class="o">=</span><span class="m">0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.tile_shard<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="nv">output_dir</span><span class="o">=</span>/tmp/log<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nv">image_tif</span><span class="o">=</span>phenotyping/well1_grid4/tile0x0y/raw_pt.tif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nv">mask_tif</span><span class="o">=</span>phenotyping/well1_grid4/tile0x0y/cells_mask.tif<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nv">segmentation_csv</span><span class="o">=</span>phenotyping/well1_grid4/tile0x0y/cells.csv<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nv">well</span><span class="o">=</span>well1<span class="w"> </span><span class="nv">tile</span><span class="o">=</span>tile0x0y<span class="w"> </span><span class="nv">window</span><span class="o">=</span><span class="m">224</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nv">output_tar</span><span class="o">=</span>phenotyping/well1_grid4/tile0x0y/cells_raw_shard_224.tar
 </code></pre></div>
 <h2 id="common-config-fields">Common config fields<a class="headerlink" href="#common-config-fields" title="Permanent link">&para;</a></h2>
 <p>Every CLI tool's config extends <code>AppConfig</code>, which supplies:</p>
@@ -2422,7 +2476,7 @@ the exact image and mask to read.</p>
 </tr>
 </tbody>
 </table>
-<p>See <a href="../../api/dataset/">API Reference: dataset</a> for full function documentation.</p>
+<p>See <a href="../../api/tile_shard/">API Reference: tile_shard</a> for full function documentation.</p>
 
 
 

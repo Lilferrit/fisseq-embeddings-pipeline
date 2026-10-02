@@ -9,7 +9,7 @@
       
       
       
-        <link rel="prev" href="../dataset/">
+        <link rel="prev" href="../cell_metadata/">
       
       
         <link rel="next" href="../embed/">
@@ -646,6 +646,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../build_cell_images_table/" class="md-nav__link">
         
   
@@ -682,34 +710,6 @@
     
   
     Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
   
 
     
@@ -1468,6 +1468,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/build_cell_images_table/" class="md-nav__link">
         
   
@@ -1504,34 +1532,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2276,7 +2276,7 @@ filters above run. Every other class passes through untouched. If
 <code>n_variants</code> cap entirely and aren't counted against it.</p>
 <p>Vendored close to verbatim from <code>fisseq-data-pipeline</code>'s <code>qcfilter.py</code> --
 the only structural difference is that this pipeline's only real
-<code>cell_files</code> input is <code>BUILD_DATASET</code>'s <code>metadata.parquet</code>, which already
+<code>cell_files</code> input is <code>BUILD_CELL_METADATA</code>'s <code>metadata.parquet</code>, which already
 writes columns under their canonical <code>meta_*</code> names, so
 <code>barcode_col_name</code>/<code>aa_changes_col_name</code>/<code>edit_distance_col_name</code> default
 to those names instead of the upstream raw-CSV names. The
@@ -2296,7 +2296,7 @@ generation machinery from the upstream source is dropped entirely.</p>
 <tr>
 <td><code>cell_files</code></td>
 <td><strong>required</strong></td>
-<td>Path or list of paths to cell files (CSV or Parquet) -- in practice, <code>BUILD_DATASET</code>'s <code>metadata.parquet</code>.</td>
+<td>Path or list of paths to cell files (CSV or Parquet) -- in practice, <code>BUILD_CELL_METADATA</code>'s <code>metadata.parquet</code>.</td>
 </tr>
 <tr>
 <td><code>bc_threshold</code></td>

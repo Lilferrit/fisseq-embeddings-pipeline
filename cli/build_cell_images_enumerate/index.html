@@ -12,7 +12,7 @@
         <link rel="prev" href="../../configuration/">
       
       
-        <link rel="next" href="../build_cell_images_table/">
+        <link rel="next" href="../tile_shard/">
       
       
         
@@ -748,6 +748,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../build_cell_images_table/" class="md-nav__link">
         
   
@@ -784,34 +812,6 @@
     
   
     Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
   
 
     
@@ -1479,6 +1479,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/build_cell_images_table/" class="md-nav__link">
         
   
@@ -1515,34 +1543,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2288,19 +2288,21 @@ the files the rest of the process consumes:</p>
   dirs as shell-sourceable <code>key='value'</code> lines, so the nested <code>snakemake</code>
   (phase 2) uses exactly the paths this phase resolved.</li>
 <li><code>targets_out</code> (<code>targets.txt</code>) -- one snakemake target path per line: for
-  every tile, starcall-workflow's own native per-tile outputs -- the
-  whole-tile phenotype image (<code>raw_pt.tif</code>, or <code>corrected_pt.tif</code> with
-  <code>use_corrected</code>), its segmentation mask (<code>{segmentation_type}_mask.tif</code>),
+  every tile, its WebDataset shard
+  (<code>{segmentation_type}_{raw|corrected}_shard_{window}.tar</code>, cut by this
+  repo's own <code>make_cell_shard</code> rule -- see <a href="../tile_shard/">Cell Shards</a>),
   the segmentation cell table (<code>{segmentation_type}.csv</code>) and the
   sequencing reads table (<code>{segmentation_type}_reads{params}.csv</code>), plus
   the CellProfiler CSV if <code>cp_features</code> is set. Phase 2's <code>snakemake ...
-  -- $(cat targets.txt)</code>, against starcall's own unmodified Snakefile,
-  consumes this. Requesting the <code>temp()</code> image and mask as targets is what
-  keeps them on disk for <code>BUILD_DATASET</code> to crop from -- see
+  -- $(cat targets.txt)</code>, against <code>snakemake/Snakefile</code> (starcall's own
+  Snakefile at the image's pinned commit, plus <code>make_cell_shard</code>), consumes
+  this. The whole-tile image and mask the shard is cut from are
+  deliberately <em>not</em> targets: the image is <code>temp()</code> upstream, so
+  snakemake deletes it once the shard is cut -- see
   <a href="../../architecture/">Architecture</a> decision 17.</li>
 <li><code>manifest_out</code> (<code>tiles_manifest.csv</code>) -- drives phase 3
   (<a href="../build_cell_images_table/"><code>build_cell_images_table</code></a>); columns
-  <code>well,tile,segmentation_csv,reads_csv,cellprofiler_csv,image_tif,mask_tif</code>.</li>
+  <code>well,tile,segmentation_csv,reads_csv,cellprofiler_csv,shard_tar</code>.</li>
 <li><code>jobscript_out</code> (<code>starcall_jobscript.sh</code>) -- <strong>only</strong> when
   <code>starcall_job_image</code> is set, i.e. the run passes a <code>starcall_profile</code>:
   the <code>--jobscript</code> template every starcall child job runs through (see
@@ -2328,8 +2330,8 @@ that re-executes itself once as</p>
 </code></pre></div>
 <p>(guarded by a <code>FISSEQ_STARCALL_IN_IMAGE</code> environment variable), then runs
 the job's <code>{exec_job}</code>. The binds (<code>jobscript_bind_paths</code>) are the three
-resolved data dirs, <code>jobscript_binds</code> (the process passes the starcall
-checkout and the snakemake cache dir), and the current working directory
+resolved data dirs, <code>jobscript_binds</code> (the process passes
+<code>starcall_workflow_dir</code> and the snakemake cache dir), and the current working directory
 -- snakemake <code>cd</code>s each cluster job into the directory the submitter was
 launched from. snakemake fills the template with <code>str.format</code>, so a path
 containing a brace is rejected up front.</p>
@@ -2347,7 +2349,7 @@ containing a brace is rejected up front.</p>
 <tr>
 <td><code>starcall_workflow_dir</code></td>
 <td><strong>required</strong></td>
-<td>The starcall-workflow checkout/working directory; the data dirs default under it, and its own <code>config.yaml</code>/<code>default-config.yaml</code> is consulted first.</td>
+<td>The experiment's starcall working directory (snakemake's <code>--directory</code>: its <code>config.yaml</code> and data trees -- not starcall's code, which comes from the image's pinned commit); the data dirs default under it, and its own <code>config.yaml</code>/<code>default-config.yaml</code> is consulted first.</td>
 </tr>
 <tr>
 <td><code>phenotyping_dir</code>, <code>segmentation_dir</code>, <code>sequencing_dir</code></td>
@@ -2372,7 +2374,12 @@ containing a brace is rejected up front.</p>
 <tr>
 <td><code>use_corrected</code></td>
 <td><code>false</code></td>
-<td>Target <code>corrected_pt.tif</code> instead of <code>raw_pt.tif</code>, mirroring starcall's own <code>get_phenotyping_pt</code>.</td>
+<td>Cut each shard from <code>corrected_pt.tif</code> instead of <code>raw_pt.tif</code> (mirroring starcall's own <code>get_phenotyping_pt</code>); names the shard <code>..._corrected_shard_...</code> rather than <code>..._raw_shard_...</code>.</td>
+</tr>
+<tr>
+<td><code>window</code></td>
+<td><strong>required</strong></td>
+<td>Crop size each cell is cut at, in the shard target's filename. Must match <code>cell_dino_crop_size</code>. Routed from the experiment's <code>window</code> (or the global default).</td>
 </tr>
 <tr>
 <td><code>sequencing_reads_params</code></td>
@@ -2436,15 +2443,14 @@ containing a brace is rejected up front.</p>
 </tr>
 </tbody>
 </table>
-<p>There is no <code>window</code> field: <code>BUILD_CELL_IMAGES</code> asks starcall for no crops,
-so the crop size is <code>BUILD_DATASET</code>'s alone.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>fisseq_embeddings_pipeline.build_cell_images_enumerate<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="nv">output_dir</span><span class="o">=</span>./out<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nv">starcall_workflow_dir</span><span class="o">=</span>/data/experiment1<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="s1">'wells=[well1,well2]'</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nv">grid_size</span><span class="o">=</span><span class="m">12</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nv">segmentation_type</span><span class="o">=</span>cells
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nv">window</span><span class="o">=</span><span class="m">224</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nv">grid_size</span><span class="o">=</span><span class="m">12</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nv">segmentation_type</span><span class="o">=</span>cells
 </code></pre></div>
 <h2 id="common-config-fields">Common config fields<a class="headerlink" href="#common-config-fields" title="Permanent link">&para;</a></h2>
 <p>Every CLI tool's config extends <code>AppConfig</code>, which supplies:</p>

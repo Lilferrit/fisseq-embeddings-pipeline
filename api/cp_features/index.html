@@ -641,6 +641,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../cli/tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Images, Phase 2: Cell Shards (make_cell_shard, inside BUILD_CELL_IMAGES)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../cli/build_cell_images_table/" class="md-nav__link">
         
   
@@ -677,34 +705,6 @@
     
   
     Cell Metadata (BUILD_CELL_METADATA)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../cli/dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Dataset (BUILD_DATASET)
   
 
     
@@ -1377,6 +1377,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tile_shard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tile_shard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../build_cell_images_table/" class="md-nav__link">
         
   
@@ -1413,34 +1441,6 @@
     
   
     cell_metadata
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../dataset/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    dataset
   
 
     
@@ -2392,7 +2392,7 @@ discovery concerns BUILD_CELL_IMAGES owns.</p>
               <div class="doc-md-description">
                 <p>This experiment's identifier, written into every row as
 meta_batch -- one BUILD_CP_FEATURES run covers exactly one
-experiment, matching BUILD_DATASET's convention.</p>
+experiment, matching BUILD_CELL_METADATA's convention.</p>
               </div>
             </td>
           </tr>
@@ -2404,7 +2404,7 @@ experiment, matching BUILD_DATASET's convention.</p>
             <td>
               <div class="doc-md-description">
                 <p>Name of the barcode column in cell_table.parquet. Defaults to
-<code>"upBarcode"</code> -- same default as <code>BuildDatasetConfig</code>, since
+<code>"upBarcode"</code> -- same default as <code>CellMetadataConfig</code>, since
 this reads the same table.</p>
               </div>
             </td>
@@ -2508,10 +2508,10 @@ to <code>"editDistance"</code>.</p>
 <a id="__codelineno-0-62" name="__codelineno-0-62"></a><span class="sd">    batch_stem : str</span>
 <a id="__codelineno-0-63" name="__codelineno-0-63"></a><span class="sd">        This experiment's identifier, written into every row as</span>
 <a id="__codelineno-0-64" name="__codelineno-0-64"></a><span class="sd">        meta_batch -- one BUILD_CP_FEATURES run covers exactly one</span>
-<a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="sd">        experiment, matching BUILD_DATASET's convention.</span>
+<a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="sd">        experiment, matching BUILD_CELL_METADATA's convention.</span>
 <a id="__codelineno-0-66" name="__codelineno-0-66"></a><span class="sd">    barcode_col_name : str</span>
 <a id="__codelineno-0-67" name="__codelineno-0-67"></a><span class="sd">        Name of the barcode column in cell_table.parquet. Defaults to</span>
-<a id="__codelineno-0-68" name="__codelineno-0-68"></a><span class="sd">        ``"upBarcode"`` -- same default as ``BuildDatasetConfig``, since</span>
+<a id="__codelineno-0-68" name="__codelineno-0-68"></a><span class="sd">        ``"upBarcode"`` -- same default as ``CellMetadataConfig``, since</span>
 <a id="__codelineno-0-69" name="__codelineno-0-69"></a><span class="sd">        this reads the same table.</span>
 <a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">    aa_changes_col_name : str</span>
 <a id="__codelineno-0-71" name="__codelineno-0-71"></a><span class="sd">        Name of the amino-acid changes column in cell_table.parquet.</span>
