@@ -11,7 +11,7 @@ process BUILD_CP_FEATURES {
     publishDir { "${params.pipeline_dir}/cp_features/${batch_stem}" }, mode: 'copy'
 
     input:
-    tuple val(batch_stem), val(cp_features_args), path(cell_table)
+    tuple val(batch_stem), val(cell_table_args), path(cell_table)
 
     output:
     tuple val(batch_stem), path("cp_features.parquet"), emit: cp_features
@@ -23,7 +23,7 @@ process BUILD_CP_FEATURES {
         output_dir=. \\
         batch_stem=${batch_stem} \\
         cell_images_dir=. \\
-        ${cp_features_args} \\
+        ${cell_table_args} \\
         random_seed=${params.random_seed}
     """
 }

@@ -212,11 +212,11 @@ def test_build_cell_table_empty_when_no_tiles():
 
 
 # ---------------------------------------------------------------------------
-# build_tiles_table -- the per-tile image/mask sidecar
+# build_tiles_table -- the per-tile shard sidecar
 # ---------------------------------------------------------------------------
 
 
-def test_build_tiles_table_keeps_one_row_per_tile_with_image_paths():
+def test_build_tiles_table_keeps_one_row_per_tile_with_shard_path():
     tiles = [
         {
             "well": "well1",
@@ -224,23 +224,21 @@ def test_build_tiles_table_keeps_one_row_per_tile_with_image_paths():
             "segmentation_csv": "/p/cells.csv",
             "reads_csv": "/s/cells_reads.csv",
             "cellprofiler_csv": "",
-            "image_tif": "/p/raw_pt.tif",
-            "mask_tif": "/p/cells_mask.tif",
+            "shard_tar": "/p/cells_raw_shard_224.tar",
         }
     ]
 
     table = mod.build_tiles_table(tiles)
 
-    assert table.columns == ["well", "tile", "image_tif", "mask_tif"]
+    assert table.columns == ["well", "tile", "shard_tar"]
     assert table.row(0, named=True) == {
         "well": "well1",
         "tile": "tile00x00y",
-        "image_tif": "/p/raw_pt.tif",
-        "mask_tif": "/p/cells_mask.tif",
+        "shard_tar": "/p/cells_raw_shard_224.tar",
     }
 
 
 def test_build_tiles_table_empty_when_no_tiles():
     table = mod.build_tiles_table([])
     assert table.height == 0
-    assert table.columns == ["well", "tile", "image_tif", "mask_tif"]
+    assert table.columns == ["well", "tile", "shard_tar"]

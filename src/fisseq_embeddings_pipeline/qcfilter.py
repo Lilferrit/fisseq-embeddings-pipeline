@@ -21,7 +21,7 @@ machinery:
    to `"meta_barcode"`/`"meta_aa_changes"`/`"meta_edit_distance"` instead of
    the upstream raw-CSV names (`"upBarcode"`/`"aaChanges"`/`"editDistance"`),
    since `metadata.parquet` already writes those columns under their
-   canonical `meta_*` names (see dataset.py's write_dataset_shards) -- this
+   canonical `meta_*` names (see utils/cell_table.py's projection) -- this
    pipeline's only real `cell_files` input is never the raw, unrenamed cell
    table. `filter_columns`'s rename-then-select logic is otherwise
    unaffected: renaming a column to its own existing name is a harmless
@@ -73,7 +73,7 @@ class QcFilterConfig(AppConfig):
     ----------
     cell_files : Any
         Path or list of paths to cell data files (CSV or Parquet) -- in
-        practice, BUILD_DATASET's metadata.parquet.
+        practice, BUILD_CELL_METADATA's metadata.parquet.
     bc_threshold : int
         Minimum number of cells required for a barcode to pass QC.
         Defaults to ``10``.

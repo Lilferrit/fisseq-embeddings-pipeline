@@ -1,14 +1,13 @@
 // BUILD_CELL_METADATA. Projects BUILD_CELL_IMAGES' cell_table.parquet down
 // to the seven meta_* columns QC_FILTER reads (metadata.parquet) -- the
 // stage that makes QC_FILTER the pipeline's shared fan-out point rather
-// than BUILD_DATASET.
+// than the image-reading cellDINO track. EMBED_CELLS also joins its meta_*
+// columns back onto each embedded cell (a shard's meta.json carries only the
+// cell's location), so both tracks see identical meta_* values.
 //
-// Before this stage existed, QC_FILTER was fed BUILD_DATASET's own
-// metadata.parquet, which made the expensive, image-reading WebDataset
-// build a hard dependency of the CellProfiler track too (FILTER_CP_FEATURES
-// consumes the same QC output). Now BUILD_DATASET/EMBED_CELLS and
-// BUILD_CP_FEATURES hang off QC independently: either track can fail
-// without stopping the other. See cell_metadata.py's own module docstring
+// Before this stage existed, QC_FILTER was fed the (since removed)
+// BUILD_DATASET stage's own metadata.parquet, which made the WebDataset build
+// a hard dependency of the CellProfiler track too. See cell_metadata.py's own module docstring
 // and docs/architecture.md for the full rationale, including why QC can't
 // just read cell_table.parquet directly (qcfilter.py's filter_columns
 // drops the unprefixed well/tile/tile_cell_index columns that become
@@ -23,7 +22,7 @@ process BUILD_CELL_METADATA {
     publishDir { "${params.pipeline_dir}/cell_metadata/${batch_stem}" }, mode: 'copy'
 
     input:
-    tuple val(batch_stem), path(cell_table)
+    tuple val(batch_stem), val(cell_table_args), path(cell_table)
 
     output:
     tuple val(batch_stem), path("metadata.parquet"), emit: metadata
@@ -35,6 +34,7 @@ process BUILD_CELL_METADATA {
         output_dir=. \\
         cell_table=${cell_table} \\
         batch_stem=${batch_stem} \\
+        ${cell_table_args} \\
         random_seed=${params.random_seed}
     """
 }

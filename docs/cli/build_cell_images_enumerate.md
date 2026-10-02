@@ -10,19 +10,21 @@ the files the rest of the process consumes:
   dirs as shell-sourceable `key='value'` lines, so the nested `snakemake`
   (phase 2) uses exactly the paths this phase resolved.
 - `targets_out` (`targets.txt`) -- one snakemake target path per line: for
-  every tile, starcall-workflow's own native per-tile outputs -- the
-  whole-tile phenotype image (`raw_pt.tif`, or `corrected_pt.tif` with
-  `use_corrected`), its segmentation mask (`{segmentation_type}_mask.tif`),
+  every tile, its WebDataset shard
+  (`{segmentation_type}_{raw|corrected}_shard_{window}.tar`, cut by this
+  repo's own `make_cell_shard` rule -- see [Cell Shards](tile_shard.md)),
   the segmentation cell table (`{segmentation_type}.csv`) and the
   sequencing reads table (`{segmentation_type}_reads{params}.csv`), plus
   the CellProfiler CSV if `cp_features` is set. Phase 2's `snakemake ...
-  -- $(cat targets.txt)`, against starcall's own unmodified Snakefile,
-  consumes this. Requesting the `temp()` image and mask as targets is what
-  keeps them on disk for `BUILD_DATASET` to crop from -- see
+  -- $(cat targets.txt)`, against `snakemake/Snakefile` (starcall's own
+  Snakefile at the image's pinned commit, plus `make_cell_shard`), consumes
+  this. The whole-tile image and mask the shard is cut from are
+  deliberately *not* targets: the image is `temp()` upstream, so
+  snakemake deletes it once the shard is cut -- see
   [Architecture](../architecture.md) decision 17.
 - `manifest_out` (`tiles_manifest.csv`) -- drives phase 3
   ([`build_cell_images_table`](build_cell_images_table.md)); columns
-  `well,tile,segmentation_csv,reads_csv,cellprofiler_csv,image_tif,mask_tif`.
+  `well,tile,segmentation_csv,reads_csv,cellprofiler_csv,shard_tar`.
 - `jobscript_out` (`starcall_jobscript.sh`) -- **only** when
   `starcall_job_image` is set, i.e. the run passes a `starcall_profile`:
   the `--jobscript` template every starcall child job runs through (see
@@ -57,8 +59,8 @@ that re-executes itself once as
 
 (guarded by a `FISSEQ_STARCALL_IN_IMAGE` environment variable), then runs
 the job's `{exec_job}`. The binds (`jobscript_bind_paths`) are the three
-resolved data dirs, `jobscript_binds` (the process passes the starcall
-checkout and the snakemake cache dir), and the current working directory
+resolved data dirs, `jobscript_binds` (the process passes
+`starcall_workflow_dir` and the snakemake cache dir), and the current working directory
 -- snakemake `cd`s each cluster job into the directory the submitter was
 launched from. snakemake fills the template with `str.format`, so a path
 containing a brace is rejected up front.
@@ -69,12 +71,13 @@ Extends the [common config fields](#common-config-fields) below.
 
 | Field | Default | Description |
 | ----- | ------- | ----------- |
-| `starcall_workflow_dir` | **required** | The starcall-workflow checkout/working directory; the data dirs default under it, and its own `config.yaml`/`default-config.yaml` is consulted first. |
+| `starcall_workflow_dir` | **required** | The experiment's starcall working directory (snakemake's `--directory`: its `config.yaml` and data trees -- not starcall's code, which comes from the image's pinned commit); the data dirs default under it, and its own `config.yaml`/`default-config.yaml` is consulted first. |
 | `phenotyping_dir`, `segmentation_dir`, `sequencing_dir` | `null` | Explicit data dirs; `null` resolves via the project config, then `{starcall_workflow_dir}/{phenotyping,segmentation,sequencing}`. |
 | `wells` | **required** | Wells to enumerate. |
 | `grid_size` | `null` | Explicit grid size (lists the full grid), or `null` to auto-detect per well (lists existing tiles). |
 | `segmentation_type` | `"cells"` | Segmentation type name, threaded into every target filename. |
-| `use_corrected` | `false` | Target `corrected_pt.tif` instead of `raw_pt.tif`, mirroring starcall's own `get_phenotyping_pt`. |
+| `use_corrected` | `false` | Cut each shard from `corrected_pt.tif` instead of `raw_pt.tif` (mirroring starcall's own `get_phenotyping_pt`); names the shard `..._corrected_shard_...` rather than `..._raw_shard_...`. |
+| `window` | **required** | Crop size each cell is cut at, in the shard target's filename. Must match `cell_dino_crop_size`. Routed from the experiment's `window` (or the global default). |
 | `sequencing_reads_params` | `""` | Suffix threaded into the reads CSV filename (`{segmentation_type}_reads{sequencing_reads_params}.csv`). |
 | `cp_features` | `false` | Also target this experiment's CellProfiler CSV. |
 | `cellprofiler_cycle` | `""` | Threaded into the CellProfiler CSV filename when `cp_features` is set. |
@@ -88,9 +91,6 @@ Extends the [common config fields](#common-config-fields) below.
 | `jobscript_out` | `"starcall_jobscript.sh"` | Output filename (under `output_dir`). |
 | `resolved_dirs_out` | `"resolved_dirs.env"` | Output filename (under `output_dir`). |
 
-There is no `window` field: `BUILD_CELL_IMAGES` asks starcall for no crops,
-so the crop size is `BUILD_DATASET`'s alone.
-
 ## Example
 
 ```bash
@@ -98,6 +98,7 @@ uv run python -m fisseq_embeddings_pipeline.build_cell_images_enumerate \
     output_dir=./out \
     starcall_workflow_dir=/data/experiment1 \
     'wells=[well1,well2]' \
+    window=224 \
     grid_size=12 \
     segmentation_type=cells
 ```

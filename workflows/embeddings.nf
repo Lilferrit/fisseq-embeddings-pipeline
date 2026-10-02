@@ -4,11 +4,12 @@
 //   PLAN_EXPERIMENTS -> BUILD_CELL_IMAGES -> BUILD_CELL_METADATA -> QC_FILTER
 //
 // QC_FILTER is where the two tracks fan out. It hangs off
-// BUILD_CELL_METADATA (a flat projection of cell_table.parquet) rather than
-// off the expensive, image-reading dataset build, so a BUILD_DATASET failure
-// can't take the CellProfiler track down with it.
+// BUILD_CELL_METADATA (a flat projection of cell_table.parquet), so an
+// EMBED_CELLS failure can't take the CellProfiler track down with it. The
+// cellDINO track's per-tile shards are cut inside BUILD_CELL_IMAGES' own
+// nested snakemake (make_cell_shard), not by a stage here.
 //
-//   cellDINO:  BUILD_DATASET -> EMBED_CELLS -> FILTER_EMBEDDINGS ->
+//   cellDINO:  EMBED_CELLS -> FILTER_EMBEDDINGS ->
 //              {AGGREGATE_EMBEDDINGS, OVWT_BATCHWISE, reproducibility chain}
 //              -> {GLOBAL_BLOCKLIST -> GLOBAL_VARIANT_EMBEDDINGS,
 //                  GLOBAL_VARIANT_DISTINGUISHABILITY}
@@ -25,7 +26,6 @@ include { PLAN_EXPERIMENTS } from '../modules/local/plan_experiments/main.nf'
 include { BUILD_CELL_IMAGES } from '../modules/local/build_cell_images/main.nf'
 include { BUILD_CELL_METADATA } from '../modules/local/build_cell_metadata/main.nf'
 include { QC_FILTER } from '../modules/local/qc_filter/main.nf'
-include { BUILD_DATASET } from '../modules/local/build_dataset/main.nf'
 include { EMBED_CELLS } from '../modules/local/embed_cells/main.nf'
 include { FILTER_EMBEDDINGS } from '../modules/local/filter_embeddings/main.nf'
 include { AGGREGATE_EMBEDDINGS } from '../modules/local/aggregate_embeddings/main.nf'
@@ -71,16 +71,19 @@ workflow EmbeddingsPipeline {
     cell_images = BUILD_CELL_IMAGES(plans)  // (batch_stem, cell_table, tiles, phenotyping_dir)
     cell_tables = cell_images.map { stem, cell_table, _tiles, _pheno_dir -> tuple(stem, cell_table) }
 
-    metadata = BUILD_CELL_METADATA(cell_tables)
+    metadata = BUILD_CELL_METADATA(
+        plans.map { p -> tuple(p.batch_stem, p.cell_table_args) }.join(cell_tables)
+    )
     qc = QC_FILTER(metadata)
     // Only the join key; the other two QC outputs are report files.
     qc_passed = qc.map { stem, filtered, _barcode_counts, _variants -> tuple(stem, filtered) }
 
     // ── cellDINO track ───────────────────────────────────────────────────
-    dataset = BUILD_DATASET(
-        plans.map { p -> tuple(p.batch_stem, p.dataset_args) }.join(cell_images)
+    embeddings = EMBED_CELLS(
+        cell_images
+            .map { stem, _cell_table, tiles, pheno_dir -> tuple(stem, tiles, pheno_dir) }
+            .join(metadata)
     )
-    embeddings = EMBED_CELLS(dataset.map { stem, shards, _meta -> tuple(stem, shards) })
 
     // embeddings_only stops the cellDINO track here and skips the CP track:
     // for when all you want is the embeddings (and what the containerized
@@ -149,7 +152,7 @@ workflow EmbeddingsPipeline {
         // meant to stay comparable to the published CellProfiler analysis.
         cp_features = BUILD_CP_FEATURES(
             plans.filter { p -> p.cp_features }
-                .map { p -> tuple(p.batch_stem, p.cp_features_args) }
+                .map { p -> tuple(p.batch_stem, p.cell_table_args) }
                 .join(cell_tables)
         )
         cp_filtered = FILTER_CP_FEATURES(cp_features.join(qc_passed))

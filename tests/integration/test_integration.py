@@ -29,11 +29,13 @@ BUILD_CELL_IMAGES' nested starcall `snakemake` is a stub prepended onto
 PATH (under `-profile local`, `process.ext.snakemake_bin` is bare
 `snakemake`). The synthetic fixture pre-populates a starcall-shaped
 phenotyping_dir/sequencing_dir tree the way a real run would have left it
--- per-tile cell/reads tables plus the whole-tile phenotype image and
-segmentation mask -- and the stub records its argv and exits 0, standing in
-for "every requested target is already up to date". So tile enumeration,
-the table build and the dataset crop all run for real; only
-starcall-workflow itself is faked.
+-- per-tile cell/reads tables plus each tile's WebDataset shard, cut by
+`tile_shard.write_tile_shard` (the same code the real `make_cell_shard`
+rule runs) -- and the stub records its argv and exits 0, standing in for
+"every requested target is already up to date". So tile enumeration, the
+table build, the crop and the embedding all run for real; only snakemake
+itself is faked. The real rule, through real snakemake, is the
+`--container` suite's job.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ import torch
 import yaml
 
 from fisseq_embeddings_pipeline.filter import JOIN_KEYS
+from fisseq_embeddings_pipeline.tile_shard import TileShardConfig, write_tile_shard
 from fisseq_embeddings_pipeline.utils.cell_table import CELL_METADATA_SCHEMA
 from fisseq_embeddings_pipeline.vendor.dinov2.models.vision_transformer import (
     vit_small,
@@ -179,8 +182,9 @@ def _write_starcall_tile(
     sequencing-side reads table (sequencing_dir, editDistance/upBarcode/
     aaChanges, matching `rule merge_final_tables`) are deliberately kept
     separate -- matching the real starcall-workflow data flow this
-    pipeline now correctly follows (see dataset.py's module docstring, and
-    build_cell_images_table.py's index-value join)."""
+    pipeline now correctly follows (see build_cell_images_table.py's
+    index-value join). The tile's shard is cut from a synthetic whole-tile
+    image and mask the way make_cell_shard would."""
     grid_dir = f"{well}_grid{grid_size}"
     pheno_tile_dir = phenotyping_dir / grid_dir / tile
     seq_tile_dir = sequencing_dir / grid_dir / tile
@@ -210,15 +214,29 @@ def _write_starcall_tile(
     )
     reads_table.to_csv(seq_tile_dir / "cells_reads.csv")
 
-    # The whole-tile image and mask starcall itself leaves under
-    # phenotyping_dir once they're requested as targets -- BUILD_DATASET
-    # crops each cell out of these.
+    # What make_cell_shard leaves behind: the shard, cut from the
+    # whole-tile image and mask -- which, being temp() upstream, snakemake
+    # then deletes. So those two are written to a scratch dir, not the tile.
+    scratch = phenotyping_dir.parent / ".tile_inputs" / grid_dir / tile
+    scratch.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(
-        pheno_tile_dir / "raw_pt.tif",
+        scratch / "raw_pt.tif",
         _make_tile_image(_NUM_CHANNELS),
         photometric="minisblack",
     )
-    tifffile.imwrite(pheno_tile_dir / "cells_mask.tif", _make_tile_mask(centers))
+    tifffile.imwrite(scratch / "cells_mask.tif", _make_tile_mask(centers))
+    write_tile_shard(
+        TileShardConfig(
+            output_dir=str(scratch),
+            image_tif=str(scratch / "raw_pt.tif"),
+            mask_tif=str(scratch / "cells_mask.tif"),
+            segmentation_csv=str(pheno_tile_dir / "cells.csv"),
+            well=well,
+            tile=tile,
+            window=_WINDOW,
+            output_tar=str(pheno_tile_dir / f"cells_raw_shard_{_WINDOW}.tar"),
+        )
+    )
 
     if write_cellprofiler_csv:
         # Row-position matched to the cell table (cell_ids here are already
@@ -451,7 +469,7 @@ def test_pipeline_exits_cleanly(pipeline_outputs):
 
 def test_cell_images_produced(pipeline_outputs):
     """BUILD_CELL_IMAGES' own output -- the one complete, self-sufficient
-    cell table everything downstream reads, plus the per-tile image table."""
+    cell table everything downstream reads, plus the per-tile shard table."""
     exp_dir, _ = pipeline_outputs
     cell_images_dir = exp_dir / "cell_images" / "batch1"
     cell_table = pl.read_parquet(cell_images_dir / "cell_table.parquet")
@@ -462,19 +480,20 @@ def test_cell_images_produced(pipeline_outputs):
     )
     assert any(c.startswith("cp_") for c in cell_table.columns)
     # Nothing is copied or linked out of starcall's tree: tiles.parquet
-    # just names the whole-tile image/mask BUILD_DATASET crops from.
+    # just names each tile's shard, which EMBED_CELLS reads in place.
     tiles = pl.read_parquet(cell_images_dir / "tiles.parquet")
     assert tiles.height == 1
     tile = tiles.row(0, named=True)
-    assert tile["image_tif"].endswith("well1_grid1/tile00x00y/raw_pt.tif")
-    assert tile["mask_tif"].endswith("well1_grid1/tile00x00y/cells_mask.tif")
-    assert Path(tile["image_tif"]).exists() and Path(tile["mask_tif"]).exists()
+    assert tile["shard_tar"].endswith(
+        f"well1_grid1/tile00x00y/cells_raw_shard_{_WINDOW}.tar"
+    )
+    assert Path(tile["shard_tar"]).exists()
     assert not list(cell_images_dir.glob("*_grid*"))
 
 
 def test_cell_metadata_produced(pipeline_outputs):
     """BUILD_CELL_METADATA's metadata.parquet -- QC_FILTER's input, and
-    the stage that keeps QC off the cellDINO dataset build (see
+    what EMBED_CELLS joins each cell's meta_* columns back from (see
     cell_metadata.py's module docstring)."""
     exp_dir, _ = pipeline_outputs
     metadata = pl.read_parquet(
@@ -516,8 +535,10 @@ def _main_invocations(exp_dir: Path) -> list[str]:
 
 def test_nested_snakemake_runs_starcalls_own_snakefile_locally(pipeline_outputs):
     """Default (no starcall_profile): every starcall rule runs inside the
-    one task, `--cores snakemake_cores`, against starcall-workflow's own
-    unmodified Snakefile -- and not one flag of profile mode."""
+    one task, `--cores snakemake_cores`, against this repo's wrapper
+    Snakefile (the image's pinned starcall-workflow clone's own, plus
+    make_cell_shard) in the experiment's own directory -- and not one flag
+    of profile mode."""
     exp_dir, _ = pipeline_outputs
     swd = exp_dir / "starcall-workflow"
     invocations = _read_stub_argv(exp_dir)
@@ -526,16 +547,21 @@ def test_nested_snakemake_runs_starcalls_own_snakefile_locally(pipeline_outputs)
     main_runs = _main_invocations(exp_dir)
     assert len(main_runs) == 1, main_runs
     argv = main_runs[0]
-    assert f"--snakefile {swd}/workflow/Snakefile" in argv, argv
+    assert f"--snakefile {_PROJECT_ROOT}/snakemake/Snakefile" in argv, argv
     assert f"--directory {swd}" in argv, argv
     # _write_synthetic_experiment pins snakemake_cores to 1.
     assert "--cores 1" in argv, argv
     assert "--rerun-incomplete" in argv, argv
     assert "--profile" not in argv and "--jobscript" not in argv, argv
-    # Every requested target comes after the '--'.
+    # make_cell_shard's interpreter: this task's own python.
+    assert "fisseq_python=/" in argv, argv
+    # Every requested target comes after the '--': each tile's shard, and
+    # NOT the whole-tile image/mask, so snakemake can delete those temp()
+    # files once the shard is cut.
     options, targets = argv.split(" -- ", 1)
-    assert "raw_pt.tif" in targets and "cells_mask.tif" in targets, targets
-    assert ".tif" not in options, options
+    assert f"tile00x00y/cells_raw_shard_{_WINDOW}.tar" in targets, targets
+    assert ".tif" not in targets, targets
+    assert ".tar" not in options, options
 
 
 def test_starcall_profile_switches_to_profile_mode(tmp_path_factory):
@@ -600,24 +626,21 @@ def test_starcall_profile_without_job_image_fails_fast(tmp_path):
     assert "starcall_job_image is required" in result.stdout + result.stderr
 
 
-def test_cp_track_survives_dataset_failure(tmp_path_factory):
+def test_cp_track_survives_embedding_failure(tmp_path_factory):
     """The regression test for decoupling the two tracks: with
-    BUILD_DATASET failing outright, the whole cellDINO branch
-    (BUILD_DATASET -> EMBED_CELLS -> FILTER_EMBEDDINGS -> ...) produces
-    nothing, but QC_FILTER and the entire CellProfiler branch still run
-    to completion.
+    EMBED_CELLS failing outright, the whole cellDINO branch
+    (EMBED_CELLS -> FILTER_EMBEDDINGS -> ...) produces nothing, but
+    QC_FILTER and the entire CellProfiler branch still run to completion.
 
-    BUILD_DATASET is failed via an extra `-c` config (a `beforeScript`
+    EMBED_CELLS is failed via an extra `-c` config (a `beforeScript`
     that exits 1) rather than by corrupting its inputs, so the failure is
     unambiguous and isolated to that one process. errorStrategy 'ignore'
     is what then lets the rest of the DAG finish."""
-    exp_dir = tmp_path_factory.mktemp("nf_experiment_dataset_fail")
+    exp_dir = tmp_path_factory.mktemp("nf_experiment_embed_fail")
     _write_synthetic_experiment(exp_dir)
     checkpoint_path = tmp_path_factory.mktemp("weights_fail") / "checkpoint.pth"
     _write_tiny_checkpoint(checkpoint_path)
-    fail_config = _write_failing_process_config(
-        exp_dir / "fail.config", "BUILD_DATASET"
-    )
+    fail_config = _write_failing_process_config(exp_dir / "fail.config", "EMBED_CELLS")
 
     result = _run_nextflow(
         exp_dir, checkpoint_path, extra_args=("-c", str(fail_config))
@@ -626,7 +649,6 @@ def test_cp_track_survives_dataset_failure(tmp_path_factory):
     assert result.returncode == 0, result.stdout + result.stderr
 
     # The cellDINO branch is gone...
-    assert not (exp_dir / "dataset" / "batch1" / "metadata.parquet").exists()
     assert not (exp_dir / "embeddings" / "batch1" / "embeddings.parquet").exists()
     assert not (
         exp_dir / "filter_embeddings" / "batch1" / "filtered_keys.parquet"
@@ -650,15 +672,24 @@ def test_cp_track_survives_dataset_failure(tmp_path_factory):
     assert (exp_dir / "global" / "cp_features" / "median_aggregate.parquet").exists()
 
 
-def test_dataset_and_embeddings_produced(pipeline_outputs):
+def test_embeddings_produced_with_joined_metadata(pipeline_outputs):
+    """Every cell in the shards is embedded, with the same seven meta_*
+    columns QC saw -- joined on from BUILD_CELL_METADATA, since a shard's
+    meta.json carries only the cell's location."""
     exp_dir, _ = pipeline_outputs
-    metadata = pl.read_parquet(exp_dir / "dataset" / "batch1" / "metadata.parquet")
+    metadata = pl.read_parquet(
+        exp_dir / "cell_metadata" / "batch1" / "metadata.parquet"
+    )
     assert metadata.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
     embeddings = pl.read_parquet(
         exp_dir / "embeddings" / "batch1" / "embeddings.parquet"
     )
     assert embeddings.height == metadata.height
     assert any(c.startswith("emb_") for c in embeddings.columns)
+    meta_cols = list(CELL_METADATA_SCHEMA)
+    assert embeddings.columns[: len(meta_cols)] == meta_cols
+    assert embeddings.select(meta_cols).sort(JOIN_KEYS).equals(metadata.sort(JOIN_KEYS))
+    assert not (exp_dir / "dataset").exists()
 
 
 def test_filter_embeddings_has_no_embedding_columns(pipeline_outputs):
@@ -843,8 +874,10 @@ def test_pipeline_auto_detects_grid_size_when_omitted(tmp_path_factory):
     result = _run_nextflow(exp_dir, checkpoint_path)
     assert result.returncode == 0, result.stderr
 
-    metadata = pl.read_parquet(exp_dir / "dataset" / "batch1" / "metadata.parquet")
-    assert metadata.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
+    embeddings = pl.read_parquet(
+        exp_dir / "embeddings" / "batch1" / "embeddings.parquet"
+    )
+    assert embeddings.height == sum(n_b * n_c for _, n_b, n_c in _VARIANTS.values())
 
 
 def test_pipeline_defaults_data_dirs_under_starcall_workflow_dir_when_omitted(
@@ -987,7 +1020,9 @@ def test_cp_features_produced(pipeline_outputs):
     cp_features = pl.read_parquet(
         exp_dir / "cp_features" / "batch1" / "cp_features.parquet"
     )
-    metadata = pl.read_parquet(exp_dir / "dataset" / "batch1" / "metadata.parquet")
+    metadata = pl.read_parquet(
+        exp_dir / "cell_metadata" / "batch1" / "metadata.parquet"
+    )
     assert cp_features.height == metadata.height
     assert "Cells_AreaShape_Area" in cp_features.columns
 
@@ -1166,16 +1201,6 @@ def test_rerunning_reproduces_aggregate_row_order(reproducibility_outputs):
 _MINI_FIXTURE_DIR = _PROJECT_ROOT / "testing_data" / "lmna_t3_mini"
 _MINI_INPUT_DIR = _MINI_FIXTURE_DIR / "starcall_input"
 _MINI_CONFIG = Path(__file__).parent / "fixtures" / "lmna_t3_mini_config.yaml"
-# Shared by every real-data fixture; an older checkout under lmna_t3/ is
-# reused rather than cloned again.
-_STARCALL_WORKFLOW_CACHE = (
-    _PROJECT_ROOT / "testing_data" / "_starcall_workflow_checkout"
-)
-_LEGACY_STARCALL_WORKFLOW_CACHE = (
-    _PROJECT_ROOT / "testing_data" / "lmna_t3" / "_starcall_workflow_checkout"
-)
-_STARCALL_WORKFLOW_GIT_URL = "https://github.com/FowlerLab/starcall-workflow.git"
-
 _IMAGE_TAG = "fisseq-embeddings-pipeline:real-starcall-test"
 _MINI_WELL = "well1_subset1"
 _MINI_TILE = "tile00x00y"  # the one tile of grid size 1, in starcall's naming
@@ -1193,39 +1218,14 @@ def _skip_reason() -> str | None:
     return None
 
 
-def _prepare_starcall_workflow_checkout() -> Path:
-    """A real `origin/devel` starcall-workflow checkout, cached under
-    testing_data/ (gitignored) so repeat runs don't re-clone -- the same
-    ref the root Dockerfile builds its `ops` env from."""
-    for cached in (_STARCALL_WORKFLOW_CACHE, _LEGACY_STARCALL_WORKFLOW_CACHE):
-        if (cached / "workflow" / "Snakefile").exists():
-            return cached
-    subprocess.run(
-        [
-            "git",
-            "clone",
-            "--recursive",
-            "--branch",
-            "devel",
-            _STARCALL_WORKFLOW_GIT_URL,
-            str(_STARCALL_WORKFLOW_CACHE),
-        ],
-        check=True,
-        timeout=300,
-    )
-    return _STARCALL_WORKFLOW_CACHE
-
-
 def _write_starcall_workflow_dir(dest: Path) -> Path:
-    """One experiment's `starcall_workflow_dir`: a copy of the checkout
-    (snakemake's --directory is also its lock directory, so it must be
-    per-experiment), the fixture's config.yaml, and the input/ tree."""
-    shutil.copytree(
-        _prepare_starcall_workflow_checkout(),
-        dest,
-        symlinks=True,
-        ignore=shutil.ignore_patterns(".git"),
-    )
+    """One experiment's `starcall_workflow_dir`: just the fixture's
+    config.yaml and its input/ tree. starcall's code comes from the pinned
+    clone baked into the image (snakemake/Snakefile includes it), so no
+    checkout lives here -- the same shape a real experiment directory has.
+    snakemake's --directory is also its lock directory, so it must be
+    per-experiment."""
+    dest.mkdir(parents=True)
     shutil.copy(_MINI_CONFIG, dest / "config.yaml")
     shutil.copytree(_MINI_INPUT_DIR, dest / "input")
     return dest
@@ -1336,33 +1336,30 @@ def _assert_cells_embedded(pipeline_dir: Path, result: subprocess.CompletedProce
     assert cell_table.height > 0
     assert {"editDistance", "bbox_x1", "crop_index"}.issubset(cell_table.columns)
 
-    dataset_meta = pl.read_parquet(
-        pipeline_dir / "dataset" / "lmna_t3" / "metadata.parquet"
-    )
-    assert dataset_meta.height == cell_table.height
-
     embeddings = pl.read_parquet(
         pipeline_dir / "embeddings" / "lmna_t3" / "embeddings.parquet"
     )
     assert embeddings.height == cell_table.height
     assert any(c.startswith("emb_") for c in embeddings.columns)
+    meta_cols = list(CELL_METADATA_SCHEMA)
+    assert embeddings.columns[: len(meta_cols)] == meta_cols
     return cell_table
 
 
 @pytest.mark.container
 def test_real_starcall_local(real_starcall_local_run):
-    """Real starcall, local mode: every starcall rule runs inside
-    BUILD_CELL_IMAGES' own container, against starcall's unmodified
-    Snakefile, from raw input (an explicit grid_size needs no pre-existing
-    tile directories)."""
+    """Real starcall, local mode: every starcall rule, and make_cell_shard,
+    runs inside BUILD_CELL_IMAGES' own container, through snakemake/Snakefile
+    (the image's pinned starcall Snakefile plus our rule), from raw input
+    (an explicit grid_size needs no pre-existing tile directories)."""
     swd, _, pipeline_dir, result = real_starcall_local_run
     _assert_cells_embedded(pipeline_dir, result)
 
-    # temp() upstream, but requested as targets -- so still there for
-    # BUILD_DATASET to crop from.
     tile_dir = swd / "phenotyping" / f"{_MINI_WELL}_grid1" / _MINI_TILE
-    assert (tile_dir / "raw_pt.tif").exists()
-    assert (tile_dir / "cells_mask.tif").exists()
+    assert (tile_dir / f"cells_raw_shard_{_WINDOW}.tar").exists()
+    # temp() upstream and no longer a target, so snakemake deleted it once
+    # the shard was cut -- see docs/architecture.md decision 17.
+    assert not (tile_dir / "raw_pt.tif").exists()
 
 
 _FAKE_RUNTIME = """#!/bin/sh
@@ -1407,9 +1404,10 @@ def test_real_starcall_profile_mode(
     if not (local_dir / "cell_images" / "lmna_t3" / "cell_table.parquet").exists():
         pytest.skip("the local-mode run failed -- see test_real_starcall_local")
     # Remove the per-tile outputs and let mtime-based rerun rebuild them
-    # (and only them) through the "cluster".
+    # (and only them) through the "cluster" -- make_cell_shard included.
     tile_dir = swd / "phenotyping" / f"{_MINI_WELL}_grid1" / _MINI_TILE
-    for name in ("cells.csv", "raw_pt.tif", "cells_mask.tif"):
+    shard = tile_dir / f"cells_raw_shard_{_WINDOW}.tar"
+    for name in ("cells.csv", "cells_mask.tif", shard.name):
         (tile_dir / name).unlink(missing_ok=True)
 
     fake_runtime = swd / "fake_apptainer"
@@ -1439,7 +1437,8 @@ def test_real_starcall_profile_mode(
         timeout=1200,
     )
     _assert_cells_embedded(pipeline_dir, result)
-    assert (tile_dir / "raw_pt.tif").exists()
+    assert shard.exists()
+    assert not (tile_dir / "raw_pt.tif").exists()
 
     log = swd / "fake_runtime.log"
     assert log.exists(), result.stdout

@@ -8,19 +8,17 @@ and enumerates existing tile directories directly against
 starcall-workflow's own `phenotyping_dir` tree, then writes:
 
 - `targets_out`: one Snakemake target file path per line -- for every
-  tile, starcall-workflow's own native per-tile outputs: the whole-tile
-  phenotype image (`raw_pt.tif`, or `corrected_pt.tif` when
-  `use_corrected`), its segmentation mask (`{segmentation_type}_mask.tif`),
-  the segmentation cell table and the sequencing reads table (plus the
-  CellProfiler CSV, if `cp_features` is set). Consumed by BUILD_CELL_IMAGES'
-  nested `snakemake ... $(cat targets.txt)` invocation, run against
-  starcall-workflow's own unmodified Snakefile. The image and mask are
-  `temp()` outputs upstream; requesting them as explicit targets is what
-  keeps them on disk (Snakemake never deletes a requested target) for
-  BUILD_DATASET to crop cells out of -- see `docs/architecture.md`
+  tile, its WebDataset shard (`{segmentation_type}_{raw|corrected}_shard_
+  {window}.tar`, written by this repo's own `make_cell_shard` rule --
+  `snakemake/Snakefile`), the segmentation cell table and the sequencing
+  reads table (plus the CellProfiler CSV, if `cp_features` is set).
+  Consumed by BUILD_CELL_IMAGES' nested `snakemake ... $(cat targets.txt)`
+  invocation. The whole-tile image and mask the shard is cut from are
+  deliberately NOT targets: they're `temp()` upstream, so snakemake deletes
+  them once every rule needing them is done -- see `docs/architecture.md`
   decision 17.
 - `manifest_out`: a CSV (`well,tile,segmentation_csv,reads_csv,
-  cellprofiler_csv,image_tif,mask_tif`) driving phase 3
+  cellprofiler_csv,shard_tar`) driving phase 3
   (`build_cell_images_table.py`).
 - `jobscript_out`, only when `starcall_job_image` is set (i.e. the run
   passes a `starcall_profile` for per-rule cluster submission): the
@@ -37,16 +35,6 @@ this module runs like every other stage, via this repo's own installed
 package -- only the Snakemake invocation between this phase and
 `build_cell_images_table.py` still needs the separate `ops` env, and that's
 a plain shell step in the `build_cell_images` rule, not Python.
-
-`resolve_grid_size`/`enumerate_tile_names` are conceptually the same
-grid-size-and-tile-discovery problem `dataset.py`'s `discover_tiles`
-solves, but operate on a different tree at a different point in the
-pipeline (starcall-workflow's raw, not-yet-normalized `phenotyping_dir`,
-here, vs. BUILD_CELL_IMAGES' own already-normalized `cell_images_dir`
-there) with different return shapes, so they're kept as separate
-implementations -- only the tile-directory-naming regex (`TILE_DIR_RE`,
-`utils/constants.py`) is shared between the two, since that's the one
-piece that must not silently drift.
 
 `resolve_data_dir` resolves `phenotyping_dir`/`segmentation_dir`/
 `sequencing_dir` themselves, each independently optional: an explicit
@@ -108,8 +96,7 @@ _MANIFEST_FIELDNAMES = [
     "segmentation_csv",
     "reads_csv",
     "cellprofiler_csv",
-    "image_tif",
-    "mask_tif",
+    "shard_tar",
 ]
 
 _RESOLVED_DIR_KEYS = ("phenotyping_dir", "segmentation_dir", "sequencing_dir")
@@ -147,10 +134,14 @@ class BuildCellImagesEnumerateConfig(AppConfig):
     segmentation_type : str
         Defaults to ``"cells"``.
     use_corrected : bool
-        Target the background-corrected whole-tile phenotype image
-        (`corrected_pt.tif`) instead of the raw one (`raw_pt.tif`) --
-        mirrors starcall-workflow's own `get_phenotyping_pt`. Defaults to
-        ``False``.
+        Cut each tile's shard from the background-corrected whole-tile
+        phenotype image (`corrected_pt.tif`) instead of the raw one
+        (`raw_pt.tif`) -- mirrors starcall-workflow's own
+        `get_phenotyping_pt`. Defaults to ``False``.
+    window : int
+        Crop size each cell is cut at, in the shard's filename -- see
+        ``tile_shard.TileShardConfig``. Must match the Cell-DINO
+        checkpoint's expected input (`cell_dino_crop_size`).
     sequencing_reads_params : str
         Suffix threaded into the reads CSV filename
         (`{segmentation_type}_reads{sequencing_reads_params}.csv`).
@@ -194,6 +185,7 @@ class BuildCellImagesEnumerateConfig(AppConfig):
     grid_size: Optional[int] = None
     segmentation_type: str = "cells"
     use_corrected: bool = False
+    window: int = MISSING
     sequencing_reads_params: str = ""
     cp_features: bool = False
     cellprofiler_cycle: str = ""
@@ -349,6 +341,7 @@ def build_enumeration(
     grid_size: Optional[int],
     segmentation_type: str,
     use_corrected: bool,
+    window: int,
     sequencing_reads_params: str,
     cp_features: bool,
     cellprofiler_cycle: str,
@@ -364,7 +357,7 @@ def build_enumeration(
     """
     targets: List[str] = []
     manifest_rows: List[Dict[str, str]] = []
-    image_name = "corrected_pt.tif" if use_corrected else "raw_pt.tif"
+    image = "corrected" if use_corrected else "raw"
 
     for well in wells:
         resolved_grid_size = resolve_grid_size(phenotyping_dir, well, grid_size)
@@ -376,14 +369,13 @@ def build_enumeration(
             tile_dir = f"{phenotyping_dir}/{grid_dir}/{tile}"
             seq_tile_dir = f"{sequencing_dir}/{grid_dir}/{tile}"
 
-            image_path = f"{tile_dir}/{image_name}"
-            mask_path = f"{tile_dir}/{segmentation_type}_mask.tif"
+            shard_tar = f"{tile_dir}/{segmentation_type}_{image}_shard_{window}.tar"
             seg_csv = f"{tile_dir}/{segmentation_type}.csv"
             reads_csv = (
                 f"{seq_tile_dir}/{segmentation_type}_reads{sequencing_reads_params}.csv"
             )
 
-            targets.extend([image_path, mask_path, seg_csv, reads_csv])
+            targets.extend([shard_tar, seg_csv, reads_csv])
 
             cp_csv = ""
             if cp_features:
@@ -400,8 +392,7 @@ def build_enumeration(
                     "segmentation_csv": seg_csv,
                     "reads_csv": reads_csv,
                     "cellprofiler_csv": cp_csv,
-                    "image_tif": image_path,
-                    "mask_tif": mask_path,
+                    "shard_tar": shard_tar,
                 }
             )
 
@@ -486,7 +477,8 @@ def main(cfg: DictConfig) -> None:
             output_dir=./out \\
             starcall_workflow_dir=/data/experiment1 \\
             'wells=[well1,well2]' \\
-            segmentation_type=cells
+            segmentation_type=cells \\
+            window=224
     """
     enum_cfg: BuildCellImagesEnumerateConfig = OmegaConf.to_object(cfg)
 
@@ -514,6 +506,7 @@ def main(cfg: DictConfig) -> None:
         grid_size=enum_cfg.grid_size,
         segmentation_type=enum_cfg.segmentation_type,
         use_corrected=enum_cfg.use_corrected,
+        window=enum_cfg.window,
         sequencing_reads_params=enum_cfg.sequencing_reads_params,
         cp_features=enum_cfg.cp_features,
         cellprofiler_cycle=enum_cfg.cellprofiler_cycle,

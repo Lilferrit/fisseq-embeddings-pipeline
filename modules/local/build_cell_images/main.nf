@@ -5,13 +5,15 @@
 //      sequencing_dir (resolved_dirs.env), each well's grid size and tiles,
 //      and writes targets.txt + tiles_manifest.csv -- plus, in cluster mode,
 //      the jobscript every starcall child job re-enters the image through.
-//   2. One snakemake run of starcall-workflow's own, unmodified Snakefile,
-//      against the REAL data dirs (so its own mtime caching reuses whatever
-//      is already computed), asking only for starcall's native per-tile
-//      outputs. BUILD_DATASET does the cropping -- see docs/architecture.md
+//   2. One snakemake run against the REAL data dirs (so its own mtime
+//      caching reuses whatever is already computed), of starcall-workflow's
+//      own Snakefile -- cloned into the image at a pinned commit, unmodified
+//      -- plus this repo's make_cell_shard rule (snakemake/Snakefile,
+//      task.ext.fisseq_snakefile), asking for every tile's cell and reads
+//      tables and its WebDataset shard. See docs/architecture.md
 //      decision 17.
 //   3. build_cell_images_table joins the per-tile CSVs into
-//      cell_table.parquet, plus tiles.parquet naming each tile's image/mask.
+//      cell_table.parquet, plus tiles.parquet naming each tile's shard.
 //
 // Local mode (no params.starcall_profile): every starcall rule runs inside
 // this one task, `--cores params.snakemake_cores`. Cluster mode: the nested
@@ -75,7 +77,7 @@ process BUILD_CELL_IMAGES {
         random_seed=${params.random_seed}
 
     # Fully resolved by phase 1, not recomputed here. Exported so the
-    # env("phenotyping_dir") output (BUILD_DATASET's bind path) sees it.
+    # env("phenotyping_dir") output (EMBED_CELLS' bind path) sees it.
     source resolved_dirs.env
     export phenotyping_dir segmentation_dir sequencing_dir
 
@@ -83,16 +85,19 @@ process BUILD_CELL_IMAGES {
     # every path by plain string concatenation onto these, matching its own
     # 'phenotyping/'-style defaults. Without it a path wildcard silently
     # comes out malformed.
+    # fisseq_python: the interpreter make_cell_shard runs this package
+    # with -- this task's own, which every child job shares (same image).
     starcall_config=(
         phenotyping_dir="\$phenotyping_dir/"
         segmentation_dir="\$segmentation_dir/"
         sequencing_dir="\$sequencing_dir/"
+        fisseq_python="\$(command -v python)"
     )
 
     # A killed run leaves <starcall_workflow_dir>/.snakemake/locks behind and
     # the next one dies with "Directory cannot be locked".
     ${snakemake} \\
-        --snakefile "${starcall_dir}/workflow/Snakefile" \\
+        --snakefile "${task.ext.fisseq_snakefile}" \\
         --directory "${starcall_dir}" \\
         --unlock \\
         --config "\${starcall_config[@]}" \\
@@ -101,7 +106,7 @@ process BUILD_CELL_IMAGES {
     # '--' stops --config's parser from swallowing the targets as bogus
     # config entries.
     ${snakemake} \\
-        --snakefile "${starcall_dir}/workflow/Snakefile" \\
+        --snakefile "${task.ext.fisseq_snakefile}" \\
         --directory "${starcall_dir}" \\
         ${submission} \\
         --use-conda --conda-frontend conda \\

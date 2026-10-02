@@ -26,9 +26,8 @@
 # -- the `ops` env now gets real CI build coverage for the first time.
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
-# ca-certificates/git: needed by both the uv project install below and the
-# `ops` env's starcall-workflow clone. curl: fetches the Miniforge
-# installer (this base image ships no conda). build-essential: the `ops`
+# ca-certificates/git: needed by the uv project install below. curl: fetches
+# the Miniforge installer (this base image ships no conda). build-essential: the `ops`
 # env's snakemake dependency `datrie` has no prebuilt wheel for this
 # platform and fails to compile ("error: [Errno 2] No such file or
 # directory: 'gcc'") without a C compiler present -- confirmed via a real
@@ -146,27 +145,24 @@ SHELL ["/opt/conda/bin/conda", "run", "--no-capture-output", "-n", "ops", "/bin/
 # looks, and deliberately not bundled with the cluster work.
 RUN pip install --no-cache-dir "snakemake==7.32.4"
 
-# Cloned at build time (no vendored copy lives in this repo) at the
-# origin/devel ref this pipeline tracks -- NOT master, which has a
-# differently-shaped make_cell_images and no extract_embeddings rule at
-# all (see docs/architecture.md's "A note on branches"). --recursive pulls
-# both submodules (packages/starcall, packages/constitch) in the same
-# step. Cloned into a fixed, well-known path purely to install its Python
-# *dependencies* (requirements.txt + the two submodules' own setup.py
-# packages) into the `ops` env -- NOT as the checkout any experiment's
-# starcall_workflow_dir should point at; that always points at a real,
-# already-populated experiment-specific checkout mounted from outside the
-# container (starcall_workflow_dir is per-experiment, not baked into this
-# image -- see BUILD_CELL_IMAGES's own comment on why).
-# Removed once its pip installs succeed (below) -- nothing at runtime reads
-# this checkout, only the `ops` env's now-installed site-packages.
+# starcall-workflow, cloned at build time at ONE pinned commit on its
+# origin/devel branch (NOT master, which has a differently-shaped
+# make_cell_images and no extract_embeddings rule at all; see
+# docs/architecture.md's "A note on branches"). The same checkout supplies
+# both the `ops` env's Python packages (requirements.txt plus the two
+# submodules' setup.py packages, installed below) and the Snakefile the
+# nested run executes: snakemake/Snakefile (copied in with the project
+# source, further down) includes ../starcall-workflow/workflow/Snakefile,
+# so it's cloned to that path relative to it. So one pin decides which
+# starcall every experiment runs. Bump it by changing the default here (or
+# `docker build --build-arg STARCALL_WORKFLOW_COMMIT=<sha>`) -- see
+# docs/architecture.md decision 24. --recursive pulls packages/starcall
+# and packages/constitch.
 ARG STARCALL_WORKFLOW_GIT_URL=https://github.com/FowlerLab/starcall-workflow.git
-ARG STARCALL_WORKFLOW_REF=origin/devel
-RUN git clone --recursive "${STARCALL_WORKFLOW_GIT_URL}" /opt/starcall-workflow-deps \
-    && cd /opt/starcall-workflow-deps \
-    && git fetch origin devel \
-    && git checkout "${STARCALL_WORKFLOW_REF}" \
-    && git submodule update --init --recursive
+ARG STARCALL_WORKFLOW_COMMIT=6e2dc8bf8a96095e640e110550209bba50c23d07
+RUN git clone --recursive "${STARCALL_WORKFLOW_GIT_URL}" starcall-workflow \
+    && git -C starcall-workflow checkout "${STARCALL_WORKFLOW_COMMIT}" \
+    && git -C starcall-workflow submodule update --init --recursive
 
 # SETUPTOOLS_USE_DISTUTILS=stdlib is required -- confirmed via a real
 # `docker build`: stardist's legacy numpy.distutils-based build imports
@@ -193,15 +189,15 @@ ENV SETUPTOOLS_USE_DISTUTILS=stdlib
 # the package directory once at install time using setuptools' own legacy
 # `packages=[...]`-driven file discovery, which tolerates the trailing
 # slash typo fine, and does not need to remain "live" against the checkout
-# afterward (this checkout is deleted right after, below).
-RUN pip install --no-cache-dir -r /opt/starcall-workflow-deps/requirements.txt \
-    && pip install --no-cache-dir /opt/starcall-workflow-deps/packages/constitch \
-    && pip install --no-cache-dir /opt/starcall-workflow-deps/packages/starcall
+# afterward (only workflow/ is kept, below).
+RUN pip install --no-cache-dir -r starcall-workflow/requirements.txt \
+    && pip install --no-cache-dir starcall-workflow/packages/constitch \
+    && pip install --no-cache-dir starcall-workflow/packages/starcall
 
-# Build-time-only checkout, no longer needed once the pip installs above
-# succeed -- trims a meaningful chunk of image size (a full starcall-
-# workflow + submodules git history) at zero runtime cost.
-RUN rm -rf /opt/starcall-workflow-deps
+# Keep only workflow/ (the rules the nested run executes); the git history,
+# packages/ and the rest are build-time only once the pip installs above
+# succeed.
+RUN find starcall-workflow -mindepth 1 -maxdepth 1 ! -name workflow -exec rm -rf {} +
 
 # Reset SHELL back to plain bash -- the layers below (uv-facing) should
 # not run inside the `ops` conda env.
@@ -216,6 +212,11 @@ SHELL ["/bin/bash", "-c"]
 COPY README.md ./
 COPY src/ src/
 RUN uv sync --frozen --no-dev
+
+# What BUILD_CELL_IMAGES' nested snakemake runs (process.ext.fisseq_snakefile
+# in nextflow.config): snakemake/Snakefile, which includes the pinned
+# starcall-workflow clone's own (above) by relative path.
+COPY snakemake/ snakemake/
 
 # `uv sync` installs into a project-local .venv/, not any system Python --
 # put it on PATH so the bare `python -m fisseq_embeddings_pipeline.<module>`

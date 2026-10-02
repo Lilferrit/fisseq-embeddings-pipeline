@@ -30,8 +30,12 @@ pipeline):
   which file in its own docstring; `docs/architecture.md` has the full
   terminology map.
 - `starcall-workflow` — the Snakemake pipeline whose `origin/devel` branch
-  produces this pipeline's two inputs (Cell Info Table, Cell Images). See
-  `docs/architecture.md`'s Data contracts section.
+  produces this pipeline's two inputs (Cell Info Table, Cell Images). The
+  root `Dockerfile` clones it at **one pinned commit**
+  (`ARG STARCALL_WORKFLOW_COMMIT`): the code `BUILD_CELL_IMAGES`' nested
+  snakemake actually runs, through `snakemake/Snakefile`, and what the
+  image's `ops` env is built from. See `docs/architecture.md`'s Data
+  contracts section and decision 24.
 
 `.devcontainer/devcontainer.json` bind-mounts both sibling repos read-only
 into this sandbox at `/workspaces/fisseq-data-pipeline` and
@@ -42,14 +46,22 @@ note that in your commit message instead of editing the sibling repo in
 place.
 
 **`starcall-workflow` gotcha:** this pipeline tracks `starcall-workflow`'s
-`origin/devel` branch, not `master` — check
-`/workspaces/starcall-workflow`'s checked-out branch before trusting
-anything you read from it (`git -C /workspaces/starcall-workflow branch
---show-current`); if it's on `master`, the phenotyping layout this pipeline
-depends on (`workflow/rules/phenotyping.smk`'s whole-tile outputs under
-`phenotyping_dir`) won't be there at all. Its own `make_cell_images` is
-broken against its cell table, which is why `BUILD_DATASET` does the
-cropping itself (`docs/architecture.md` decision 17).
+`origin/devel` branch, not `master`. The authoritative version is the
+Dockerfile's `STARCALL_WORKFLOW_COMMIT` — read starcall's code at that
+commit (`git -C /workspaces/starcall-workflow show
+<commit>:workflow/rules/phenotyping.smk`). The bind-mounted sibling's own
+checkout may be on a different branch (check `git -C
+/workspaces/starcall-workflow branch --show-current` before trusting its
+working tree; on `master`, the phenotyping layout this pipeline depends on
+— `workflow/rules/phenotyping.smk`'s whole-tile outputs under
+`phenotyping_dir` — won't be there at all). starcall is never patched:
+anything this pipeline adds to starcall's DAG goes in
+`snakemake/Snakefile` instead. Upstream's own
+`make_cell_images` is broken against its cell table, which is why the
+per-tile `make_cell_shard` rule there does the cropping itself
+(`tile_shard.py`; `docs/architecture.md` decision 17). Bumping the pin:
+change `STARCALL_WORKFLOW_COMMIT`'s default to the new devel commit,
+rebuild the image, and run `tests/integration --container`.
 
 ## Repo conventions
 
@@ -66,7 +78,8 @@ cropping itself (`docs/architecture.md` decision 17).
   reads — matching `starcall-workflow`'s own CSV-reading convention there;
   it still writes its final `cell_table.parquet` via polars, though, to
   keep everything downstream of `BUILD_CELL_IMAGES` in the usual
-  convention).
+  convention; `tile_shard.py` reuses its `read_segmentation_table` rather
+  than reading the same CSV another way).
 - **`meta_*` column convention**: metadata columns are prefixed `meta_*`;
   `FEATURE_SELECTOR` (`cs.exclude("^meta_.*$")`) and `EMBEDDING_SELECTOR`
   (`cs.matches(r"^emb_\d+$")`) key off this — see
@@ -85,7 +98,9 @@ cropping itself (`docs/architecture.md` decision 17).
   `python -m <pkg>.<module>` invocation with `output_dir=.` and a trailing
   `random_seed=${params.random_seed}` — see `EMBED_CELLS` for the
   fully-worked example, and `BUILD_CELL_IMAGES` for the one genuine
-  exception (a nested starcall `snakemake`). `PLAN_EXPERIMENTS` runs first
+  exception (a nested starcall `snakemake`, run against
+  `snakemake/Snakefile`, whose `make_cell_shard` rule calls `python -m
+  fisseq_embeddings_pipeline.tile_shard` once per tile). `PLAN_EXPERIMENTS` runs first
   and owns validation/routing (`config/experiments.py`) — add new
   per-experiment routing there, in Python, not in Groovy. See
   [`docs/nextflow.md`](docs/nextflow.md#modules).
@@ -142,7 +157,9 @@ directly on that repo's own integration suite — a synthetic fixture, a
 `subprocess`-driven end-to-end `nextflow run -profile local`, and
 output-file/column assertions. BUILD_CELL_IMAGES' nested `snakemake` is a
 stub on PATH that records its argv; the fixture pre-writes the
-starcall-shaped outputs it would have produced.
+starcall-shaped outputs it would have produced — per-tile cell/reads
+tables plus each tile's shard, cut by `tile_shard.write_tile_shard` (the
+same code `make_cell_shard` runs).
 
 `EMBED_CELLS`' GPU/checkpoint dependency is handled in the integration
 fixture by building a tiny, from-scratch, randomly-initialized
@@ -153,10 +170,14 @@ fixture by building a tiny, from-scratch, randomly-initialized
 
 `--container` is mutually exclusive with the synthetic suite (see
 `tests/integration/conftest.py`) and runs only the `container`-marked
-tests: real starcall-workflow inside a real build of the root Dockerfile
-(under Docker), on the tiny `testing_data/lmna_t3_mini/` fixture
+tests: real starcall-workflow — the pinned commit cloned into a real
+build of the root Dockerfile — plus
+the real `make_cell_shard` rule (under Docker), on the tiny
+`testing_data/lmna_t3_mini/` fixture
 (`uv run python scripts/prepare_real_starcall_test_data.py --minimal`),
-stopping after `EMBED_CELLS`. `test_real_starcall_local` runs the nested
+stopping after `EMBED_CELLS`. Each experiment's `starcall_workflow_dir` is
+just the fixture's `config.yaml` plus its `input/` tree; no starcall
+checkout is cloned. `test_real_starcall_local` runs the nested
 starcall in local mode; `test_real_starcall_profile_mode` runs it through
 a throwaway `starcall_profile` with a fake cluster and fake container
 runtime — the real `apptainer` re-entry on a compute node is only

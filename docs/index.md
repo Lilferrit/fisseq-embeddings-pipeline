@@ -15,8 +15,8 @@ variant's cell population differs from wildtype (WT) controls in that
 learned embedding space, both per experiment and pooled across experiments.
 
 ```text
-starcall-workflow's raw tree -> Cell Images (BUILD_CELL_IMAGES)
-    -> Cell Dataset (WebDataset) -> Cell Embeddings (Cell-DINO)
+starcall-workflow's raw tree -> Cell Images (BUILD_CELL_IMAGES, incl. per-tile
+    WebDataset shards) -> Cell Embeddings (Cell-DINO)
     -> Filter Embeddings (QC-passed + synonymous-corrected)
     -> Aggregation -> Experiment Aggregates -> Global Variant Embeddings (PCA)
     -> OVWT Distinguish-ability Scores -> Experiment Scores -> Global Variant
@@ -24,10 +24,12 @@ starcall-workflow's raw tree -> Cell Images (BUILD_CELL_IMAGES)
 ```
 
 `BUILD_CELL_IMAGES` is the only stage that reads `starcall-workflow`'s
-tree or runs its snakemake -- it forces each tile's phenotype image, mask,
-and genotype columns to exist and joins them into one self-sufficient
-`cell_table.parquet` per experiment; `BUILD_DATASET` then crops each cell
-straight out of those whole-tile images (see [Architecture](architecture.md)).
+tree or runs its snakemake (starcall's own Snakefile, at the commit the
+image pins, plus this pipeline's `make_cell_shard`
+rule). It has every tile's cells cropped straight into a per-tile
+WebDataset shard as an ordinary snakemake job, and joins each tile's
+segmentation and genotype tables into one self-sufficient
+`cell_table.parquet` per experiment (see [Architecture](architecture.md)).
 
 A variant's identity is preserved throughout by its label column
 (`meta_aa_changes`); "synonymous" variants (same amino acid before/after)

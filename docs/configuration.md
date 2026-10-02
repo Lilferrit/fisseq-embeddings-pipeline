@@ -26,15 +26,21 @@ rather than letting an error surface from inside a task.
 
 Each experiment supplies its own map of per-experiment fields as one entry
 of `params.yaml`'s `experiments:` list (see
-[Nextflow Workflow](nextflow.md#per-experiment-configs)), split across up
-to three stages:
+[Nextflow Workflow](nextflow.md#per-experiment-configs)), split across
+these stages:
 
 - **`BUILD_CELL_IMAGES`** (starcall-workflow-facing, always runs):
   `starcall_workflow_dir`, `phenotyping_dir`, `segmentation_dir`,
   `sequencing_dir`, `wells`, `grid_size`, `segmentation_type`,
-  `use_corrected`, `sequencing_reads_params`. This is the ONLY stage that
-  touches `starcall-workflow`'s tree or runs its snakemake -- see
+  `use_corrected`, `window`, `sequencing_reads_params`. This is the ONLY
+  stage that touches `starcall-workflow`'s tree or runs its snakemake -- see
   [Architecture](architecture.md#cell-images-build_cell_images-output-from-starcall-workflow).
+  `starcall_workflow_dir` is the nested snakemake's `--directory`: it
+  supplies that experiment's `config.yaml` and data trees, **not**
+  starcall's code -- the Snakefile run is this repo's
+  `snakemake/Snakefile`, which includes the starcall-workflow commit the
+  image is built at (see [Architecture](architecture.md) decision 24). An
+  experiment directory doesn't need a starcall checkout in it.
   `phenotyping_dir`/`segmentation_dir`/`sequencing_dir` are all optional,
   each auto-resolved when omitted: `starcall_workflow_dir`'s own
   `config.yaml` (or `default-config.yaml`) is read for that key if
@@ -50,18 +56,20 @@ to three stages:
   disk are requested. **Set it explicitly for a run starting from raw
   input**: every tile of the grid is then requested from starcall, in its
   own `tile{x:02}x{y:02}y` naming, whether or not it exists yet.
-  `use_corrected: true` requests the background-corrected whole-tile image
-  (`corrected_pt.tif`) instead of `raw_pt.tif`.
-- **`BUILD_DATASET`**: `window` (the side length each cell is cropped at,
-  centred on its bbox midpoint -- `BUILD_DATASET` does the cropping, see
-  [Architecture](architecture.md) decision 17), `shard_maxcount`,
-  `barcode_col_name`/`aa_changes_col_name`/`edit_distance_col_name`.
-  `cell_images_dir` (which directory to read) is injected automatically
-  from `BUILD_CELL_IMAGES`' own output -- never set it yourself.
-- **`BUILD_CP_FEATURES`** (only for `cp_features: true` entries):
-  the same three `*_col_name` fields, shared with `BUILD_DATASET` since
-  both read the same `cell_table.parquet`. `cell_images_dir` is injected
-  the same way. There's no separate list to keep in sync with
+  `use_corrected: true` cuts each tile's shard from the background-corrected
+  whole-tile image (`corrected_pt.tif`) instead of `raw_pt.tif`. `window`
+  is the side length each cell is cropped at, centred on its bbox
+  midpoint, by the per-tile `make_cell_shard` rule (see
+  [Cell Shards](cli/tile_shard.md)); it's part of the shard's filename,
+  so changing it requests new shards.
+- **`BUILD_CELL_METADATA`** and **`BUILD_CP_FEATURES`** (the latter only
+  for `cp_features: true` entries): `barcode_col_name`/
+  `aa_changes_col_name`/`edit_distance_col_name`, routed to both (the
+  plan's `cell_table_args`) since both read the same
+  `cell_table.parquet` -- so QC, the embeddings and the CellProfiler
+  track all name a cell's genotype the same way. Their input
+  (`cell_table`/`cell_images_dir`) is injected automatically from
+  `BUILD_CELL_IMAGES`' own output -- never set it yourself. There's no separate list to keep in sync with
   `experiments:` -- an entry opts itself in by setting `cp_features: true`,
   which also makes `BUILD_CELL_IMAGES` force + fold in that experiment's
   CellProfiler CSV -- see
@@ -72,8 +80,7 @@ always the same across every experiment in a run -- `window`,
 `cellprofiler_pipeline`, `cellprofiler_cycle` -- each have their own
 pipeline-wide default below, used for any experiment entry that doesn't
 set its own value for that key; an entry's own value always wins over the
-global default. `window` routes to `BUILD_DATASET` only;
-`cellprofiler_pipeline`/`cellprofiler_cycle` to `BUILD_CELL_IMAGES` only.
+global default. All three route to `BUILD_CELL_IMAGES` only.
 
 ### Fields
 
@@ -82,8 +89,8 @@ global default. `window` routes to `BUILD_DATASET` only;
 | `pipeline_dir` | *(required)* | all |
 | `container_image` | `"fisseq-embeddings-pipeline:latest"` | all stages |
 | `cell_dino_checkpoint` | *(required)* | `EMBED_CELLS` |
-| `experiments` | `[]` (required non-empty) | `BUILD_CELL_IMAGES` (always), `BUILD_DATASET`, and `BUILD_CP_FEATURES` for any entry setting `cp_features: true` (list of per-experiment maps, each requiring `batch_stem`; see above) |
-| `window` | `224` | `BUILD_DATASET` (the crop size; global default for any `experiments` entry that omits `window` -- an entry's own `window` wins. Must match `cell_dino_crop_size`) |
+| `experiments` | `[]` (required non-empty) | `BUILD_CELL_IMAGES` and `BUILD_CELL_METADATA` (always), and `BUILD_CP_FEATURES` for any entry setting `cp_features: true` (list of per-experiment maps, each requiring `batch_stem`; see above) |
+| `window` | `224` | `BUILD_CELL_IMAGES` (the crop size each tile's shard is cut at; global default for any `experiments` entry that omits `window` -- an entry's own `window` wins. Must match `cell_dino_crop_size`) |
 | `cellprofiler_pipeline` | `null` (required, here or per `cp_features: true` entry, once any experiment sets `cp_features: true`) | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_pipeline`) |
 | `cellprofiler_cycle` | `""` | `BUILD_CELL_IMAGES` (global default for any `cp_features: true` entry that omits `cellprofiler_cycle`) |
 | `snakemake_cores` | `4` | `BUILD_CELL_IMAGES` (`--cores` for its nested starcall `snakemake`). **Local mode only** -- not passed with `starcall_profile`, whose profile owns the job budget |
@@ -99,7 +106,7 @@ global default. `window` routes to `BUILD_DATASET` only;
 | `edit_distance_threshold` | `1` | `QC_FILTER` |
 | `cell_dino_arch` | `"vit_large"` | `EMBED_CELLS` |
 | `cell_dino_patch_size` | `16` | `EMBED_CELLS` |
-| `cell_dino_crop_size` | `224` | `EMBED_CELLS` (must match `BUILD_DATASET`'s per-experiment `window`) |
+| `cell_dino_crop_size` | `224` | `EMBED_CELLS` (must match the per-experiment `window` the shards were cut at) |
 | `cell_dino_channels` | `[0, 1, 2, 3]` | `EMBED_CELLS` |
 | `cell_dino_apply_mask` | `true` | `EMBED_CELLS` |
 | `cell_dino_channel_pool` | `"mean"` | `EMBED_CELLS` |
@@ -168,7 +175,7 @@ The two `*_cumulative_variance_explained` params each have their own
 CellProfiler-track counterpart above; `ovwt_*`, by contrast, is genuinely
 shared between both tracks' OVWT stages (scoring methodology, not tied to
 feature type) -- see [Nextflow Workflow](nextflow.md#cellprofiler-feature-track).
-See each [Stage Reference](cli/dataset.md) page for the full field list a
+See each [Stage Reference](cli/tile_shard.md) page for the full field list a
 given stage's Hydra config accepts beyond what `params.yaml` exposes (e.g.
 `QC_FILTER`'s optional `n_variants` downsampling cap, off by default).
 
@@ -235,46 +242,9 @@ rather than publishing that as yet another separate image. This grows the
 image meaningfully (two full ML stacks in one artifact, so every pull,
 even for CPU-only stages, is bigger than it would be with the two split
 apart) and means every build now also runs the `ops` env's install chain
-(conda/pip installs, a `starcall-workflow` git clone) -- worth knowing if a
+(conda/pip installs from a `starcall-workflow` clone at the pinned
+`STARCALL_WORKFLOW_COMMIT`) -- worth knowing if a
 build ever gets noticeably slower or larger, but not something to work
 around: this is the direct cost of one image over two, chosen so
 `starcall-workflow`'s own environment gets the same CI build coverage as
 everything else (it previously had none at all).
-
-## `BUILD_DATASET` shard sizing
-
-`shard_maxcount` (default `2000`, `BuildDatasetConfig.shard_maxcount`)
-controls how many cells `write_dataset_shards()` packs into each
-`dataset-*.tar` shard.
-
-**Inputs to the estimate:**
-
-- Channel count: **4**, from `starcall-workflow`'s default single
-  phenotype cycle (`phenotype_cycles: ['PT']`, `phenotyping_channels:
-  ['DAPI', 'GFP', 'Ph+WGA', 'Mito']`). `crop.npy`'s actual channel
-  dimension is `num_phenotyping_cycles × num_channels` (cycle-major
-  flattened), so a deployment configuring more than one phenotyping cycle
-  scales this estimate proportionally.
-- Crop window: **224** (`window`/`crop_size`), matching Cell-DINO's
-  channel-adaptive eval config (`global_crops_size: 224`).
-- Crop dtype: **uint16**, the standard bit depth for fluorescence
-  microscopy TIFFs.
-- Mask dtype: **uint8** label mask.
-
-**Per-sample size:**
-
-| Component | Formula | Size |
-| --- | --- | --- |
-| `crop.npy` | 4 × 224 × 224 × 2 bytes | ≈ 392 KB |
-| `mask.npy` | 224 × 224 × 1 byte | ≈ 49 KB |
-| `meta.json` + tar per-file headers (3 files/sample) | -- | a few KB |
-| **Total** | | **≈ 440 KB/sample** |
-
-**Per-shard size** at the default `shard_maxcount=2000`:
-440 KB × 2000 ≈ **~880 MB/shard** -- within the "hundreds of MB to ~1GB"
-band generally considered reasonable for a WebDataset shard, so the
-`2000` default is kept as-is. Re-check this estimate (or better, measure
-directly) against a real experiment's actual byte sizes if channel count,
-crop dtype, or window change meaningfully -- e.g. a channel count above
-~9 or a `uint32`/float crop dtype would push a shard past 1GB at the
-current default.

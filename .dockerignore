@@ -17,6 +17,7 @@ work/
 site/
 docs/
 tests/
+starcall-workflow/
 testing_data/
 scratch/
 outputs/

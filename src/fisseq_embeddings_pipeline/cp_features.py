@@ -62,10 +62,10 @@ class CpFeaturesConfig(AppConfig):
     batch_stem : str
         This experiment's identifier, written into every row as
         meta_batch -- one BUILD_CP_FEATURES run covers exactly one
-        experiment, matching BUILD_DATASET's convention.
+        experiment, matching BUILD_CELL_METADATA's convention.
     barcode_col_name : str
         Name of the barcode column in cell_table.parquet. Defaults to
-        ``"upBarcode"`` -- same default as ``BuildDatasetConfig``, since
+        ``"upBarcode"`` -- same default as ``CellMetadataConfig``, since
         this reads the same table.
     aa_changes_col_name : str
         Name of the amino-acid changes column in cell_table.parquet.

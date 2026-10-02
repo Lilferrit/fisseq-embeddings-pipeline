@@ -3,11 +3,11 @@
 ``cell_table.parquet`` (built by ``build_cell_images_table.py``) carries
 starcall-workflow's own, unprefixed column names (``well``, ``tile``,
 ``tile_cell_index``, plus whatever the aux table calls the barcode/
-amino-acid-changes/edit-distance columns). Three stages need the same
+amino-acid-changes/edit-distance columns). Two stages need the same
 seven-column ``meta_*`` projection out of it -- BUILD_CELL_METADATA
-(``cell_metadata.py``, the QC_FILTER input), BUILD_CP_FEATURES
-(``cp_features.py``, alongside its CellProfiler columns), and
-BUILD_DATASET (``dataset.py``, as each cell's ``meta.json``) -- and those
+(``cell_metadata.py``, the QC_FILTER input, which EMBED_CELLS also joins
+onto each embedded cell) and BUILD_CP_FEATURES (``cp_features.py``,
+alongside its CellProfiler columns) -- and those
 seven columns are exactly ``filter.py``'s ``JOIN_KEYS`` plus the three
 genotype fields ``qcfilter.py`` thresholds on. They must not drift, so
 the projection lives here once rather than being restated per stage.

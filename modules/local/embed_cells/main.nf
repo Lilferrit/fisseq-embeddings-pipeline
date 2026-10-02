@@ -5,6 +5,12 @@
 // aggregate_embeddings/main.nf's `aggregators=[...]` precedent;
 // `apply_mask` is a plain scalar (one shared mask per cell, so one flag
 // covering every selected channel -- see EmbedCellsConfig).
+//
+// The shards themselves aren't staged: tiles.parquet names each tile's shard
+// by its real path under phenotyping_dir, where the nested snakemake's
+// make_cell_shard rule left it, and nextflow.config binds that directory in.
+// metadata.parquet (BUILD_CELL_METADATA) supplies every meta_* column but
+// the shard's own well/tile/cell_index.
 
 include { threadEnv } from '../functions'
 
@@ -16,7 +22,7 @@ process EMBED_CELLS {
     publishDir { "${params.pipeline_dir}/embeddings/${batch_stem}" }, mode: 'copy'
 
     input:
-    tuple val(batch_stem), path(shards)   // dataset-*.tar, collected as a real path list from BUILD_DATASET
+    tuple val(batch_stem), path(tiles), val(phenotyping_dir), path(metadata)
 
     output:
     tuple val(batch_stem), path("embeddings.parquet"), emit: embeddings
@@ -26,7 +32,8 @@ process EMBED_CELLS {
     ${threadEnv(task.cpus)}
     python -m fisseq_embeddings_pipeline.embed \\
         output_dir=. \\
-        'shard_pattern=./*.tar' \\
+        tiles_path=${tiles} \\
+        metadata_path=${metadata} \\
         checkpoint_path=${params.cell_dino_checkpoint} \\
         arch=${params.cell_dino_arch} \\
         patch_size=${params.cell_dino_patch_size} \\
